@@ -10,12 +10,14 @@ namespace bifrost_scales {
 
 inline constexpr const char* kInteractiveCandidateBatchSchema =
     "bifrost-scales/interactive-candidate-batch/1";
+inline constexpr const char* kInteractiveConflictReferenceSchema =
+    "bifrost-scales/interactive-conflict-reference/1";
 inline constexpr std::size_t kInteractiveCandidateRandomStride = 6U;
 
 // GPU-transfer-friendly stochastic surface candidates for Interactive
 // Distribution. Boundary and authored Guide anchors intentionally remain in
-// the exact CPU path. Candidate conflict arbitration is a separate milestone.
-// Calling this API never mutates the Stage Cache or changes settled output.
+// the exact CPU path. Calling this API never mutates the Stage Cache or changes
+// settled output.
 struct InteractiveCandidateBatch {
     std::uint64_t seed{0U};
     std::uint32_t candidate_count{0U};
@@ -31,6 +33,33 @@ struct InteractiveCandidateBatch {
     [[nodiscard]] bool has_consistent_sizes() const noexcept;
 };
 
+// Per-candidate Guide Field results consumed by conflict arbitration. Empty
+// arrays select uniform defaults: acceptance=1 and nominal local spacing.
+struct InteractiveCandidateFields {
+    std::vector<float> density_acceptance;
+    std::vector<float> mask_acceptance;
+    std::vector<float> local_spacing;
+
+    [[nodiscard]] bool has_consistent_sizes(
+        std::size_t candidate_count) const noexcept;
+};
+
+// Deterministic CPU reference for the future GPU conflict pass. Candidate
+// ordinal is the priority order; accepted indices therefore remain a prefix-
+// stable decision stream when candidate_count grows.
+struct InteractiveConflictResult {
+    std::uint32_t considered_count{0U};
+    std::uint32_t accepted_count{0U};
+    std::uint32_t rejected_density{0U};
+    std::uint32_t rejected_mask{0U};
+    std::uint32_t rejected_conflict{0U};
+    float default_spacing{0.0F};
+    std::vector<std::uint32_t> accepted_candidate_indices;
+    std::vector<std::uint64_t> accepted_candidate_keys;
+
+    [[nodiscard]] bool has_consistent_sizes() const noexcept;
+};
+
 // The counter-based stream gives a strict prefix property: generating N
 // candidates and then M>N candidates produces identical first N entries.
 // This allows the Interactive budget to grow without invalidating an existing
@@ -40,5 +69,14 @@ InteractiveCandidateBatch build_interactive_candidate_batch(
     const Mesh& mesh,
     const Settings& settings,
     std::uint32_t candidate_count);
+
+// Applies density/mask stochastic gates, then deterministic spatial conflict
+// arbitration. Processing stops after max_accepted candidates have won.
+// This reference is Preview-only and never calls or mutates distribute().
+InteractiveConflictResult arbitrate_interactive_candidates(
+    const InteractiveCandidateBatch& batch,
+    const Settings& settings,
+    std::uint32_t max_accepted,
+    const InteractiveCandidateFields& fields = {});
 
 }  // namespace bifrost_scales
