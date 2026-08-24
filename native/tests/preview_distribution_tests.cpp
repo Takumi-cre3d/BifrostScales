@@ -227,6 +227,7 @@ int main() {
         CHECK(gpu_force_info.backend ==
               "opencl-gpu-conflict-reference+cpu-exact-settle");
         CHECK(!gpu_force_info.device.empty());
+        CHECK(gpu_force_info.iteration_count > 0U);
     } else {
         CHECK(!gpu_force_info.fallback_reason.empty());
         CHECK(gpu_force_info.backend == "cpu-conflict-reference");
@@ -264,9 +265,33 @@ int main() {
     CHECK(same_conflict_result(varied_gpu, varied_reference));
     if (varied_gpu_info.used) {
         CHECK(varied_gpu_info.available);
+        CHECK(varied_gpu_info.iteration_count > 0U);
     } else {
         CHECK(!varied_gpu_info.fallback_reason.empty());
     }
+
+    bifrost_scales::gpu::ExecutionInfo no_conflict_gpu_info;
+    const auto no_conflict_gpu =
+        bifrost_scales::arbitrate_interactive_candidates_accelerated(
+            small,
+            settings,
+            100U,
+            no_conflict_gpu_info,
+            no_conflicts);
+    CHECK(same_conflict_result(
+        no_conflict_gpu,
+        no_conflict_result));
+    bifrost_scales::gpu::ExecutionInfo one_winner_gpu_info;
+    const auto one_winner_gpu =
+        bifrost_scales::arbitrate_interactive_candidates_accelerated(
+            small,
+            settings,
+            32U,
+            one_winner_gpu_info,
+            one_winner);
+    CHECK(same_conflict_result(
+        one_winner_gpu,
+        one_winner_result));
     set_gpu_override("auto");
 
     bifrost_scales::Settings settled_settings = settings;
