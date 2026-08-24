@@ -85,6 +85,7 @@ release_extract*/
 /tests/test_release_utilities.py
 /tests/test_relaxation.py
 /tests/test_sampling.py
+/tests/fixtures/parity_v0105/
 
 # Superseded graph revisions; v4 is the only published graph.
 /BifrostScales/bifrost/compounds/BifrostScales_native_scales_graph.json
