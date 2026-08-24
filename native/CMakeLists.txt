@@ -85,6 +85,10 @@ if(BIFROST_SCALES_BUILD_PARITY_TOOLS)
         bifrost_scales_candidate_batch_benchmark
         tools/candidate_batch_benchmark.cpp
     )
+    add_executable(
+        bifrost_scales_conflict_gpu_benchmark
+        tools/conflict_gpu_benchmark.cpp
+    )
     target_link_libraries(
         bifrost_scales_performance_benchmark
         PRIVATE bifrost_scales_core
@@ -107,6 +111,10 @@ if(BIFROST_SCALES_BUILD_PARITY_TOOLS)
     )
     target_link_libraries(
         bifrost_scales_candidate_batch_benchmark
+        PRIVATE bifrost_scales_core
+    )
+    target_link_libraries(
+        bifrost_scales_conflict_gpu_benchmark
         PRIVATE bifrost_scales_core
     )
     if(MSVC)
@@ -135,6 +143,10 @@ if(BIFROST_SCALES_BUILD_PARITY_TOOLS)
             bifrost_scales_candidate_batch_benchmark
             PRIVATE /W4 /permissive-
         )
+        target_compile_options(
+            bifrost_scales_conflict_gpu_benchmark
+            PRIVATE /W4 /permissive-
+        )
     else()
         target_compile_options(bifrost_scales_parity_dump PRIVATE -Wall -Wextra -Wpedantic -Werror)
         target_compile_options(
@@ -161,6 +173,10 @@ if(BIFROST_SCALES_BUILD_PARITY_TOOLS)
             bifrost_scales_candidate_batch_benchmark
             PRIVATE -Wall -Wextra -Wpedantic -Werror
         )
+        target_compile_options(
+            bifrost_scales_conflict_gpu_benchmark
+            PRIVATE -Wall -Wextra -Wpedantic -Werror
+        )
     endif()
     install(
         TARGETS
@@ -171,6 +187,7 @@ if(BIFROST_SCALES_BUILD_PARITY_TOOLS)
             bifrost_scales_stage_cache_benchmark
             bifrost_scales_interactive_distribution_benchmark
             bifrost_scales_candidate_batch_benchmark
+            bifrost_scales_conflict_gpu_benchmark
         RUNTIME DESTINATION tools
     )
 endif()
