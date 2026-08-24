@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -46,6 +47,30 @@ bool throws_invalid_fields(
         return true;
     }
     return false;
+}
+
+
+void set_gpu_override(const char* value) {
+#ifdef _WIN32
+    _putenv_s("BIFROST_SCALES_GPU", value);
+#else
+    setenv("BIFROST_SCALES_GPU", value, 1);
+#endif
+}
+
+bool same_conflict_result(
+    const bifrost_scales::InteractiveConflictResult& left,
+    const bifrost_scales::InteractiveConflictResult& right) {
+    return left.considered_count == right.considered_count &&
+           left.accepted_count == right.accepted_count &&
+           left.rejected_density == right.rejected_density &&
+           left.rejected_mask == right.rejected_mask &&
+           left.rejected_conflict == right.rejected_conflict &&
+           left.default_spacing == right.default_spacing &&
+           left.accepted_candidate_indices ==
+               right.accepted_candidate_indices &&
+           left.accepted_candidate_keys ==
+               right.accepted_candidate_keys;
 }
 
 }  // namespace
@@ -172,6 +197,77 @@ int main() {
     invalid_spacing.local_spacing.assign(small.candidate_count, 1.0F);
     invalid_spacing.local_spacing[5U] = 0.0F;
     CHECK(throws_invalid_fields(small, settings, invalid_spacing));
+
+    set_gpu_override("off");
+    bifrost_scales::gpu::ExecutionInfo gpu_off_info;
+    const auto gpu_off_result =
+        bifrost_scales::arbitrate_interactive_candidates_accelerated(
+            large,
+            settings,
+            256U,
+            gpu_off_info);
+    CHECK(same_conflict_result(gpu_off_result, reference));
+    CHECK(!gpu_off_info.requested);
+    CHECK(!gpu_off_info.used);
+    CHECK(gpu_off_info.backend == "cpu-conflict-reference");
+    CHECK(!gpu_off_info.fallback_reason.empty());
+
+    set_gpu_override("force");
+    bifrost_scales::gpu::ExecutionInfo gpu_force_info;
+    const auto gpu_force_result =
+        bifrost_scales::arbitrate_interactive_candidates_accelerated(
+            large,
+            settings,
+            256U,
+            gpu_force_info);
+    CHECK(same_conflict_result(gpu_force_result, reference));
+    CHECK(gpu_force_info.requested);
+    if (gpu_force_info.used) {
+        CHECK(gpu_force_info.available);
+        CHECK(gpu_force_info.backend ==
+              "opencl-gpu-conflict-reference+cpu-exact-settle");
+        CHECK(!gpu_force_info.device.empty());
+    } else {
+        CHECK(!gpu_force_info.fallback_reason.empty());
+        CHECK(gpu_force_info.backend == "cpu-conflict-reference");
+    }
+
+    bifrost_scales::InteractiveCandidateFields varied_fields;
+    varied_fields.density_acceptance.resize(large.candidate_count);
+    varied_fields.mask_acceptance.resize(large.candidate_count);
+    varied_fields.local_spacing.resize(large.candidate_count);
+    for (std::size_t index = 0U;
+         index < large.candidate_count;
+         ++index) {
+        varied_fields.density_acceptance[index] =
+            index % 3U == 0U ? 0.45F : 0.85F;
+        varied_fields.mask_acceptance[index] =
+            index % 5U == 0U ? 0.55F : 0.95F;
+        varied_fields.local_spacing[index] =
+            reference.default_spacing *
+            (index % 2U == 0U ? 0.75F : 1.25F);
+    }
+    const auto varied_reference =
+        bifrost_scales::arbitrate_interactive_candidates(
+            large,
+            settings,
+            256U,
+            varied_fields);
+    bifrost_scales::gpu::ExecutionInfo varied_gpu_info;
+    const auto varied_gpu =
+        bifrost_scales::arbitrate_interactive_candidates_accelerated(
+            large,
+            settings,
+            256U,
+            varied_gpu_info,
+            varied_fields);
+    CHECK(same_conflict_result(varied_gpu, varied_reference));
+    if (varied_gpu_info.used) {
+        CHECK(varied_gpu_info.available);
+    } else {
+        CHECK(!varied_gpu_info.fallback_reason.empty());
+    }
+    set_gpu_override("auto");
 
     bifrost_scales::Settings settled_settings = settings;
     settled_settings.target_count = 32U;
