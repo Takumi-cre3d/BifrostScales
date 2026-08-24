@@ -1,10 +1,10 @@
-# Interactive Distribution Candidate Batch
+# Interactive Distribution Candidate Batch／Conflict Reference
 
 ## 目的
 
-GPU Distributionへ進む前に、候補生成と競合解決を分離できる転送契約を追加しました。現行CPU exact Poisson列は条件分岐に応じて乱数消費位置が変わるため、Field計算だけのGPU移植では競合解決と同期コストを除去できません。本契約はInteractive Preview専用の独立ストリームです。
+Interactive DistributionのGPU実装に先行して、Surface Candidate生成、Guide Field入力、競合裁定を独立した転送契約として定義します。現行CPU exact Poisson列とは分離し、Settled結果とStable Cell IDの正本を維持します。
 
-## Contract 1
+## Candidate Batch Contract
 
 `bifrost-scales/interactive-candidate-batch/1` は次のSoA Bufferを持ちます。
 
@@ -15,24 +15,43 @@ GPU Distributionへ進む前に、候補生成と競合解決を分離できる�
 - Triangle Index: uint32
 - Candidate Key: uint64
 
-1候補72 bytesです。カウンタベースRandomにより同じMesh／Seed／Countはbyte-stableです。Countを増やしても既存prefixは変化しません。
+1候補72 bytesです。Counter-based Randomにより同じMesh／Seed／Countは決定的です。Countを増やしても既存prefixは変化しません。
+
+## Conflict Reference Contract
+
+`bifrost-scales/interactive-conflict-reference/1` は将来のGPU Passと比較するHost非依存CPU referenceです。
+
+1. Candidate ordinalの昇順を優先度として処理します。
+2. Density RandomとMask Randomが各acceptance未満の場合だけ競合判定へ進みます。
+3. `local_spacing` が省略された場合はSurface Area、受理上限、Spacing Factorから既定値を計算します。
+4. Candidateと既受理Candidateの距離が両者のLocal Spacingの最大値未満なら競合Rejectします。
+5. 受理上限へ到達するかCandidate末尾へ到達すると終了します。
+
+Field配列はCandidate数と同じ長さ、または空配列です。空のDensity／Mask acceptanceは1、空のLocal Spacingは既定値を表します。結果には受理Candidate Index／KeyとDensity、Mask、Conflict別のReject数を保存します。
+
+空間Indexは最大Local SpacingをCell Sizeとする3D Gridです。Gridの走査順とCandidate処理順は固定し、Hash Mapのiteration orderには依存しません。
 
 ## 非目標
 
 - 現行 `distribute()` の置換
+- Maya Runtimeへの接続
 - Boundary Anchor／Guide Center AnchorのGPU化
 - GPU Candidate Conflict Arbitration
 - Settled／Final／Bakeの変更
 - Stable Cell IDの正本変更
 
-## 受入結果
+## 検証結果
 
 - MSVC Release build: PASS
-- Native deterministic test: PASS
-- 32候補のrepeat一致: PASS
-- 32→128候補のprefix一致: PASS
-- Candidate Key一意性: PASS
+- Native tests: 2／2 PASS
+- Arbitration repeat一致: PASS
+- 512→2,048候補の受理prefix一致: PASS
+- Density／Mask gate境界: PASS
+- 可変Local Spacing: PASS
 - 呼び出し前後のSettled vertices／faces／cell_ids一致: PASS
-- 40,000候補: 2,880,000 bytes、4.126 ms（単回参考値）
+- Python tracked tests: 140 PASS
+- 40,000候補: 2,880,000 bytes、Candidate生成中央値4.207 ms、Conflict Arbitration中央値7.653 ms、受理7,511件
 
-次段階は、Guide Field評価を同じBatchへ適用し、Candidate Key順の競合解決をCPU referenceとして定義してからGPU版と比較することです。
+性能値はWindows／MSVC Releaseで5回測定した参考中央値であり、製品性能保証ではありません。
+
+次段階は、同じBufferと判定規則をGPUへ移植し、受理Index／Candidate KeyをCPU referenceと比較することです。
