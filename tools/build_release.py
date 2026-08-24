@@ -252,6 +252,7 @@ def _extract_payload(destination):
             "BifrostScales/bifrost/native/tests/core_tests.cpp",
             "BifrostScales/bifrost/native/tools/interactive_distribution_benchmark.cpp",
             "BifrostScales/bifrost/native/tools/candidate_batch_benchmark.cpp",
+            "BifrostScales/bifrost/native/tools/conflict_gpu_benchmark.cpp",
             "BifrostScales/bifrost/native/tools/parity_dump.cpp",
             "BifrostScales/bifrost/native/tools/stage_cache_benchmark.cpp",
             "BifrostScales/bifrost/native/bifrost/operator_contract.json",
