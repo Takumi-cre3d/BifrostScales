@@ -1,9 +1,11 @@
 {
   "product": "Bifrost Scales",
   "version": "0.10.6",
-  "source_development_state": "post-0.10.6-interactive-candidate-batch-foundation",
+  "source_development_state": "post-0.10.6-interactive-conflict-reference",
   "interactive_candidate_batch_schema": "bifrost-scales/interactive-candidate-batch/1",
   "interactive_candidate_batch_runtime_enabled": false,
+  "interactive_conflict_reference_schema": "bifrost-scales/interactive-conflict-reference/1",
+  "interactive_conflict_reference_runtime_enabled": false,
   "schema": "bifrost-scales/5",
   "milestone": "exact-single-site-cell-hot-path",
   "build_date": "2026-08-24",
