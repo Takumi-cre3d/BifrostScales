@@ -179,6 +179,19 @@ if(BUILD_TESTING)
     add_executable(bifrost_scales_core_tests tests/core_tests.cpp)
     target_link_libraries(bifrost_scales_core_tests PRIVATE bifrost_scales_core)
     add_test(NAME bifrost_scales_core_tests COMMAND bifrost_scales_core_tests)
+
+    add_executable(
+        bifrost_scales_preview_distribution_tests
+        tests/preview_distribution_tests.cpp
+    )
+    target_link_libraries(
+        bifrost_scales_preview_distribution_tests
+        PRIVATE bifrost_scales_core
+    )
+    add_test(
+        NAME bifrost_scales_preview_distribution_tests
+        COMMAND bifrost_scales_preview_distribution_tests
+    )
 endif()
 
 if(BIFROST_SCALES_BUILD_BIFROST_OPERATOR)
