@@ -327,12 +327,12 @@ InteractiveConflictResult arbitrate_interactive_candidates(
         const std::size_t random_offset =
             static_cast<std::size_t>(candidate_index) *
             kInteractiveCandidateRandomStride;
-        if (batch.random_values[random_offset] >
+        if (batch.random_values[random_offset] >=
             acceptance_at(fields.density_acceptance, candidate_index)) {
             ++result.rejected_density;
             continue;
         }
-        if (batch.random_values[random_offset + 1U] >
+        if (batch.random_values[random_offset + 1U] >=
             acceptance_at(fields.mask_acceptance, candidate_index)) {
             ++result.rejected_mask;
             continue;
