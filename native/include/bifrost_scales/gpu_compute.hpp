@@ -58,6 +58,33 @@ struct alignas(16) DirectionOutput {
     float padding2{0.0F};
 };
 
+struct alignas(16) Int4 {
+    std::int32_t x{0};
+    std::int32_t y{0};
+    std::int32_t z{0};
+    std::int32_t w{0};
+};
+
+struct alignas(16) ConflictInput {
+    Float4 position{};
+    Float4 gates{};
+    float local_spacing{0.0F};
+    std::int32_t cell_x{0};
+    std::int32_t cell_y{0};
+    std::int32_t cell_z{0};
+};
+
+struct alignas(16) ConflictCounters {
+    std::uint32_t considered_count{0U};
+    std::uint32_t accepted_count{0U};
+    std::uint32_t rejected_density{0U};
+    std::uint32_t rejected_mask{0U};
+    std::uint32_t rejected_conflict{0U};
+    std::uint32_t padding0{0U};
+    std::uint32_t padding1{0U};
+    std::uint32_t padding2{0U};
+};
+
 struct ExecutionInfo {
     bool requested{false};
     bool available{false};
@@ -69,6 +96,7 @@ struct ExecutionInfo {
     double kernel_ms{0.0};
     double readback_ms{0.0};
     std::uint32_t sample_count{0U};
+    std::uint32_t iteration_count{0U};
 };
 
 // Cheap policy/runtime gate used before constructing compact GPU buffers.
@@ -84,6 +112,19 @@ bool try_compute_orientation(
     float global_direction_radians,
     float random_rotation_degrees,
     std::vector<DirectionOutput>& outputs,
+    ExecutionInfo& info);
+
+// Conflict arbitration uses the same OpenCL device and environment policy as
+// orientation, with a candidate-specific automatic crossover threshold.
+bool should_attempt_conflict(
+    std::size_t candidate_count,
+    ExecutionInfo& info);
+
+bool try_arbitrate_conflicts(
+    const std::vector<ConflictInput>& inputs,
+    std::uint32_t max_accepted,
+    std::vector<std::uint32_t>& accepted_indices,
+    ConflictCounters& counters,
     ExecutionInfo& info);
 
 }  // namespace bifrost_scales::gpu

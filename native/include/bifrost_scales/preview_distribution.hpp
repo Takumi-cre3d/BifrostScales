@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bifrost_scales/core.hpp"
+#include "bifrost_scales/gpu_compute.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -12,6 +13,8 @@ inline constexpr const char* kInteractiveCandidateBatchSchema =
     "bifrost-scales/interactive-candidate-batch/1";
 inline constexpr const char* kInteractiveConflictReferenceSchema =
     "bifrost-scales/interactive-conflict-reference/1";
+inline constexpr const char* kInteractiveConflictGpuSchema =
+    "bifrost-scales/interactive-conflict-gpu/1";
 inline constexpr std::size_t kInteractiveCandidateRandomStride = 6U;
 
 // GPU-transfer-friendly stochastic surface candidates for Interactive
@@ -77,6 +80,17 @@ InteractiveConflictResult arbitrate_interactive_candidates(
     const InteractiveCandidateBatch& batch,
     const Settings& settings,
     std::uint32_t max_accepted,
+    const InteractiveCandidateFields& fields = {});
+
+// Attempts the OpenCL conflict kernel under BIFROST_SCALES_GPU policy and
+// falls back to the CPU reference on every unavailable or invalid GPU result.
+// The current correctness kernel preserves ordinal priority exactly and is
+// intentionally isolated from the Maya runtime.
+InteractiveConflictResult arbitrate_interactive_candidates_accelerated(
+    const InteractiveCandidateBatch& batch,
+    const Settings& settings,
+    std::uint32_t max_accepted,
+    gpu::ExecutionInfo& execution,
     const InteractiveCandidateFields& fields = {});
 
 }  // namespace bifrost_scales

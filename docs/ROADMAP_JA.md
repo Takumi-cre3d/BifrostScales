@@ -12,6 +12,9 @@
 - exact Cell Partition Hot Path
 - Interactive Candidate Batch
 - Candidate Batch上のCPU Reference Conflict Arbitration
+- GPU Candidate Conflict Arbitration
+- CPU／GPU受理Index・Candidate Key完全一致
+- 8,192候補の自動GPU CrossoverとCPU fallback
 
 ## Interactive Distribution基盤
 
@@ -23,15 +26,15 @@
 - Density／Mask stochastic gate
 - Candidate単位Local Spacingと決定的な空間競合裁定
 - Settled CPU exact経路からの完全分離
+- Parallel Lexicographic MISによるCPU優先規則の再現
 
 ## 次段階
 
-1. GPU上のCandidate Conflict Arbitration
-2. CPU referenceとの受理Index／Candidate Key差分測定
-3. CPU exact SettleとのStable ID／画面差分測定
-4. Cell／Shape用Compact Parameter Buffer
-5. GPU Procedural Cell Preview
-6. Viewport常駐Bufferと再Upload削減
-7. 対象GPUでの自動Crossover学習
+1. CPU exact SettleとのStable ID／画面差分測定
+2. Interactive Candidate結果のMaya Runtime接続設計
+3. Cell／Shape用Compact Parameter Buffer
+4. GPU Procedural Cell Preview
+5. Viewport常駐Bufferと再Upload削減
+6. 対象GPUでの自動Crossover学習
 
 Stable Cell ID、Cell境界、Settled／Final／BakeはCPU exactの正本を維持します。DistributionのFieldだけを部分移植せず、Candidate生成と競合解決を一括したPreview経路として測定します。GPU対応のために簡易形状へ置換したり、最終ルックを変更したりしません。

@@ -39,14 +39,15 @@ The interactive distribution foundation contains two host-independent contracts:
 
 - `bifrost-scales/interactive-candidate-batch/1`: compact, deterministic, prefix-stable surface candidates
 - `bifrost-scales/interactive-conflict-reference/1`: deterministic CPU reference for density/mask gates and spatial conflict arbitration
+- `bifrost-scales/interactive-conflict-gpu/1`: exact-priority parallel OpenCL arbitration with automatic CPU-reference fallback
 
-These contracts are not connected to the Maya runtime yet. They cannot modify settled geometry, the Stage Cache, or Stable Cell IDs.
+These contracts are not connected to the Maya runtime yet. They cannot modify settled geometry, the Stage Cache, or Stable Cell IDs. GPU conflict arbitration uses an 8,192-candidate automatic crossover by default; `BIFROST_SCALES_GPU_MIN_CANDIDATES` overrides it.
 
 ## Current limitations
 
 - Per-cell override values are stored by Maya but are not yet applied by the native shape stage.
 - Final and Bake controls remain hidden until their native contracts are complete.
-- Interactive distribution conflict arbitration is currently a host-independent CPU reference, not a GPU runtime stage.
+- Interactive distribution GPU arbitration is host-independent and is not connected to the Maya runtime.
 - Source builds require the Maya 2026 and Bifrost SDK development environment.
 
 ## Build and test
@@ -66,5 +67,6 @@ Building the Maya/Bifrost operator additionally requires `BIFROST_LOCATION`. See
 - [Architecture](docs/ARCHITECTURE_JA.md)
 - [Roadmap](docs/ROADMAP_JA.md)
 - [Interactive distribution candidate batch](docs/INTERACTIVE_DISTRIBUTION_CANDIDATE_BATCH_JA.md)
+- [GPU conflict arbitration](docs/INTERACTIVE_DISTRIBUTION_GPU_CONFLICT_JA.md)
 - [Maya host validation](docs/MAYA_HOST_TEST_JA.md)
 - [Native validation](docs/NATIVE_VALIDATION_JA.md)

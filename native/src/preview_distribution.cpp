@@ -406,4 +406,183 @@ InteractiveConflictResult arbitrate_interactive_candidates(
 }
 
 
+InteractiveConflictResult arbitrate_interactive_candidates_accelerated(
+    const InteractiveCandidateBatch& batch,
+    const Settings& settings,
+    std::uint32_t max_accepted,
+    gpu::ExecutionInfo& execution,
+    const InteractiveCandidateFields& fields) {
+    execution = gpu::ExecutionInfo{};
+    auto cpu_fallback = [&]() {
+        execution.used = false;
+        execution.backend = "cpu-conflict-reference";
+        return arbitrate_interactive_candidates(
+            batch,
+            settings,
+            max_accepted,
+            fields);
+    };
+    if (max_accepted == 0U) {
+        execution.fallback_reason =
+            "conflict accepted limit is zero";
+        return cpu_fallback();
+    }
+    if (!gpu::should_attempt_conflict(
+            batch.candidate_count,
+            execution)) {
+        return cpu_fallback();
+    }
+    if (!batch.has_consistent_sizes()) {
+        throw std::invalid_argument(
+            "interactive candidate batch has inconsistent buffer sizes");
+    }
+    if (!fields.has_consistent_sizes(batch.candidate_count)) {
+        throw std::invalid_argument(
+            "interactive candidate fields have inconsistent buffer sizes");
+    }
+    if (!std::isfinite(batch.surface_area) || batch.surface_area <= 0.0) {
+        throw std::invalid_argument(
+            "interactive candidate batch has invalid surface area");
+    }
+
+    const double nominal_count = static_cast<double>(
+        std::max<std::uint32_t>(max_accepted, 1U));
+    const double spacing_factor = std::clamp(
+        settings.spacing_factor,
+        0.15,
+        2.5);
+    const float default_spacing = static_cast<float>(
+        std::sqrt(batch.surface_area / nominal_count) * spacing_factor);
+    if (!std::isfinite(default_spacing) || default_spacing <= 0.0F) {
+        throw std::invalid_argument(
+            "interactive conflict GPU path has invalid default spacing");
+    }
+
+    float maximum_spacing = default_spacing;
+    if (!fields.local_spacing.empty()) {
+        for (const float spacing : fields.local_spacing) {
+            if (!std::isfinite(spacing) || spacing <= 0.0F) {
+                throw std::invalid_argument(
+                    "interactive local spacing must be finite and positive");
+            }
+            maximum_spacing = std::max(maximum_spacing, spacing);
+        }
+    }
+    const auto acceptance_at = [](const std::vector<float>& values,
+                                  std::size_t index) {
+        if (values.empty()) {
+            return 1.0F;
+        }
+        const float value = values[index];
+        if (!std::isfinite(value)) {
+            throw std::invalid_argument(
+                "interactive acceptance must be finite");
+        }
+        return std::clamp(value, 0.0F, 1.0F);
+    };
+    const auto spacing_at = [&fields, default_spacing](std::size_t index) {
+        return fields.local_spacing.empty()
+            ? default_spacing
+            : fields.local_spacing[index];
+    };
+
+    std::vector<gpu::ConflictInput> inputs;
+    inputs.reserve(batch.candidate_count);
+    constexpr std::int64_t minimum_cell =
+        static_cast<std::int64_t>(
+            std::numeric_limits<std::int32_t>::min()) + 1;
+    constexpr std::int64_t maximum_cell =
+        static_cast<std::int64_t>(
+            std::numeric_limits<std::int32_t>::max()) - 1;
+    for (std::size_t index = 0U;
+         index < batch.candidate_count;
+         ++index) {
+        const std::size_t position_offset = index * 3U;
+        const std::size_t random_offset =
+            index * kInteractiveCandidateRandomStride;
+        const std::int64_t cell_x = grid_coordinate(
+            batch.positions_xyz[position_offset],
+            maximum_spacing);
+        const std::int64_t cell_y = grid_coordinate(
+            batch.positions_xyz[position_offset + 1U],
+            maximum_spacing);
+        const std::int64_t cell_z = grid_coordinate(
+            batch.positions_xyz[position_offset + 2U],
+            maximum_spacing);
+        if (cell_x < minimum_cell || cell_x > maximum_cell ||
+            cell_y < minimum_cell || cell_y > maximum_cell ||
+            cell_z < minimum_cell || cell_z > maximum_cell) {
+            execution.fallback_reason =
+                "candidate grid coordinate exceeds OpenCL int32 range";
+            return cpu_fallback();
+        }
+
+        gpu::ConflictInput input;
+        input.position = {
+            batch.positions_xyz[position_offset],
+            batch.positions_xyz[position_offset + 1U],
+            batch.positions_xyz[position_offset + 2U],
+            0.0F,
+        };
+        input.gates = {
+            batch.random_values[random_offset],
+            batch.random_values[random_offset + 1U],
+            acceptance_at(fields.density_acceptance, index),
+            acceptance_at(fields.mask_acceptance, index),
+        };
+        input.local_spacing = spacing_at(index);
+        input.cell_x = static_cast<std::int32_t>(cell_x);
+        input.cell_y = static_cast<std::int32_t>(cell_y);
+        input.cell_z = static_cast<std::int32_t>(cell_z);
+        inputs.push_back(input);
+    }
+
+    std::vector<std::uint32_t> accepted_indices;
+    gpu::ConflictCounters counters;
+    if (!gpu::try_arbitrate_conflicts(
+            inputs,
+            max_accepted,
+            accepted_indices,
+            counters,
+            execution)) {
+        return cpu_fallback();
+    }
+
+    InteractiveConflictResult result;
+    result.considered_count = counters.considered_count;
+    result.accepted_count = counters.accepted_count;
+    result.rejected_density = counters.rejected_density;
+    result.rejected_mask = counters.rejected_mask;
+    result.rejected_conflict = counters.rejected_conflict;
+    result.default_spacing = default_spacing;
+    result.accepted_candidate_indices = std::move(accepted_indices);
+    result.accepted_candidate_keys.reserve(result.accepted_count);
+    bool valid_indices = true;
+    std::uint32_t previous_index = 0U;
+    for (std::size_t slot = 0U;
+         slot < result.accepted_candidate_indices.size();
+         ++slot) {
+        const std::uint32_t index =
+            result.accepted_candidate_indices[slot];
+        if (index >= batch.candidate_count ||
+            (slot > 0U && index <= previous_index)) {
+            valid_indices = false;
+            break;
+        }
+        result.accepted_candidate_keys.push_back(
+            batch.candidate_keys[index]);
+        previous_index = index;
+    }
+    if (!valid_indices || !result.has_consistent_sizes()) {
+        execution.used = false;
+        execution.backend = "cpu-conflict-reference";
+        execution.fallback_reason =
+            "OpenCL conflict output failed validation";
+        return cpu_fallback();
+    }
+    return result;
+}
+
+
+
 }  // namespace bifrost_scales
