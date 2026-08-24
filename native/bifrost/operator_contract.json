@@ -1,0 +1,309 @@
+{
+  "schema": "bifrost-scales/operator-contract/18",
+  "namespace": "BifrostScales",
+  "operator": "BifrostScales::generate_scale_mesh_payload_arrays",
+  "published_graph": "Graphs::BifrostScales::native_scales_v4",
+  "payload_schema": "bifrost-scales/native-payload/10",
+  "runtime_dependencies": [
+    "Amino::Core",
+    "Amino::Cpp",
+    "Bifrost SDK"
+  ],
+  "inputs": [
+    {
+      "name": "source_point_position",
+      "type": "array<Math::float3>"
+    },
+    {
+      "name": "source_face_offset",
+      "type": "array<uint>"
+    },
+    {
+      "name": "source_face_vertex",
+      "type": "array<uint>"
+    },
+    {
+      "name": "payload_json",
+      "type": "string"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "point_position",
+      "type": "array<Math::float3>"
+    },
+    {
+      "name": "face_offset",
+      "type": "array<uint>"
+    },
+    {
+      "name": "face_vertex",
+      "type": "array<uint>"
+    },
+    {
+      "name": "uv",
+      "type": "array<Math::float2>"
+    },
+    {
+      "name": "color",
+      "type": "array<Math::float4>"
+    },
+    {
+      "name": "scale_type_id",
+      "type": "array<long>"
+    },
+    {
+      "name": "scale_count",
+      "type": "long"
+    },
+    {
+      "name": "point_count",
+      "type": "long"
+    },
+    {
+      "name": "face_count",
+      "type": "long"
+    },
+    {
+      "name": "profile_json",
+      "type": "string"
+    },
+    {
+      "name": "success",
+      "type": "bool"
+    },
+    {
+      "name": "status",
+      "type": "string"
+    }
+  ],
+  "core_stages": [
+    "distribute",
+    "orient_samples",
+    "build_cells",
+    "shape_cells"
+  ],
+  "shape_contract": {
+    "unique_cell_outline_is_source_shape": true,
+    "shared_profile_substitution": false,
+    "scale_type_guide_localization": true,
+    "tip_controls_use_original_cell_longitudinal_coordinate": true,
+    "scale_type_group_localization": true,
+    "outer_cell_boundary_is_exact_partition_boundary": true,
+    "global_gap_world_basis": "distribution-final-spacing",
+    "local_spacing_does_not_scale_gap": true,
+    "cell_growth_affects_interior_rings_only": true,
+    "global_gap_contract": "shared-edge-offset-voronoi-total-world-width",
+    "cell_gap_applied_once_across_shared_edge": true,
+    "open_boundary_additional_gap_shrink": false,
+    "mask_core_additional_gap_shrink": false,
+    "scale_type_selection": "strongest-positive-guide-or-group-link-stable-settings-order",
+    "unlinked_scale_type_selection": "uniform-deterministic-random-type",
+    "scale_size_composition": "global-base-times-neutral-delta-clamped-to-authored-guide-type-envelope",
+    "cell_safe_scale_size_cap": "0.92-times-local-spacing-plus-boundary-clamp",
+    "fixed_scale_aspect": 1.65,
+    "removed_scale_type_parameters": [
+      "weight",
+      "guide_selection_bias",
+      "guide_range_override",
+      "inset",
+      "squash",
+      "expand",
+      "round_sharp",
+      "smooth"
+    ],
+    "scale_size_underflow_prevention": "authored-envelope-clamp"
+  },
+  "guide_contract": {
+    "independent_roles": [
+      "density",
+      "size",
+      "direction",
+      "mask"
+    ],
+    "combined_curve_kind": "flow_curve",
+    "curve_direction": "cv0-to-cvN",
+    "group_membership_field": "group_id",
+    "group_modifiers_applied_by_host": true,
+    "group_scale_type_influence": "maximum-enabled-member",
+    "exact_guide_id_precedes_group_id": true,
+    "ui_order_changes_evaluation_order": false,
+    "point_direction": "sample-to-guide-position",
+    "curve_distribution": "density-aware-poisson-cell-center-candidates",
+    "curve_cell_pairing": false,
+    "point_cell_pairing": false,
+    "direction_strength_range": [
+      0.0,
+      1.0
+    ],
+    "symmetry_authoring": "host-expanded-transient-mirror-guides",
+    "symmetry_axes": [
+      "x",
+      "y",
+      "z"
+    ],
+    "symmetry_spaces": [
+      "world",
+      "target_local"
+    ],
+    "symmetry_dag_duplication": false,
+    "symmetry_group_override": "enabled-group-axis-space-overrides-member",
+    "symmetry_center_plane_duplicate_suppression": "adaptive-radius-tolerance",
+    "symmetry_exact_guide_link_influence": "maximum-original-or-mirror",
+    "symmetry_reflected_direction_angle": "negated",
+    "mask_exclusion": "falloff-feathered-stochastic-exclusion-plus-50-percent-core-cell-ray-clip",
+    "mask_display_color": "magenta",
+    "mask_falloff_used": true,
+    "mask_symmetry_supported": true,
+    "mask_ray_clip": "analytic-sphere-and-finite-segment-capsule-at-50-percent-influence",
+    "curve_direction_strength_contract": "positive-enables-centerline-magnitude-controls-orientation-only",
+    "curve_center_candidates_obey_density": true,
+    "curve_center_candidates_force_inserted": false,
+    "mask_core_influence": 0.5,
+    "direction_pair_user_parameters": false
+  },
+  "graph_policy": {
+    "published_graph": true,
+    "target_binding": "maya-dg-worldMesh-once",
+    "normal_updates": [
+      "payload_json",
+      "parent_visibility"
+    ],
+    "runtime_topology_mutation": false,
+    "python_vnn_commands": false,
+    "automatic_graph_repair": false,
+    "automatic_retry_after_error": false
+  },
+  "mesh_topology_contract": {
+    "source_face_offset": "array<uint>",
+    "source_face_vertex": "array<uint>",
+    "generated_face_offset": "array<uint>",
+    "generated_face_vertex": "array<uint>",
+    "construct_mesh_compatible": true,
+    "generated_face_winding": "source-surface-normal",
+    "cell_center_fan_matches_ring_quads": true,
+    "interactive_card_matches_settled_card": true,
+    "cell_center_fan_geometric_reorientation": true,
+    "winding_change_requires_exact_topology_refresh": true
+  },
+  "parity_contract": {
+    "dump_schema": "bifrost-scales/parity-dump/1",
+    "report_schema": "bifrost-scales/parity-report/1",
+    "random_stream": "cpython-random.Random-int-v2",
+    "seed_normalization": "absolute-integer",
+    "absolute_tolerance": 1e-09,
+    "relative_tolerance": 1e-08,
+    "full_pipeline_fixture": "tests/fixtures/parity/plane_flow",
+    "direction_relax_spacing": "distribution-final-spacing",
+    "cell_maximum_spacing": "maximum-actual-sample-local-spacing",
+    "stable_sample_id": "fnv1a64-topology-seed-authored-candidate-key",
+    "stable_cell_ids_compared": true,
+    "settled_and_final_compute": "deterministic-double-precision-cpu-exact",
+    "interactive_gpu_precision": "float-preview-with-cpu-exact-settle",
+    "interactive_gpu_changes_stable_cell_ids": false
+  },
+  "performance_contract": {
+    "profile_schema": "bifrost-scales/native-profile/9",
+    "preview_auxiliary_arrays_emitted": false,
+    "preview_topology_representation": "flat-face-offset-and-vertex-buffers",
+    "reference_mesh_contract_preserved": true,
+    "direction_relax_neighbor_query": "deterministic-spatial-grid",
+    "guide_runtime_precomputation": true,
+    "target_projection_acceleration": "deterministic-triangle-bvh",
+    "stage_cache": "process-shared-bounded-lru-exact-dual-hash",
+    "stage_cache_default_entries_per_stage": 2,
+    "stage_cache_environment_override": "BIFROST_SCALES_STAGE_CACHE_ENTRIES=1..8",
+    "stage_cache_profile_fields": [
+      "stage_cache_scope",
+      "stage_cache_capacity",
+      "stage_cache_evictions"
+    ],
+    "distribution_candidate_guide_index": "deterministic-authored-order-aabb-bvh",
+    "distribution_neighbor_range": "exact-maximum-accepted-spacing-bound",
+    "cell_hot_path": "exact-single-site-precomputed-rays-neighbor-metadata-mask-gate",
+    "cell_ray_trigonometry": "shared-precomputed-table",
+    "cell_neighbor_normalization": "precomputed",
+    "mask_cell_ray_gate": "once-per-cell-build",
+    "direction_pair_partition_runtime": false,
+    "stage_cache_boundaries": {
+      "shape_edit": [
+        "distribution",
+        "orientation",
+        "cells"
+      ],
+      "cell_edit": [
+        "distribution",
+        "orientation"
+      ],
+      "direction_edit": [
+        "distribution",
+        "cells"
+      ],
+      "positive_direction_curve_strength_edit": [
+        "distribution",
+        "cells"
+      ]
+    },
+    "cell_cache_key_basis": "distribution-not-orientation",
+    "direction_only_edits_reuse_exact_cell_partition": true,
+    "cell_neighbor_selection": "deterministic-partial-selection-when-over-limit",
+    "guide_stage_specific_cache_hashing": true,
+    "preview_ui_maximum_count": 50000,
+    "host_independent_target_benchmark_count": 30000,
+    "compute_backend": "hybrid-opencl-gpu-interactive-cpu-exact-settled-final",
+    "gpu_generation_compute": true,
+    "gpu_stage": "interactive-orientation-with-zero-direction-relax",
+    "gpu_buffer_schema": "bifrost-scales/compact-orientation-buffer/1",
+    "gpu_environment_policy": "BIFROST_SCALES_GPU=auto|off|force",
+    "gpu_minimum_sample_environment_override": "BIFROST_SCALES_GPU_MIN_SAMPLES",
+    "gpu_default_crossover_samples": 4096,
+    "gpu_runtime_loading": "dynamic-opencl-1.2-no-bundled-driver",
+    "gpu_failure_policy": "automatic-cpu-multicore-fallback",
+    "gpu_direction_relax_policy": "cpu-exact",
+    "settled_and_final_backend": "deterministic-cpu-multicore",
+    "cpu_thread_environment_override": "BIFROST_SCALES_CPU_THREADS",
+    "cpu_thread_automatic_policy": "hardware-concurrency-minus-one-capped-at-32",
+    "parallel_stages": [
+      "distribution-relax",
+      "orientation",
+      "direction-relax",
+      "cells",
+      "shape"
+    ],
+    "deterministic_across_worker_counts": true,
+    "worker_counts_reported": true,
+    "orientation_edit_policy": "0.10.2-full-orientation-cache-miss-no-dirty-region"
+  },
+  "coverage_contract": {
+    "open_boundary_detection": "undirected-triangle-edge-incidence-one",
+    "open_boundary_center_rows": "deterministic-density-weighted-arc-length-anchors",
+    "open_boundary_density_spacing": "inverse-sqrt-local-density",
+    "open_boundary_density_changes_anchor_count": true,
+    "open_boundary_neutral_density_matches_0_10_2": true,
+    "open_boundary_orientation_override": false,
+    "open_boundary_cell_clip": "owning-triangle-inward-half-plane",
+    "open_boundary_outside_surface_allowed": false,
+    "symmetry_center_shape_stabilization": "disabled-no-synthetic-seam-competitors",
+    "density_changes_gap_width": false,
+    "symmetry_mirror_guides_preserved": true,
+    "cell_gap_method": "offset-voronoi-half-plane-shared-total",
+    "cell_gap_applied_once_across_shared_edge": true,
+    "projection_component_barriers": "physical-open-edges-only",
+    "local_projection_neighborhood": "compact-edge-rings-plus-on-demand-hit-edge-or-vertex-stars-within-cut-component",
+    "high_valence_projection_stability": true,
+    "uv_boundary_feature": "removed-in-0.9.0-no-runtime-cost"
+  },
+  "unique_scale_contract": {
+    "stage": "identity-registration-foundation",
+    "cell_id_schema": "bifrost-scales/cell-id/1",
+    "metadata_schema": "bifrost-scales/cell-metadata/1",
+    "identity_basis": "topology-hash-seed-authored-candidate-key",
+    "normal_preview_metadata": "not-emitted",
+    "query_limit": 4096,
+    "registration": "maya-settings-json",
+    "orphan_detection": true,
+    "automatic_nearest_rebind": false,
+    "manual_rebind": true,
+    "shape_overrides": "deferred-to-0.9.1"
+  }
+}

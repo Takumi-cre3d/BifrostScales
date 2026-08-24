@@ -1,0 +1,102 @@
+# Python caches and local test dependencies
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.test-deps/
+
+# Native build products
+native/build*/
+BifrostScales/bifrost/out/
+BifrostScales/bifrost/pack/*
+!BifrostScales/bifrost/pack/README_JA.md
+*.dll
+*.lib
+*.obj
+*.pdb
+*.exp
+*.ilk
+*.log
+
+# Release staging and generated deliverables. Releases are published from CI,
+# not committed to source control.
+release_extract*/
+/BifrostScales_0_*
+/BifrostScales.mod
+/BifrostScales_Uninstaller.py
+/BifrostScales_Remove_Legacy_Tools.py
+/BifrostScales_Complete_Legacy_Cleanup.py
+/*.zip
+/*.xml
+/*_REPORT.txt
+/*_AUDIT.json
+/*_BENCHMARK.json
+/*_PERFORMANCE.csv
+/*_COMPARISON_*.csv
+/*_COMPARISON_*.json
+/PARITY_*.json
+/PYTEST*.xml
+/SHA256SUMS.txt
+/BENCHMARK_REFERENCE.json
+/CELL_PICKER_OVERLAY_AUDIT.json
+/NORMAL_AUDIT*.json
+/REGRESSION_AUDIT*.json
+/SCHEMA_CONTRACT_AUDIT*.json
+/STABILITY_REGRESSION_REPORT.json
+/STABLE_CELL_IDENTITY_AUDIT*.json
+/STAGE_CACHE_BENCHMARK*.csv
+/STAGE_CACHE_BENCHMARK*.json
+/TEST_REPORT.txt
+
+# Historical local documentation and benchmark captures are retained on the
+# workstation but excluded from the new repository's initial history.
+/benchmarks/
+/BifrostScales/docs/
+/BifrostScales/tests/
+/docs/*_0_*.md
+/docs/PARITY_HARNESS_JA.md
+/CHANGELOG.md
+/native_cmake_*.log
+
+# Retired Python reference engine and its historical diagnostics. Production
+# has been native-only since 0.10.0.
+/BifrostScales/scripts/bifrost_scales/adaptive.py
+/BifrostScales/scripts/bifrost_scales/cells.py
+/BifrostScales/scripts/bifrost_scales/generator.py
+/BifrostScales/scripts/bifrost_scales/maya_mesh.py
+/BifrostScales/scripts/bifrost_scales/maya_smoke.py
+/BifrostScales/scripts/bifrost_scales/mesh.py
+/BifrostScales/scripts/bifrost_scales/orientation.py
+/BifrostScales/scripts/bifrost_scales/relaxation.py
+/BifrostScales/scripts/bifrost_scales/sampling.py
+/BifrostScales/scripts/bifrost_scales/surface_features.py
+/tools/benchmark_reference.py
+/tools/face_winding_audit.py
+/tools/parity_harness.py
+/tools/quality_regression_audit.py
+/tools/stable_cell_identity_audit.py
+/tests/test_adaptive.py
+/tests/test_backend.py
+/tests/test_cell_shape.py
+/tests/test_cells.py
+/tests/test_generator.py
+/tests/test_installer.py
+/tests/test_maya_mesh.py
+/tests/test_parity_harness.py
+/tests/test_release_utilities.py
+/tests/test_relaxation.py
+/tests/test_sampling.py
+
+# Superseded graph revisions; v4 is the only published graph.
+/BifrostScales/bifrost/compounds/BifrostScales_native_scales_graph.json
+/BifrostScales/bifrost/compounds/BifrostScales_native_scales_v3_graph.json
+
+# Third-party/reference assets are intentionally never published.
+*.hda
+*.hdalc
+*.hip
+*.hiplc
+*.fbx
+*.abc
+*.usd
+*.usda
+*.usdc

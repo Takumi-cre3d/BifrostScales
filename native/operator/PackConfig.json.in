@@ -1,0 +1,25 @@
+{
+  "AminoConfigurations": [
+    {
+      "vendorName": "BifrostScales",
+      "libraryVersion": "@PROJECT_VERSION@",
+      "libraryName": "BifrostScales",
+      "sharedLibs": [
+        {
+          "path": "./lib",
+          "files": ["BifrostScalesOps"]
+        }
+      ],
+      "jsonLibs": [
+        {
+          "path": "./json/BifrostScales/operators",
+          "files": ["bifrost_scales_nodedef.json"]
+        },
+        {
+          "path": "./json/BifrostScales/graphs",
+          "files": ["BifrostScales_native_scales_v4_graph.json"]
+        }
+      ]
+    }
+  ]
+}

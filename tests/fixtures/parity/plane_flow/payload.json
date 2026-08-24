@@ -1,0 +1,194 @@
+{
+  "schema": "bifrost-scales/native-payload/10",
+  "mode": "settled",
+  "settings": {
+    "target_count": 18,
+    "seed": 37,
+    "spacing_factor": 0.72,
+    "relax_iterations": 2,
+    "relax_strength": 0.42,
+    "size": 0.16,
+    "lift": 0.004,
+    "curvature": 0.31,
+    "direction_degrees": 17.0,
+    "direction_relax_iterations": 2,
+    "direction_relax_strength": 0.4,
+    "random_size": 0.18,
+    "random_rotation_degrees": 11.0,
+    "inset": 0.22,
+    "squash": 0.18,
+    "expand": 0.12,
+    "tip_roundness": 0.32,
+    "tip_offset": 0.14,
+    "forward_offset": 0.09,
+    "cell_mode": "cells",
+    "cell_growth": 0.9,
+    "cell_gap": 0.05,
+    "cell_collision_margin": 0.015,
+    "cell_radius_multiplier": 1.7,
+    "cell_shape_divisions": 2,
+    "cell_interactive_resolution": 6,
+    "cell_settled_resolution": 8,
+    "cell_projection_rings": 2,
+    "cell_project_to_surface": true,
+    "interactive_budget": 18,
+    "settled_budget": 18,
+    "color_r": 0.29,
+    "color_g": 0.57,
+    "color_b": 0.81,
+    "scale_types": [
+      {
+        "type_id": "classic",
+        "name": "Classic",
+        "enabled": true
+      },
+      {
+        "type_id": "sharp_flow",
+        "name": "Sharp Flow",
+        "enabled": true,
+        "size_multiplier": 0.92,
+        "width_multiplier": 0.78,
+        "length_multiplier": 1.18,
+        "curvature_multiplier": 1.15,
+        "tip_offset": 0.18,
+        "guide_id": "group_flow",
+        "use_custom_color": true,
+        "color_r": 0.82,
+        "color_g": 0.31,
+        "color_b": 0.17
+      },
+      {
+        "type_id": "wide_exact",
+        "name": "Wide Exact Link",
+        "enabled": true,
+        "size_multiplier": 1.05,
+        "width_multiplier": 1.22,
+        "length_multiplier": 0.94,
+        "curvature_multiplier": 0.9,
+        "guide_id": "flow-main",
+        "use_custom_color": true,
+        "color_r": 0.24,
+        "color_g": 0.78,
+        "color_b": 0.42
+      }
+    ]
+  },
+  "guides": [
+    {
+      "guide_id": "flow-main",
+      "name": "Main Flow",
+      "kind": "flow_curve",
+      "points": [
+        [
+          0.35,
+          0.02,
+          -0.7
+        ],
+        [
+          0.72,
+          0.07,
+          -0.2
+        ],
+        [
+          1.08,
+          0.11,
+          0.25
+        ],
+        [
+          1.42,
+          0.15,
+          0.72
+        ]
+      ],
+      "direction": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "enabled": true,
+      "radius": 1.35,
+      "falloff": 1.7,
+      "density_multiplier": 1.6,
+      "size_multiplier": 1.2,
+      "strength": 0.85,
+      "angle_degrees": 6.0,
+      "closed": false,
+      "use_density": true,
+      "use_size": true,
+      "use_direction": true,
+      "group_id": "group_flow",
+      "symmetry_enabled": true,
+      "symmetry_axis": "x",
+      "symmetry_space": "world",
+      "symmetry_origin": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "symmetry_normal": [
+        1.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "guide_id": "mask-cut",
+      "name": "Mask Cut",
+      "kind": "density_point",
+      "points": [
+        [
+          0.0,
+          0.08,
+          0.0
+        ]
+      ],
+      "direction": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "enabled": true,
+      "radius": 0.21,
+      "falloff": 2.0,
+      "density_multiplier": 1.0,
+      "size_multiplier": 1.0,
+      "strength": 0.0,
+      "angle_degrees": 0.0,
+      "closed": false,
+      "use_density": false,
+      "use_size": false,
+      "use_direction": false,
+      "use_mask": true,
+      "group_id": "",
+      "symmetry_enabled": true,
+      "symmetry_axis": "x",
+      "symmetry_space": "world",
+      "symmetry_origin": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "symmetry_normal": [
+        1.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "symmetry_planes": [
+    {
+      "origin": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "normal": [
+        1.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "cell_metadata_indices": [],
+  "resolve_cell_ids": []
+}

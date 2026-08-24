@@ -1,0 +1,297 @@
+{
+  "header": {
+    "metadata": [
+      {
+        "metaName": "adskFileFormatVersion",
+        "metaValue": "100L"
+      }
+    ]
+  },
+  "namespaces": [],
+  "types": [],
+  "compounds": [
+    {
+      "name": "Graphs::BifrostScales::native_scales_v4",
+      "uriImported": "stream:/bifrostScalesNativeGraphV4",
+      "metadata": [
+        {
+          "metaName": "documentation",
+          "metaType": "string",
+          "metaValue": "Static native Bifrost Scales graph. Runtime topology is immutable."
+        },
+        {
+          "metaName": "internal",
+          "metaValue": "false"
+        },
+        {
+          "metaName": "compoundIsGraph",
+          "metaValue": "true"
+        },
+        {
+          "metaName": "Asset",
+          "metadata": [
+            {
+              "metaName": "version",
+              "metaType": "string",
+              "metaValue": "4"
+            },
+            {
+              "metaName": "vendor",
+              "metaType": "string",
+              "metaValue": "BifrostScales"
+            }
+          ]
+        },
+        {
+          "metaName": "io_nodes",
+          "metadata": [
+            {
+              "metaName": "io_inodes",
+              "metadata": [
+                {
+                  "metaName": "input",
+                  "metadata": [
+                    {
+                      "metaName": "io_ports",
+                      "metadata": [
+                        {
+                          "metaName": "source_mesh"
+                        },
+                        {
+                          "metaName": "payload_json"
+                        }
+                      ]
+                    },
+                    {
+                      "metaName": "LayoutPos",
+                      "metaType": "string",
+                      "metaValue": "-700 0"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "metaName": "io_onodes",
+              "metadata": [
+                {
+                  "metaName": "output",
+                  "metadata": [
+                    {
+                      "metaName": "io_ports",
+                      "metadata": [
+                        {
+                          "metaName": "out_mesh"
+                        },
+                        {
+                          "metaName": "success"
+                        },
+                        {
+                          "metaName": "status"
+                        },
+                        {
+                          "metaName": "scale_count"
+                        },
+                        {
+                          "metaName": "point_count"
+                        },
+                        {
+                          "metaName": "face_count"
+                        },
+                        {
+                          "metaName": "profile_json"
+                        }
+                      ]
+                    },
+                    {
+                      "metaName": "LayoutPos",
+                      "metaType": "string",
+                      "metaValue": "740 0"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "ports": [
+        {
+          "portName": "source_mesh",
+          "portDirection": "input",
+          "portType": "Object",
+          "portDefault": {},
+          "metadata": [
+            {
+              "metaName": "pathinfo",
+              "metadata": [
+                {
+                  "metaName": "path",
+                  "metaValue": "",
+                  "metaType": "string"
+                },
+                {
+                  "metaName": "setOperation",
+                  "metaValue": "+",
+                  "metaType": "string"
+                },
+                {
+                  "metaName": "active",
+                  "metaValue": "true",
+                  "metaType": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "portName": "payload_json",
+          "portDirection": "input",
+          "portType": "string",
+          "portDefault": "{\"cell_metadata_indices\":[],\"guides\":[],\"mode\":\"interactive\",\"resolve_cell_ids\":[],\"schema\":\"bifrost-scales/native-payload/10\",\"settings\":{},\"symmetry_planes\":[]}"
+        },
+        {
+          "portName": "out_mesh",
+          "portDirection": "output",
+          "portType": "Object"
+        },
+        {
+          "portName": "success",
+          "portDirection": "output",
+          "portType": "bool"
+        },
+        {
+          "portName": "status",
+          "portDirection": "output",
+          "portType": "string"
+        },
+        {
+          "portName": "scale_count",
+          "portDirection": "output",
+          "portType": "long"
+        },
+        {
+          "portName": "point_count",
+          "portDirection": "output",
+          "portType": "long"
+        },
+        {
+          "portName": "face_count",
+          "portDirection": "output",
+          "portType": "long"
+        },
+        {
+          "portName": "profile_json",
+          "portDirection": "output",
+          "portType": "string"
+        }
+      ],
+      "compoundNodes": [
+        {
+          "nodeName": "get_mesh_structure",
+          "nodeType": "Geometry::Mesh::get_mesh_structure",
+          "metadata": [
+            {
+              "metaName": "LayoutPos",
+              "metaType": "string",
+              "metaValue": "-430 -20"
+            }
+          ]
+        },
+        {
+          "nodeName": "generate_scale_mesh_payload_arrays",
+          "nodeType": "BifrostScales::generate_scale_mesh_payload_arrays",
+          "metadata": [
+            {
+              "metaName": "LayoutPos",
+              "metaType": "string",
+              "metaValue": "-50 -20"
+            }
+          ]
+        },
+        {
+          "nodeName": "construct_mesh",
+          "nodeType": "Geometry::Mesh::construct_mesh",
+          "metadata": [
+            {
+              "metaName": "LayoutPos",
+              "metaType": "string",
+              "metaValue": "390 -20"
+            }
+          ]
+        }
+      ],
+      "connections": [
+        {
+          "source": ".source_mesh",
+          "target": "get_mesh_structure.mesh"
+        },
+        {
+          "source": "get_mesh_structure.point_position",
+          "target": "generate_scale_mesh_payload_arrays.source_point_position"
+        },
+        {
+          "source": "get_mesh_structure.face_offset",
+          "target": "generate_scale_mesh_payload_arrays.source_face_offset"
+        },
+        {
+          "source": "get_mesh_structure.face_vertex",
+          "target": "generate_scale_mesh_payload_arrays.source_face_vertex"
+        },
+        {
+          "source": ".payload_json",
+          "target": "generate_scale_mesh_payload_arrays.payload_json"
+        },
+        {
+          "source": "generate_scale_mesh_payload_arrays.point_position",
+          "target": "construct_mesh.point_position"
+        },
+        {
+          "source": "generate_scale_mesh_payload_arrays.face_offset",
+          "target": "construct_mesh.face_offset"
+        },
+        {
+          "source": "generate_scale_mesh_payload_arrays.face_vertex",
+          "target": "construct_mesh.face_vertex"
+        },
+        {
+          "source": "construct_mesh.mesh",
+          "target": ".out_mesh"
+        },
+        {
+          "source": "generate_scale_mesh_payload_arrays.success",
+          "target": ".success"
+        },
+        {
+          "source": "generate_scale_mesh_payload_arrays.status",
+          "target": ".status"
+        },
+        {
+          "source": "generate_scale_mesh_payload_arrays.scale_count",
+          "target": ".scale_count"
+        },
+        {
+          "source": "generate_scale_mesh_payload_arrays.point_count",
+          "target": ".point_count"
+        },
+        {
+          "source": "generate_scale_mesh_payload_arrays.face_count",
+          "target": ".face_count"
+        },
+        {
+          "source": "generate_scale_mesh_payload_arrays.profile_json",
+          "target": ".profile_json"
+        }
+      ],
+      "values": [],
+      "reservedNodeNames": [
+        {
+          "name": "input"
+        },
+        {
+          "name": "output"
+        }
+      ]
+    }
+  ]
+}
