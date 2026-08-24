@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace bifrost_scales {
 namespace {
@@ -43,6 +45,51 @@ Vec3 cross(const Vec3& left, const Vec3& right) noexcept {
 
 double length(const Vec3& value) noexcept {
     return std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
+}
+
+
+struct GridCell {
+    std::int64_t x{0};
+    std::int64_t y{0};
+    std::int64_t z{0};
+
+    bool operator==(const GridCell& other) const noexcept {
+        return x == other.x && y == other.y && z == other.z;
+    }
+};
+
+struct GridCellHash {
+    std::size_t operator()(const GridCell& cell) const noexcept {
+        auto mix = [](std::uint64_t value) noexcept {
+            value ^= value >> 30U;
+            value *= 0xBF58476D1CE4E5B9ULL;
+            value ^= value >> 27U;
+            value *= 0x94D049BB133111EBULL;
+            return value ^ (value >> 31U);
+        };
+        const std::uint64_t hx = mix(static_cast<std::uint64_t>(cell.x));
+        const std::uint64_t hy = mix(static_cast<std::uint64_t>(cell.y));
+        const std::uint64_t hz = mix(static_cast<std::uint64_t>(cell.z));
+        return static_cast<std::size_t>(
+            hx ^ (hy + 0x9E3779B97F4A7C15ULL + (hx << 6U) + (hx >> 2U)) ^
+            (hz + 0x517CC1B727220A95ULL));
+    }
+};
+
+std::int64_t grid_coordinate(float value, float cell_size) {
+    const double coordinate = std::floor(
+        static_cast<double>(value) / static_cast<double>(cell_size));
+    constexpr double minimum = static_cast<double>(
+        std::numeric_limits<std::int64_t>::min() + 1);
+    constexpr double maximum = static_cast<double>(
+        std::numeric_limits<std::int64_t>::max() - 1);
+    if (!std::isfinite(coordinate) ||
+        coordinate < minimum ||
+        coordinate > maximum) {
+        throw std::invalid_argument(
+            "interactive candidate position is outside the grid range");
+    }
+    return static_cast<std::int64_t>(coordinate);
 }
 
 void append_vec3(std::vector<float>& output, const Vec3& value) {
@@ -171,5 +218,192 @@ InteractiveCandidateBatch build_interactive_candidate_batch(
     }
     return batch;
 }
+
+
+bool InteractiveCandidateFields::has_consistent_sizes(
+    std::size_t candidate_count) const noexcept {
+    const auto valid = [candidate_count](const std::vector<float>& values) {
+        return values.empty() || values.size() == candidate_count;
+    };
+    return valid(density_acceptance) &&
+           valid(mask_acceptance) &&
+           valid(local_spacing);
+}
+
+bool InteractiveConflictResult::has_consistent_sizes() const noexcept {
+    return accepted_candidate_indices.size() == accepted_count &&
+           accepted_candidate_keys.size() == accepted_count &&
+           accepted_count <= considered_count &&
+           accepted_count + rejected_density + rejected_mask +
+               rejected_conflict == considered_count;
+}
+
+InteractiveConflictResult arbitrate_interactive_candidates(
+    const InteractiveCandidateBatch& batch,
+    const Settings& settings,
+    std::uint32_t max_accepted,
+    const InteractiveCandidateFields& fields) {
+    if (!batch.has_consistent_sizes()) {
+        throw std::invalid_argument(
+            "interactive candidate batch has inconsistent buffer sizes");
+    }
+    if (!fields.has_consistent_sizes(batch.candidate_count)) {
+        throw std::invalid_argument(
+            "interactive candidate fields have inconsistent buffer sizes");
+    }
+    if (!std::isfinite(batch.surface_area) || batch.surface_area <= 0.0) {
+        throw std::invalid_argument(
+            "interactive candidate batch has invalid surface area");
+    }
+
+    const double nominal_count = static_cast<double>(
+        std::max<std::uint32_t>(max_accepted, 1U));
+    const double spacing_factor = std::clamp(
+        settings.spacing_factor,
+        0.15,
+        2.5);
+    const float default_spacing = static_cast<float>(
+        std::sqrt(batch.surface_area / nominal_count) * spacing_factor);
+    if (!std::isfinite(default_spacing) || default_spacing <= 0.0F) {
+        throw std::invalid_argument(
+            "interactive conflict reference has invalid default spacing");
+    }
+
+    InteractiveConflictResult result;
+    result.default_spacing = default_spacing;
+    if (max_accepted == 0U || batch.candidate_count == 0U) {
+        return result;
+    }
+    result.accepted_candidate_indices.reserve(std::min<std::size_t>(
+        batch.candidate_count,
+        max_accepted));
+    result.accepted_candidate_keys.reserve(std::min<std::size_t>(
+        batch.candidate_count,
+        max_accepted));
+
+    float maximum_spacing = default_spacing;
+    if (!fields.local_spacing.empty()) {
+        for (const float spacing : fields.local_spacing) {
+            if (!std::isfinite(spacing) || spacing <= 0.0F) {
+                throw std::invalid_argument(
+                    "interactive local spacing must be finite and positive");
+            }
+            maximum_spacing = std::max(maximum_spacing, spacing);
+        }
+    }
+    const auto acceptance_at = [](const std::vector<float>& values,
+                                  std::size_t index) {
+        if (values.empty()) {
+            return 1.0F;
+        }
+        const float value = values[index];
+        if (!std::isfinite(value)) {
+            throw std::invalid_argument(
+                "interactive acceptance must be finite");
+        }
+        return std::clamp(value, 0.0F, 1.0F);
+    };
+    const auto spacing_at = [&fields, default_spacing](std::size_t index) {
+        return fields.local_spacing.empty()
+            ? default_spacing
+            : fields.local_spacing[index];
+    };
+
+    std::unordered_map<GridCell, std::vector<std::uint32_t>, GridCellHash>
+        accepted_buckets;
+    accepted_buckets.reserve(std::min<std::size_t>(
+        batch.candidate_count,
+        max_accepted));
+    std::vector<float> accepted_spacings;
+    accepted_spacings.reserve(std::min<std::size_t>(
+        batch.candidate_count,
+        max_accepted));
+
+    for (std::uint32_t candidate_index = 0U;
+         candidate_index < batch.candidate_count &&
+             result.accepted_count < max_accepted;
+         ++candidate_index) {
+        ++result.considered_count;
+        const std::size_t random_offset =
+            static_cast<std::size_t>(candidate_index) *
+            kInteractiveCandidateRandomStride;
+        if (batch.random_values[random_offset] >=
+            acceptance_at(fields.density_acceptance, candidate_index)) {
+            ++result.rejected_density;
+            continue;
+        }
+        if (batch.random_values[random_offset + 1U] >=
+            acceptance_at(fields.mask_acceptance, candidate_index)) {
+            ++result.rejected_mask;
+            continue;
+        }
+
+        const std::size_t position_offset =
+            static_cast<std::size_t>(candidate_index) * 3U;
+        const float px = batch.positions_xyz[position_offset];
+        const float py = batch.positions_xyz[position_offset + 1U];
+        const float pz = batch.positions_xyz[position_offset + 2U];
+        const GridCell cell{
+            grid_coordinate(px, maximum_spacing),
+            grid_coordinate(py, maximum_spacing),
+            grid_coordinate(pz, maximum_spacing),
+        };
+        const float candidate_spacing = spacing_at(candidate_index);
+        bool conflicts = false;
+        for (int dz = -1; dz <= 1 && !conflicts; ++dz) {
+            for (int dy = -1; dy <= 1 && !conflicts; ++dy) {
+                for (int dx = -1; dx <= 1 && !conflicts; ++dx) {
+                    const GridCell neighbor{
+                        cell.x + dx,
+                        cell.y + dy,
+                        cell.z + dz,
+                    };
+                    const auto found = accepted_buckets.find(neighbor);
+                    if (found == accepted_buckets.end()) {
+                        continue;
+                    }
+                    for (const std::uint32_t accepted_slot : found->second) {
+                        const std::uint32_t accepted_index =
+                            result.accepted_candidate_indices[accepted_slot];
+                        const std::size_t accepted_offset =
+                            static_cast<std::size_t>(accepted_index) * 3U;
+                        const float delta_x =
+                            px - batch.positions_xyz[accepted_offset];
+                        const float delta_y =
+                            py - batch.positions_xyz[accepted_offset + 1U];
+                        const float delta_z =
+                            pz - batch.positions_xyz[accepted_offset + 2U];
+                        const float minimum_distance = std::max(
+                            candidate_spacing,
+                            accepted_spacings[accepted_slot]);
+                        const float distance_squared =
+                            delta_x * delta_x +
+                            delta_y * delta_y +
+                            delta_z * delta_z;
+                        if (distance_squared <
+                            minimum_distance * minimum_distance) {
+                            conflicts = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (conflicts) {
+            ++result.rejected_conflict;
+            continue;
+        }
+
+        const std::uint32_t accepted_slot = result.accepted_count;
+        result.accepted_candidate_indices.push_back(candidate_index);
+        result.accepted_candidate_keys.push_back(
+            batch.candidate_keys[candidate_index]);
+        accepted_spacings.push_back(candidate_spacing);
+        accepted_buckets[cell].push_back(accepted_slot);
+        ++result.accepted_count;
+    }
+    return result;
+}
+
 
 }  // namespace bifrost_scales
