@@ -28,6 +28,9 @@ static_assert(sizeof(DirectionInput) == 48U);
 static_assert(sizeof(DirectionGuide) == 96U);
 static_assert(sizeof(DirectionSegment) == 64U);
 static_assert(sizeof(DirectionOutput) == 48U);
+static_assert(sizeof(Int4) == 16U);
+static_assert(sizeof(ConflictInput) == 48U);
+static_assert(sizeof(ConflictCounters) == 32U);
 
 using ClInt = std::int32_t;
 using ClUInt = std::uint32_t;
@@ -50,6 +53,7 @@ using ClEvent = void*;
 constexpr ClInt kClSuccess = 0;
 constexpr ClBool kClTrue = 1U;
 constexpr ClDeviceType kClDeviceTypeGpu = 1ULL << 2U;
+constexpr ClMemFlags kClMemReadWrite = 1ULL << 0U;
 constexpr ClMemFlags kClMemReadOnly = 1ULL << 2U;
 constexpr ClMemFlags kClMemWriteOnly = 1ULL << 1U;
 constexpr ClUInt kClDeviceName = 0x102BU;
@@ -367,6 +371,178 @@ __kernel void orientation_preview(
     output.padding2 = 0.0f;
     outputs[index] = output;
 }
+
+typedef struct {
+    float4 position;
+    float4 gates;
+    float local_spacing;
+    int cell_x;
+    int cell_y;
+    int cell_z;
+} ConflictInput;
+
+typedef struct {
+    uint considered_count;
+    uint accepted_count;
+    uint rejected_density;
+    uint rejected_mask;
+    uint rejected_conflict;
+    uint padding0;
+    uint padding1;
+    uint padding2;
+} ConflictCounters;
+
+uint mix_conflict_component(uint value) {
+    value ^= value >> 16U;
+    value *= 0x7FEB352DU;
+    value ^= value >> 15U;
+    value *= 0x846CA68BU;
+    return value ^ (value >> 16U);
+}
+
+uint hash_conflict_cell(int x, int y, int z) {
+    const uint hx = mix_conflict_component(as_uint(x));
+    const uint hy = mix_conflict_component(as_uint(y));
+    const uint hz = mix_conflict_component(as_uint(z));
+    return hx ^ rotate(hy, 11U) ^ rotate(hz, 22U);
+}
+
+int find_conflict_bucket(
+    int x,
+    int y,
+    int z,
+    uint bucket_capacity,
+    __global int4* bucket_cells,
+    __global int* bucket_heads,
+    int create_bucket) {
+    uint slot = hash_conflict_cell(x, y, z) & (bucket_capacity - 1U);
+    for (uint probe = 0U; probe < bucket_capacity; ++probe) {
+        const int head = bucket_heads[slot];
+        if (head == -2) {
+            if (create_bucket != 0) {
+                bucket_cells[slot] = (int4)(x, y, z, 0);
+                bucket_heads[slot] = -1;
+                return (int)slot;
+            }
+            return -1;
+        }
+        const int4 stored = bucket_cells[slot];
+        if (stored.x == x && stored.y == y && stored.z == z) {
+            return (int)slot;
+        }
+        slot = (slot + 1U) & (bucket_capacity - 1U);
+    }
+    return -1;
+}
+
+__kernel void conflict_arbitration(
+    __global const ConflictInput* inputs,
+    uint candidate_count,
+    uint max_accepted,
+    uint bucket_capacity,
+    __global int4* bucket_cells,
+    __global int* bucket_heads,
+    __global int* next_indices,
+    __global uint* accepted_indices,
+    __global ConflictCounters* output_counters) {
+    if (get_global_id(0) != 0U) {
+        return;
+    }
+    for (uint bucket = 0U; bucket < bucket_capacity; ++bucket) {
+        bucket_heads[bucket] = -2;
+    }
+
+    ConflictCounters counters;
+    counters.considered_count = 0U;
+    counters.accepted_count = 0U;
+    counters.rejected_density = 0U;
+    counters.rejected_mask = 0U;
+    counters.rejected_conflict = 0U;
+    counters.padding0 = 0U;
+    counters.padding1 = 0U;
+    counters.padding2 = 0U;
+
+    for (uint candidate_index = 0U;
+         candidate_index < candidate_count &&
+             counters.accepted_count < max_accepted;
+         ++candidate_index) {
+        ++counters.considered_count;
+        const ConflictInput candidate = inputs[candidate_index];
+        if (candidate.gates.x >= candidate.gates.z) {
+            ++counters.rejected_density;
+            continue;
+        }
+        if (candidate.gates.y >= candidate.gates.w) {
+            ++counters.rejected_mask;
+            continue;
+        }
+
+        int conflicts = 0;
+        for (int dz = -1; dz <= 1 && conflicts == 0; ++dz) {
+            for (int dy = -1; dy <= 1 && conflicts == 0; ++dy) {
+                for (int dx = -1; dx <= 1 && conflicts == 0; ++dx) {
+                    const int bucket = find_conflict_bucket(
+                        candidate.cell_x + dx,
+                        candidate.cell_y + dy,
+                        candidate.cell_z + dz,
+                        bucket_capacity,
+                        bucket_cells,
+                        bucket_heads,
+                        0);
+                    if (bucket < 0) {
+                        continue;
+                    }
+                    for (int accepted_index = bucket_heads[bucket];
+                         accepted_index >= 0;
+                         accepted_index = next_indices[accepted_index]) {
+                        const ConflictInput accepted = inputs[accepted_index];
+                        const float delta_x =
+                            candidate.position.x - accepted.position.x;
+                        const float delta_y =
+                            candidate.position.y - accepted.position.y;
+                        const float delta_z =
+                            candidate.position.z - accepted.position.z;
+                        const float minimum_distance = fmax(
+                            candidate.local_spacing,
+                            accepted.local_spacing);
+                        const float distance_squared =
+                            delta_x * delta_x +
+                            delta_y * delta_y +
+                            delta_z * delta_z;
+                        if (distance_squared <
+                            minimum_distance * minimum_distance) {
+                            conflicts = 1;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (conflicts != 0) {
+            ++counters.rejected_conflict;
+            continue;
+        }
+
+        const int bucket = find_conflict_bucket(
+            candidate.cell_x,
+            candidate.cell_y,
+            candidate.cell_z,
+            bucket_capacity,
+            bucket_cells,
+            bucket_heads,
+            1);
+        if (bucket < 0) {
+            ++counters.rejected_conflict;
+            continue;
+        }
+        next_indices[candidate_index] = bucket_heads[bucket];
+        bucket_heads[bucket] = (int)candidate_index;
+        accepted_indices[counters.accepted_count] = candidate_index;
+        ++counters.accepted_count;
+    }
+    output_counters[0] = counters;
+}
+
 )CLC";
 
 template <typename Function>
@@ -387,6 +563,9 @@ public:
     }
 
     ~Runtime() {
+        if (conflict_kernel_ != nullptr && release_kernel_ != nullptr) {
+            release_kernel_(conflict_kernel_);
+        }
         if (kernel_ != nullptr && release_kernel_ != nullptr) {
             release_kernel_(kernel_);
         }
@@ -423,6 +602,14 @@ public:
 
     const std::string& device_name() const noexcept {
         return device_name_;
+    }
+
+    bool conflict_available() const noexcept {
+        return conflict_available_;
+    }
+
+    const std::string& conflict_reason() const noexcept {
+        return conflict_reason_;
     }
 
     bool execute(
@@ -540,6 +727,168 @@ public:
         if (error != kClSuccess) {
             outputs.clear();
             info.fallback_reason = "OpenCL orientation readback failed";
+            return false;
+        }
+        return true;
+    }
+
+
+    bool execute_conflict(
+        const std::vector<ConflictInput>& inputs,
+        std::uint32_t max_accepted,
+        std::vector<std::uint32_t>& accepted_indices,
+        ConflictCounters& counters,
+        ExecutionInfo& info) {
+        std::lock_guard<std::mutex> guard(mutex_);
+        if (!conflict_available_) {
+            info.fallback_reason = conflict_reason_;
+            return false;
+        }
+        if (inputs.empty() || max_accepted == 0U) {
+            info.fallback_reason = "conflict arbitration input is empty";
+            return false;
+        }
+        if (inputs.size() > (1ULL << 29U)) {
+            info.fallback_reason = "conflict arbitration input exceeds hash capacity";
+            return false;
+        }
+
+        std::uint32_t bucket_capacity = 16U;
+        const std::size_t desired_capacity = inputs.size() * 2U;
+        while (bucket_capacity < desired_capacity) {
+            bucket_capacity <<= 1U;
+        }
+        const std::size_t accepted_capacity = std::min<std::size_t>(
+            inputs.size(),
+            max_accepted);
+        const std::size_t input_bytes = inputs.size() * sizeof(ConflictInput);
+        const std::size_t bucket_cell_bytes =
+            static_cast<std::size_t>(bucket_capacity) * sizeof(Int4);
+        const std::size_t bucket_head_bytes =
+            static_cast<std::size_t>(bucket_capacity) * sizeof(std::int32_t);
+        const std::size_t next_bytes =
+            inputs.size() * sizeof(std::int32_t);
+        const std::size_t accepted_bytes = std::max<std::size_t>(
+            sizeof(std::uint32_t),
+            accepted_capacity * sizeof(std::uint32_t));
+
+        ClInt error = kClSuccess;
+        ClMem input_buffer = create_buffer_(
+            context_, kClMemReadOnly, input_bytes, nullptr, &error);
+        ClMem bucket_cell_buffer = create_buffer_(
+            context_, kClMemReadWrite, bucket_cell_bytes, nullptr, &error);
+        ClMem bucket_head_buffer = create_buffer_(
+            context_, kClMemReadWrite, bucket_head_bytes, nullptr, &error);
+        ClMem next_buffer = create_buffer_(
+            context_, kClMemReadWrite, next_bytes, nullptr, &error);
+        ClMem accepted_buffer = create_buffer_(
+            context_, kClMemWriteOnly, accepted_bytes, nullptr, &error);
+        ClMem counters_buffer = create_buffer_(
+            context_, kClMemWriteOnly, sizeof(ConflictCounters), nullptr, &error);
+        auto release_buffers = [&]() {
+            for (ClMem value : {
+                     input_buffer,
+                     bucket_cell_buffer,
+                     bucket_head_buffer,
+                     next_buffer,
+                     accepted_buffer,
+                     counters_buffer}) {
+                if (value != nullptr) {
+                    release_mem_object_(value);
+                }
+            }
+        };
+        if (input_buffer == nullptr ||
+            bucket_cell_buffer == nullptr ||
+            bucket_head_buffer == nullptr ||
+            next_buffer == nullptr ||
+            accepted_buffer == nullptr ||
+            counters_buffer == nullptr ||
+            error != kClSuccess) {
+            info.fallback_reason =
+                "OpenCL conflict working buffer creation failed";
+            release_buffers();
+            return false;
+        }
+
+        using Clock = std::chrono::steady_clock;
+        const auto upload_started = Clock::now();
+        error = enqueue_write_buffer_(
+            queue_, input_buffer, kClTrue, 0U, input_bytes,
+            inputs.data(), 0U, nullptr, nullptr);
+        info.upload_ms = std::chrono::duration<double, std::milli>(
+            Clock::now() - upload_started).count();
+        const ClUInt candidate_count = static_cast<ClUInt>(inputs.size());
+        const ClUInt accepted_limit = std::min<ClUInt>(
+            candidate_count,
+            max_accepted);
+        error |= set_kernel_arg_(
+            conflict_kernel_, 0U, sizeof(input_buffer), &input_buffer);
+        error |= set_kernel_arg_(
+            conflict_kernel_, 1U, sizeof(candidate_count), &candidate_count);
+        error |= set_kernel_arg_(
+            conflict_kernel_, 2U, sizeof(accepted_limit), &accepted_limit);
+        error |= set_kernel_arg_(
+            conflict_kernel_, 3U, sizeof(bucket_capacity), &bucket_capacity);
+        error |= set_kernel_arg_(
+            conflict_kernel_, 4U, sizeof(bucket_cell_buffer), &bucket_cell_buffer);
+        error |= set_kernel_arg_(
+            conflict_kernel_, 5U, sizeof(bucket_head_buffer), &bucket_head_buffer);
+        error |= set_kernel_arg_(
+            conflict_kernel_, 6U, sizeof(next_buffer), &next_buffer);
+        error |= set_kernel_arg_(
+            conflict_kernel_, 7U, sizeof(accepted_buffer), &accepted_buffer);
+        error |= set_kernel_arg_(
+            conflict_kernel_, 8U, sizeof(counters_buffer), &counters_buffer);
+        if (error != kClSuccess) {
+            info.fallback_reason =
+                "OpenCL conflict argument upload failed";
+            release_buffers();
+            return false;
+        }
+
+        const auto kernel_started = Clock::now();
+        const std::size_t global_size = 1U;
+        const std::size_t local_size = 1U;
+        error = enqueue_nd_range_kernel_(
+            queue_, conflict_kernel_, 1U, nullptr,
+            &global_size, &local_size, 0U, nullptr, nullptr);
+        if (error == kClSuccess) {
+            error = finish_(queue_);
+        }
+        info.kernel_ms = std::chrono::duration<double, std::milli>(
+            Clock::now() - kernel_started).count();
+        if (error != kClSuccess) {
+            info.fallback_reason =
+                "OpenCL conflict kernel execution failed";
+            release_buffers();
+            return false;
+        }
+
+        const auto readback_started = Clock::now();
+        error = enqueue_read_buffer_(
+            queue_, counters_buffer, kClTrue, 0U, sizeof(ConflictCounters),
+            &counters, 0U, nullptr, nullptr);
+        if (error == kClSuccess &&
+            counters.accepted_count <= accepted_capacity) {
+            accepted_indices.resize(counters.accepted_count);
+            if (!accepted_indices.empty()) {
+                error = enqueue_read_buffer_(
+                    queue_, accepted_buffer, kClTrue, 0U,
+                    accepted_indices.size() * sizeof(std::uint32_t),
+                    accepted_indices.data(), 0U, nullptr, nullptr);
+            }
+        } else if (error == kClSuccess) {
+            error = -1;
+        }
+        info.readback_ms = std::chrono::duration<double, std::milli>(
+            Clock::now() - readback_started).count();
+        release_buffers();
+        if (error != kClSuccess) {
+            accepted_indices.clear();
+            counters = ConflictCounters{};
+            info.fallback_reason =
+                "OpenCL conflict readback failed";
             return false;
         }
         return true;
@@ -669,6 +1018,14 @@ private:
         }
         available_ = true;
         reason_.clear();
+        conflict_kernel_ = create_kernel_(
+            program_, "conflict_arbitration", &error);
+        if (conflict_kernel_ == nullptr || error != kClSuccess) {
+            conflict_reason_ = "OpenCL conflict kernel creation failed";
+            return;
+        }
+        conflict_available_ = true;
+        conflict_reason_.clear();
     }
 
     void* library_{nullptr};
@@ -677,8 +1034,11 @@ private:
     ClCommandQueue queue_{nullptr};
     ClProgram program_{nullptr};
     ClKernel kernel_{nullptr};
+    ClKernel conflict_kernel_{nullptr};
     bool available_{false};
+    bool conflict_available_{false};
     std::string reason_{"OpenCL runtime is unavailable"};
+    std::string conflict_reason_{"OpenCL conflict runtime is unavailable"};
     std::string device_name_;
     std::mutex mutex_;
 
@@ -732,6 +1092,22 @@ Policy configured_policy() {
 
 std::uint32_t minimum_sample_count() {
     const char* value = std::getenv("BIFROST_SCALES_GPU_MIN_SAMPLES");
+    if (value == nullptr || value[0] == '\0') {
+        return 4096U;
+    }
+    char* end = nullptr;
+    const unsigned long parsed = std::strtoul(value, &end, 10);
+    if (end == value || *end != '\0') {
+        return 4096U;
+    }
+    return static_cast<std::uint32_t>(std::min<unsigned long>(
+        parsed,
+        std::numeric_limits<std::uint32_t>::max()));
+}
+
+std::uint32_t minimum_candidate_count() {
+    const char* value = std::getenv(
+        "BIFROST_SCALES_GPU_MIN_CANDIDATES");
     if (value == nullptr || value[0] == '\0') {
         return 4096U;
     }
@@ -802,6 +1178,67 @@ bool try_compute_orientation(
     }
     info.used = true;
     info.backend = "opencl-gpu+cpu-exact-settle";
+    return true;
+}
+
+bool should_attempt_conflict(
+    std::size_t candidate_count,
+    ExecutionInfo& info) {
+    info = ExecutionInfo{};
+    info.sample_count = static_cast<std::uint32_t>(std::min<std::size_t>(
+        candidate_count,
+        std::numeric_limits<std::uint32_t>::max()));
+    const Policy policy = configured_policy();
+    if (policy == Policy::Off) {
+        info.fallback_reason = "disabled by BIFROST_SCALES_GPU=off";
+        return false;
+    }
+    info.requested = true;
+    if (candidate_count == 0U) {
+        info.fallback_reason = "conflict candidate input is empty";
+        return false;
+    }
+    if (policy == Policy::Auto &&
+        candidate_count < minimum_candidate_count()) {
+        info.fallback_reason =
+            "candidate count is below the GPU crossover threshold";
+        return false;
+    }
+    Runtime& compute = runtime();
+    info.available = compute.conflict_available();
+    info.device = compute.device_name();
+    if (!compute.conflict_available()) {
+        info.fallback_reason = compute.conflict_reason().empty()
+            ? compute.reason()
+            : compute.conflict_reason();
+        return false;
+    }
+    return true;
+}
+
+bool try_arbitrate_conflicts(
+    const std::vector<ConflictInput>& inputs,
+    std::uint32_t max_accepted,
+    std::vector<std::uint32_t>& accepted_indices,
+    ConflictCounters& counters,
+    ExecutionInfo& info) {
+    accepted_indices.clear();
+    counters = ConflictCounters{};
+    if (!should_attempt_conflict(inputs.size(), info)) {
+        return false;
+    }
+    Runtime& compute = runtime();
+    if (!compute.execute_conflict(
+            inputs,
+            max_accepted,
+            accepted_indices,
+            counters,
+            info)) {
+        return false;
+    }
+    info.used = true;
+    info.backend =
+        "opencl-gpu-conflict-reference+cpu-exact-settle";
     return true;
 }
 
