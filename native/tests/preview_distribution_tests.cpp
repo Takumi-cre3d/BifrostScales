@@ -270,6 +270,34 @@ int main() {
         CHECK(!varied_gpu_info.fallback_reason.empty());
     }
 
+    if (gpu_force_info.used) {
+        for (std::uint64_t seed = 1U; seed <= 8U; ++seed) {
+            bifrost_scales::Settings sweep_settings = settings;
+            sweep_settings.seed = seed;
+            const auto sweep_batch =
+                bifrost_scales::build_interactive_candidate_batch(
+                    mesh,
+                    sweep_settings,
+                    1024U);
+            const auto sweep_reference =
+                bifrost_scales::arbitrate_interactive_candidates(
+                    sweep_batch,
+                    sweep_settings,
+                    128U);
+            bifrost_scales::gpu::ExecutionInfo sweep_info;
+            const auto sweep_gpu =
+                bifrost_scales::arbitrate_interactive_candidates_accelerated(
+                    sweep_batch,
+                    sweep_settings,
+                    128U,
+                    sweep_info);
+            CHECK(sweep_info.used);
+            CHECK(same_conflict_result(
+                sweep_gpu,
+                sweep_reference));
+        }
+    }
+
     bifrost_scales::gpu::ExecutionInfo no_conflict_gpu_info;
     const auto no_conflict_gpu =
         bifrost_scales::arbitrate_interactive_candidates_accelerated(
@@ -293,6 +321,18 @@ int main() {
         one_winner_gpu,
         one_winner_result));
     set_gpu_override("auto");
+    bifrost_scales::gpu::ExecutionInfo auto_small_info;
+    const auto auto_small =
+        bifrost_scales::arbitrate_interactive_candidates_accelerated(
+            small,
+            settings,
+            256U,
+            auto_small_info);
+    CHECK(same_conflict_result(auto_small, small_result));
+    CHECK(auto_small_info.requested);
+    CHECK(!auto_small_info.used);
+    CHECK(auto_small_info.fallback_reason.find("below") !=
+          std::string::npos);
 
     bifrost_scales::Settings settled_settings = settings;
     settled_settings.target_count = 32U;
