@@ -175,6 +175,7 @@ int main(int argc, char** argv) {
               << ",\"gpu_upload_ms\":" << gpu_info.upload_ms
               << ",\"gpu_kernel_ms\":" << gpu_info.kernel_ms
               << ",\"gpu_readback_ms\":" << gpu_info.readback_ms
+              << ",\"gpu_iterations\":" << gpu_info.iteration_count
               << ",\"parity\":" << (parity ? "true" : "false")
               << ",\"device\":\"" << json_escape(gpu_info.device) << "\""
               << ",\"fallback_reason\":\""
