@@ -36,7 +36,6 @@ Field配列はCandidate数と同じ長さ、または空配列です。空のDen
 - 現行 `distribute()` の置換
 - Maya Runtimeへの接続
 - Boundary Anchor／Guide Center AnchorのGPU化
-- GPU Candidate Conflict Arbitration
 - Settled／Final／Bakeの変更
 - Stable Cell IDの正本変更
 
@@ -54,4 +53,4 @@ Field配列はCandidate数と同じ長さ、または空配列です。空のDen
 
 性能値はWindows／MSVC Releaseで5回測定した参考中央値であり、製品性能保証ではありません。
 
-次段階は、同じBufferと判定規則をGPUへ移植し、受理Index／Candidate KeyをCPU referenceと比較することです。
+GPU移植とCPU reference比較は [GPU Conflict Arbitration](INTERACTIVE_DISTRIBUTION_GPU_CONFLICT_JA.md) に記録しています。
