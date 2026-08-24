@@ -49,6 +49,6 @@ Sceneを保存して再読込し、System、Guide、Group、Scale Types、Unique
 
 ## 8. Interactive Distribution基盤の回帰
 
-`bifrost-scales/interactive-candidate-batch/1` と `bifrost-scales/interactive-conflict-reference/1` はMaya Runtimeへ未接続です。現在のSourceをbuildしてもUIや生成結果に新しい表示差は発生しません。
+`bifrost-scales/interactive-candidate-batch/1`、`bifrost-scales/interactive-conflict-reference/1`、`bifrost-scales/interactive-conflict-gpu/1` はMaya Runtimeへ未接続です。現在のSourceをbuildしてもUIや生成結果に新しい表示差は発生しません。
 
 同じMesh／Seed／SettingsでSettledを2回評価し、vertices、faces、Stable Cell IDと見た目が一致することを確認します。Interactive編集からSettledへ戻した結果も従来のCPU exact結果と一致すれば合格です。
