@@ -96,6 +96,7 @@ struct ExecutionInfo {
     double kernel_ms{0.0};
     double readback_ms{0.0};
     std::uint32_t sample_count{0U};
+    std::uint32_t iteration_count{0U};
 };
 
 // Cheap policy/runtime gate used before constructing compact GPU buffers.
