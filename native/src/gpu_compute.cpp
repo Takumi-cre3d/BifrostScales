@@ -1155,6 +1155,7 @@ public:
             }
             ++round_count;
         }
+        info.iteration_count = round_count;
         if (error == kClSuccess && remaining_count > 0U) {
             info.fallback_reason =
                 "OpenCL conflict resolution exceeded round limit";
@@ -1545,9 +1546,9 @@ bool should_attempt_conflict(
     info.available = compute.conflict_available();
     info.device = compute.device_name();
     if (!compute.conflict_available()) {
-        info.fallback_reason = compute.conflict_reason().empty()
-            ? compute.reason()
-            : compute.conflict_reason();
+        info.fallback_reason = compute.available()
+            ? compute.conflict_reason()
+            : compute.reason();
         return false;
     }
     return true;
