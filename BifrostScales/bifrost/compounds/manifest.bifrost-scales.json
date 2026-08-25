@@ -65,7 +65,7 @@
   "guide_mask_ray_clip": "disabled-no-cell-deformation",
   "guide_mask_falloff_used": true,
   "guide_falloff_distance": "projected-guide-multi-source-mesh-edge-shortest-path",
-  "guide_mask_core_influence": 0.98,
+  "guide_mask_full_suppression_influence": 0.98,
   "direction_curve_strength_distribution_contract": "positive-enables-centerline-magnitude-orientation-only",
   "direction_curve_center_candidates_obey_density_poisson": true,
   "cell_gap_applied_once_across_shared_edge": true,
