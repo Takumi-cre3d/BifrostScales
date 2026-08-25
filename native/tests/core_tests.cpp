@@ -97,8 +97,12 @@ Mesh close_disconnected_planes_mesh() {
         {
             Triangle{0, 1, 2},
             Triangle{0, 2, 3},
+            Triangle{2, 1, 0},
+            Triangle{3, 2, 0},
             Triangle{4, 5, 6},
             Triangle{4, 6, 7},
+            Triangle{6, 5, 4},
+            Triangle{7, 6, 4},
         },
     };
 }
