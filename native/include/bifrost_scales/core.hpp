@@ -99,7 +99,7 @@ struct Guide {
     Vec3 direction{1.0, 0.0, 0.0};
     bool enabled{true};
     double radius{1.0};
-    double falloff{2.0};
+    double falloff{1.0};
     double density_multiplier{1.75};
     double size_multiplier{1.0};
     double strength{1.0};
