@@ -182,11 +182,13 @@ def test_build_info_records_the_native_only_boundary():
         "deterministic-authored-order-aabb-bvh"
     )
     assert info["cell_hot_path"] == (
-        "single-site-precomputed-ray-table-normal-component-mask-gate"
+        "single-site-precomputed-ray-table-normal-component"
     )
     assert info["direction_pair_partition_runtime"] is False
-    assert info["guide_mask_density_falloff"] is True
-    assert info["guide_mask_nonexpanding_surviving_cells"] is True
+    assert info["guide_mask_density_falloff"] is False
+    assert info["guide_mask_post_cell_visibility"] is True
+    assert info["guide_mask_preserves_distribution_and_cells"] is True
+    assert info["guide_mask_visibility_random_basis"] == "stable-cell-id"
     assert info["guide_falloff_distance"] == "mesh-edge-shortest-path"
     assert info["native_pack_rebuild_required_for_release"] is True
     assert info["installer_native_preservation_scope"] == "installed-pack-only"
