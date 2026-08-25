@@ -678,6 +678,7 @@ def test_mask_acceptance_feathers_across_the_full_guide_radius():
         0.9755859375,
         1.0,
     )
+    assert guides.mask_acceptance_probability((0.03, 0.0, 0.0)) == 0.0
     assert guides.is_masked((0.0, 0.0, 0.0)) is True
     assert guides.is_masked((0.1, 0.0, 0.0)) is False
 
