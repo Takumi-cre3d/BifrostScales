@@ -5508,7 +5508,8 @@ DistributionResult distribute_impl(
     const Settings& settings,
     PreviewMode mode,
     const PreparedGuides& guides,
-    std::uint32_t* used_workers = nullptr) {
+    std::uint32_t* used_workers = nullptr,
+    GenerationProfile* profile = nullptr) {
     validate_mesh(mesh);
     const std::uint32_t count = std::max<std::uint32_t>(
         1U,
@@ -5519,7 +5520,8 @@ DistributionResult distribute_impl(
         count,
         mode,
         guides,
-        used_workers);
+        used_workers,
+        profile);
     const auto active_count = std::count_if(
         settings.scale_types.begin(),
         settings.scale_types.end(),
@@ -5957,7 +5959,8 @@ GenerationResult generate(
                 settings,
                 mode,
                 prepared_guides,
-                &profile.distribution_worker_threads));
+                &profile.distribution_worker_threads,
+                &profile));
         profile.stage_cache_evictions += cache.insert_distribution(
             distribution_key,
             distribution) ? 1U : 0U;
