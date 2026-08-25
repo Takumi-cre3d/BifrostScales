@@ -152,6 +152,7 @@
     "symmetry_exact_guide_link_influence": "maximum-original-or-mirror",
     "symmetry_reflected_direction_angle": "negated",
     "mask_exclusion": "surface-connected-full-radius-density-and-stochastic-falloff-plus-98-percent-core-cell-ray-clip",
+    "mask_distribution_spacing_is_separate_from_cell_spacing": true,
     "mask_display_color": "magenta",
     "mask_falloff_used": true,
     "guide_falloff_distance": "projected-guide-multi-source-mesh-edge-shortest-path",

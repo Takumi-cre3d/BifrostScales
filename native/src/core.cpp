@@ -3146,7 +3146,11 @@ CellResult build_cells_impl(
     for (const Sample& sample : samples) {
         const double spacing = std::max(
             1.0e-8,
-            sample.local_spacing > 0.0 ? sample.local_spacing : fallback_spacing);
+            sample.cell_spacing > 0.0
+                ? sample.cell_spacing
+                : (sample.local_spacing > 0.0
+                       ? sample.local_spacing
+                       : fallback_spacing));
         spacings.push_back(spacing);
         maximum_spacing = std::max(maximum_spacing, spacing);
     }
@@ -3714,7 +3718,10 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                 projected.point,
                 guides,
                 projected.triangle_index));
+        const double cell_density_multiplier = density_multiplier;
         density_multiplier *= mask_density;
+        const double cell_spacing = initial_spacing /
+            std::sqrt(std::max(kMaskDensityFloor, cell_density_multiplier));
         const double local_spacing = initial_spacing /
             std::sqrt(std::max(kMaskDensityFloor, density_multiplier));
         const GridCell cell = cell_for(projected.point, cell_size);
@@ -3781,6 +3788,7 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
             local_spacing,
             stable_id,
         };
+        accepted.cell_spacing = cell_spacing;
         const std::uint32_t sample_index = static_cast<std::uint32_t>(samples.size());
         anchor_samples.push_back(accepted);
         samples.push_back(std::move(accepted));
@@ -3866,9 +3874,10 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                 ++masked_candidates;
                 continue;
             }
-            const double density_multiplier =
-                field.density *
+            const double mask_density =
                 std::max(kMaskDensityFloor, field.mask_acceptance);
+            const double density_multiplier =
+                field.density * mask_density;
             const double size_multiplier = field.size;
             const double acceptance = clamp(
                 density_multiplier / maximum_density,
@@ -3878,8 +3887,10 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                 continue;
             }
             const Vec3 normal = normals[triangle_index];
+            const double cell_spacing = spacing /
+                std::sqrt(std::max(0.02, field.density));
             const double local_spacing = spacing /
-                                         std::sqrt(std::max(0.02, density_multiplier));
+                std::sqrt(std::max(0.02, density_multiplier));
             const GridCell cell = cell_for(position, cell_size);
             const double maximum_neighbor_threshold = 0.5 *
                 (local_spacing + largest_accepted_spacing);
@@ -3929,6 +3940,7 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                     kRoleSurfaceCandidate,
                     {pass_index, attempts}),
             });
+            samples.back().cell_spacing = cell_spacing;
             grid[cell].push_back(sample_index);
             largest_accepted_spacing = std::max(
                 largest_accepted_spacing,

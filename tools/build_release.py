@@ -1223,6 +1223,7 @@ def build() -> dict[str, str]:
         "guide_symmetry": True,
         "guide_mask_effect": True,
         "guide_mask_density_falloff": True,
+        "guide_mask_nonexpanding_surviving_cells": True,
         "guide_falloff_distance": "mesh-edge-shortest-path",
         "scale_type_selection_mode": "strongest-positive-guide-or-group-link",
         "uv_boundary_feature": "removed",

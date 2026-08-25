@@ -185,6 +185,10 @@ struct Sample {
     double size_multiplier{1.0};
     double local_spacing{0.0};
     std::uint64_t stable_id{0};
+    // Distribution spacing may grow inside Mask falloff to reject nearby
+    // centers. Cell spacing excludes that Mask-only growth so surviving Cells
+    // do not expand back across the deliberately sparse region.
+    double cell_spacing{0.0};
 };
 
 struct OrientedSample {
