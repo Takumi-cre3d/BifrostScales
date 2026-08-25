@@ -62,7 +62,7 @@ std::vector<bifrost_scales::Guide> make_guides() {
             {9.0, 0.0, offset + 0.6},
         };
         guide.radius = 3.25;
-        guide.falloff = 1.8;
+        guide.falloff = 1.0;
         guide.strength = 0.8;
         guide.angle_degrees = static_cast<double>(index) * 2.0;
         guide.use_density = false;
