@@ -1132,7 +1132,7 @@ class MayaSceneManager:
         )
         self._ensure_bool(node, GUIDE_ENABLED, True)
         self._ensure_double(node, GUIDE_RADIUS, 1.0)
-        self._ensure_double(node, GUIDE_FALLOFF, 2.0)
+        self._ensure_double(node, GUIDE_FALLOFF, 1.0)
         self._ensure_double(node, GUIDE_DENSITY_MULTIPLIER, 1.75)
         self._ensure_double(node, GUIDE_SIZE_MULTIPLIER, 1.0)
         self._ensure_double(node, GUIDE_STRENGTH, 1.0)
