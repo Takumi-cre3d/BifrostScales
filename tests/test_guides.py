@@ -651,6 +651,37 @@ def test_symmetry_invalidation_starts_at_the_earliest_affected_stage():
     ) is ChangeCategory.SHAPE
 
 
+def test_mask_acceptance_feathers_across_the_full_guide_radius():
+    mask = GuideData(
+        guide_id="soft_mask",
+        name="Soft Mask",
+        kind=GuideKind.DENSITY_POINT,
+        points=((0.0, 0.0, 0.0),),
+        radius=1.0,
+        falloff=2.0,
+        use_density=False,
+        use_size=False,
+        use_direction=False,
+        use_mask=True,
+    ).normalized()
+    guides = GuideSet.from_iterable((mask,))
+
+    acceptance = tuple(
+        guides.mask_acceptance_probability((distance, 0.0, 0.0))
+        for distance in (0.0, 0.25, 0.5, 0.75, 1.0)
+    )
+
+    assert acceptance == (
+        0.0,
+        0.2880859375,
+        0.75,
+        0.9755859375,
+        1.0,
+    )
+    assert guides.is_masked((0.0, 0.0, 0.0)) is True
+    assert guides.is_masked((0.1, 0.0, 0.0)) is False
+
+
 def test_mask_core_ray_entry_is_analytic_for_narrow_point_and_curve_masks():
     point_mask = GuideData(
         guide_id="narrow_point_mask",
@@ -669,7 +700,7 @@ def test_mask_core_ray_entry_is_analytic_for_narrow_point_and_curve_masks():
         (1.0, 0.0, 0.0),
         2.0,
     )
-    point_core = point_mask.radius * 0.3581208328092611
+    point_core = point_mask.radius * 0.05905480523664686
     assert abs(point_entry - (1.13 - point_core)) < 1.0e-12
 
     curve_mask = GuideData(
@@ -689,7 +720,7 @@ def test_mask_core_ray_entry_is_analytic_for_narrow_point_and_curve_masks():
         (1.0, 0.0, 0.0),
         2.0,
     )
-    curve_core = curve_mask.radius * 0.3581208328092611
+    curve_core = curve_mask.radius * 0.05905480523664686
     assert abs(curve_entry - (1.13 - curve_core)) < 1.0e-12
 
 
