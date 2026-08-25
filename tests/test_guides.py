@@ -278,7 +278,7 @@ def test_guide_group_modifiers_are_non_destructive_and_composed_at_read_time():
         points=((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)),
         group_id="group_primary",
         radius=2.0,
-        falloff=2.0,
+        falloff=1.0,
         density_multiplier=3.0,
         size_multiplier=1.5,
         strength=0.4,
@@ -302,7 +302,7 @@ def test_guide_group_modifiers_are_non_destructive_and_composed_at_read_time():
     assert authored.angle_degrees == 10.0
     assert effective.group_id == "group_primary"
     assert effective.radius == 3.0
-    assert effective.falloff == 1.0
+    assert effective.falloff == 0.5
     assert effective.density_multiplier == 2.0
     assert effective.size_multiplier == 2.0
     assert group.normalized().direction_strength == 1.0
@@ -651,36 +651,48 @@ def test_symmetry_invalidation_starts_at_the_earliest_affected_stage():
     ) is ChangeCategory.SHAPE
 
 
-def test_mask_acceptance_feathers_across_the_full_guide_radius():
-    mask = GuideData(
-        guide_id="soft_mask",
-        name="Soft Mask",
+def test_mask_falloff_is_normalized_width_within_range():
+    def acceptance(falloff: float) -> tuple[float, ...]:
+        mask = GuideData(
+            guide_id="soft_mask",
+            name="Soft Mask",
+            kind=GuideKind.DENSITY_POINT,
+            points=((0.0, 0.0, 0.0),),
+            radius=1.0,
+            falloff=falloff,
+            use_density=False,
+            use_size=False,
+            use_direction=False,
+            use_mask=True,
+        ).normalized()
+        guides = GuideSet.from_iterable((mask,))
+        return tuple(
+            guides.mask_acceptance_probability((distance, 0.0, 0.0))
+            for distance in (0.0, 0.25, 0.5, 0.75, 1.0)
+        )
+
+    assert acceptance(0.0) == (0.0, 0.0, 0.0, 0.0, 1.0)
+    assert acceptance(0.5) == (0.0, 0.0, 0.0, 0.5, 1.0)
+    assert acceptance(1.0) == (0.0, 0.15625, 0.5, 0.84375, 1.0)
+
+
+def test_falloff_normalization_migrates_legacy_values_to_valid_width():
+    assert GuideData.from_mapping(
+        {
+            "guide_id": "legacy",
+            "name": "Legacy",
+            "kind": GuideKind.DENSITY_POINT.value,
+            "points": ((0.0, 0.0, 0.0),),
+            "falloff": 2.0,
+        }
+    ).falloff == 1.0
+    assert GuideData(
+        guide_id="negative",
+        name="Negative",
         kind=GuideKind.DENSITY_POINT,
         points=((0.0, 0.0, 0.0),),
-        radius=1.0,
-        falloff=2.0,
-        use_density=False,
-        use_size=False,
-        use_direction=False,
-        use_mask=True,
-    ).normalized()
-    guides = GuideSet.from_iterable((mask,))
-
-    acceptance = tuple(
-        guides.mask_acceptance_probability((distance, 0.0, 0.0))
-        for distance in (0.0, 0.25, 0.5, 0.75, 1.0)
-    )
-
-    assert acceptance == (
-        0.0,
-        0.2880859375,
-        0.75,
-        0.9755859375,
-        1.0,
-    )
-    assert guides.mask_acceptance_probability((0.03, 0.0, 0.0)) == 0.0
-    assert guides.is_masked((0.0, 0.0, 0.0)) is True
-    assert guides.is_masked((0.1, 0.0, 0.0)) is False
+        falloff=-1.0,
+    ).normalized().falloff == 0.0
 
 
 def test_mask_geometry_changes_shape_but_not_distribution_or_direction_fingerprint():

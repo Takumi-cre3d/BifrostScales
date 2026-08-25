@@ -158,6 +158,8 @@
     "mask_display_color": "magenta",
     "mask_falloff_used": true,
     "guide_falloff_distance": "projected-guide-multi-source-mesh-edge-shortest-path",
+    "guide_falloff_control": "normalized-width-within-range",
+    "guide_falloff_full_effect_radius": "range-times-one-minus-falloff",
     "mask_symmetry_supported": true,
     "mask_ray_clip": "disabled-no-cell-deformation",
     "curve_direction_strength_contract": "positive-enables-centerline-magnitude-controls-orientation-only",

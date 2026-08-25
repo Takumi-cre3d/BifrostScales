@@ -130,7 +130,7 @@ Row run_case(
     curve.kind = bifrost_scales::GuideKind::DirectionCurve;
     curve.points = {{-4.0, 0.0, 0.0}, {0.0, 0.0, 0.75}, {4.0, 0.0, 0.0}};
     curve.radius = 2.5;
-    curve.falloff = 2.0;
+    curve.falloff = 1.0;
     curve.strength = 1.0;
     curve.use_density = false;
     curve.use_size = false;
@@ -141,7 +141,7 @@ Row run_case(
     point.kind = bifrost_scales::GuideKind::DirectionPoint;
     point.points = {{0.0, 0.0, 2.0}};
     point.radius = 2.0;
-    point.falloff = 2.0;
+    point.falloff = 1.0;
     point.strength = 0.8;
     point.use_density = false;
     point.use_size = false;

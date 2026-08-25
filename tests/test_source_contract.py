@@ -192,10 +192,31 @@ def test_build_info_records_the_native_only_boundary():
     assert info["guide_mask_preserves_distribution_and_cells"] is True
     assert info["guide_mask_visibility_random_basis"] == "stable-cell-id"
     assert info["guide_falloff_distance"] == "mesh-edge-shortest-path"
+    assert info["guide_falloff_control"] == "normalized-width-within-range"
+    assert info["guide_falloff_full_effect_radius"] == (
+        "range-times-one-minus-falloff"
+    )
     assert info["native_pack_rebuild_required_for_release"] is True
     assert info["installer_native_preservation_scope"] == "installed-pack-only"
     assert info["installer_discards_transient_bifrost_out"] is True
     assert info["installer_revision"] == 2
+
+
+def test_guide_falloff_is_a_normalized_width_inside_range():
+    core = (ROOT / "native/src/core.cpp").read_text(encoding="utf-8")
+    gpu = (ROOT / "native/src/gpu_compute.cpp").read_text(encoding="utf-8")
+    guides = (
+        ROOT / "BifrostScales/scripts/bifrost_scales/guides.py"
+    ).read_text(encoding="utf-8")
+    ui = (ROOT / "BifrostScales/scripts/bifrost_scales/ui.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "clamp(guide.falloff, 0.0, 1.0)" in core
+    assert "radius * (1.0 - falloff_width)" in core
+    assert "radius * (1.0f - falloff_width)" in gpu
+    assert "falloff=max(0.0, min(1.0" in guides
+    assert "FloatParameterControl(0.0, 1.0, 1.0, decimals=3)" in ui
 
 
 def test_installer_preserves_pack_without_copying_transient_build_tree():

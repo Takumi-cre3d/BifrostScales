@@ -210,9 +210,19 @@ float guide_influence(float distance, float radius, float falloff) {
     if (distance >= radius) {
         return 0.0f;
     }
-    const float normalized = clamp(distance / radius, 0.0f, 1.0f);
-    const float smooth = 1.0f - normalized * normalized * (3.0f - 2.0f * normalized);
-    return pow(fmax(0.0f, smooth), falloff);
+    const float falloff_width = clamp(falloff, 0.0f, 1.0f);
+    if (falloff_width <= 1.0e-8f) {
+        return 1.0f;
+    }
+    const float full_effect_radius = radius * (1.0f - falloff_width);
+    if (distance <= full_effect_radius) {
+        return 1.0f;
+    }
+    const float normalized = clamp(
+        (distance - full_effect_radius) / (radius - full_effect_radius),
+        0.0f,
+        1.0f);
+    return 1.0f - normalized * normalized * (3.0f - 2.0f * normalized);
 }
 
 float3 blend_oriented(

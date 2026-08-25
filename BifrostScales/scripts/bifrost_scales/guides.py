@@ -237,7 +237,7 @@ class GuideData:
     direction: Vec3 = (0.0, 1.0, 0.0)
     enabled: bool = True
     radius: float = 1.0
-    falloff: float = 2.0
+    falloff: float = 1.0
     density_multiplier: float = 1.0
     size_multiplier: float = 1.0
     strength: float = 1.0
@@ -306,7 +306,7 @@ class GuideData:
             direction=direction,
             enabled=bool(values.get("enabled", True)),
             radius=max(1.0e-6, float(values.get("radius", 1.0))),
-            falloff=max(0.1, min(8.0, float(values.get("falloff", 2.0)))),
+            falloff=max(0.0, min(1.0, float(values.get("falloff", 1.0)))),
             density_multiplier=max(
                 0.0,
                 min(16.0, float(values.get("density_multiplier", 1.0))),
@@ -366,7 +366,7 @@ class GuideData:
             direction=normalize(vec3(self.direction), (0.0, 1.0, 0.0)),
             enabled=bool(self.enabled),
             radius=max(1.0e-6, float(self.radius)),
-            falloff=max(0.1, min(8.0, float(self.falloff))),
+            falloff=max(0.0, min(1.0, float(self.falloff))),
             density_multiplier=max(0.0, min(16.0, float(self.density_multiplier))),
             size_multiplier=max(0.05, min(8.0, float(self.size_multiplier))),
             strength=max(0.0, min(1.0, float(self.strength))),
@@ -497,14 +497,22 @@ class GuideData:
         distance, _nearest, _tangent = self._nearest_normalized(position)
         if distance >= radius:
             return 0.0
-        normalized_distance = max(0.0, min(1.0, distance / radius))
-        smooth = (
-            1.0
-            - normalized_distance
-            * normalized_distance
-            * (3.0 - 2.0 * normalized_distance)
+        falloff_width = max(0.0, min(1.0, self.falloff))
+        if falloff_width <= 1.0e-12:
+            return 1.0
+        full_effect_radius = radius * (1.0 - falloff_width)
+        if distance <= full_effect_radius:
+            return 1.0
+        normalized_falloff = max(
+            0.0,
+            min(
+                1.0,
+                (distance - full_effect_radius) / (radius - full_effect_radius),
+            ),
         )
-        return math.pow(max(0.0, smooth), self.falloff)
+        return 1.0 - normalized_falloff * normalized_falloff * (
+            3.0 - 2.0 * normalized_falloff
+        )
 
     def influence(self, position: Vec3, radius_override: float = 0.0) -> float:
         return self.normalized()._influence_normalized(
@@ -522,7 +530,7 @@ class PointGuide:
     direction: Vec3 = (0.0, 1.0, 0.0)
     radius: float = 1.0
     strength: float = 1.0
-    falloff: float = 2.0
+    falloff: float = 1.0
     enabled: bool = True
     name: str = ""
 

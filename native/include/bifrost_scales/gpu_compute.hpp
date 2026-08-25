@@ -30,7 +30,7 @@ struct alignas(16) DirectionGuide {
     Float4 bounds_min{};
     Float4 bounds_max{};
     float radius{1.0F};
-    float falloff{2.0F};
+    float falloff{1.0F};
     float strength{1.0F};
     float angle_radians{0.0F};
     std::uint32_t segment_offset{0U};
