@@ -1435,6 +1435,31 @@ int main() {
     }
     CHECK(survived_in_falloff);
 
+    // Mask Falloff spacing controls center rejection only. Surviving Cells
+    // retain the density-only footprint instead of expanding across the holes
+    // and visually rebuilding a solid boundary.
+    bool found_mask_spacing_separation = false;
+    for (const Sample& sample : masked_distribution.samples) {
+        if (sample.cell_spacing > 0.0 &&
+            sample.local_spacing > sample.cell_spacing * 1.05) {
+            found_mask_spacing_separation = true;
+            break;
+        }
+    }
+    CHECK(found_mask_spacing_separation);
+    const auto masked_cells = bifrost_scales::build_cells(
+        mesh,
+        masked_distribution.samples,
+        mask_settings,
+        PreviewMode::Settled,
+        masked_distribution.report);
+    CHECK(masked_cells.cells.size() == masked_distribution.samples.size());
+    for (std::size_t index = 0U; index < masked_cells.cells.size(); ++index) {
+        CHECK(std::abs(
+                  masked_cells.cells[index].local_spacing -
+                  masked_distribution.samples[index].cell_spacing) < 1.0e-12);
+    }
+
     const Mesh close_layers = close_disconnected_planes_mesh();
     Guide surface_mask = mask_guide;
     surface_mask.id = "surface-mask";
