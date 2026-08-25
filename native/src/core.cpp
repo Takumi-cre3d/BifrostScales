@@ -878,6 +878,45 @@ double mask_acceptance_probability(
     return clamp(1.0 - influence, 0.0, 1.0);
 }
 
+bool sample_visible_for_mask(
+    const Sample& sample,
+    const PreparedGuides& guides) {
+    const double acceptance = mask_acceptance_probability(
+        sample.position,
+        guides,
+        sample.triangle_index);
+    if (acceptance >= 1.0) {
+        return true;
+    }
+    if (acceptance <= 0.0) {
+        return false;
+    }
+    const std::uint64_t stable_id = sample.stable_id == 0U
+        ? stable_hash_values(
+              "bifrost-scales/legacy-mask-visibility/1",
+              {sample.triangle_index})
+        : sample.stable_id;
+    const std::uint64_t value = stable_hash_values(
+        "bifrost-scales/mask-visibility/1",
+        {stable_id});
+    constexpr double inverse_53_bits =
+        1.0 / static_cast<double>(1ULL << 53U);
+    const double threshold =
+        static_cast<double>(value >> 11U) * inverse_53_bits;
+    return threshold < acceptance;
+}
+
+std::uint32_t masked_output_count(
+    const std::vector<OrientedSample>& samples,
+    const PreparedGuides& guides) {
+    return static_cast<std::uint32_t>(std::count_if(
+        samples.begin(),
+        samples.end(),
+        [&](const OrientedSample& sample) {
+            return !sample_visible_for_mask(sample.sample, guides);
+        }));
+}
+
 std::uint32_t mask_guide_count(const PreparedGuides& guides) {
     return static_cast<std::uint32_t>(std::count_if(
         guides.begin(),
@@ -1996,7 +2035,6 @@ void prepare_surface_guide_fields(
 struct DistributionGuideField {
     double density{1.0};
     double size{1.0};
-    double mask_acceptance{1.0};
 };
 
 // Candidate sampling can evaluate hundreds of thousands of rejected points.
@@ -2012,7 +2050,7 @@ public:
             const PreparedGuide& guide = guides[index];
             if (guide.source == nullptr ||
                 !guide.source->enabled ||
-                (!guide.uses_density && !guide.uses_size && !guide.uses_mask)) {
+                (!guide.uses_density && !guide.uses_size)) {
                 continue;
             }
             const Vec3 radius{guide.radius, guide.radius, guide.radius};
@@ -2039,7 +2077,6 @@ public:
         }
         double density = 1.0;
         double size = 1.0;
-        double mask_remaining = 1.0;
         for (const std::uint32_t index : scratch) {
             const PreparedGuide& guide = guides_[index];
             const Guide& source = *guide.source;
@@ -2047,9 +2084,6 @@ public:
                 guide,
                 guide_distance(guide, position, triangle_index),
                 guide.radius);
-            if (guide.uses_mask) {
-                mask_remaining *= 1.0 - clamp(influence, 0.0, 1.0);
-            }
             if (guide.uses_density) {
                 density *= 1.0 +
                     (clamp(source.density_multiplier, 0.0, 16.0) - 1.0) *
@@ -2061,14 +2095,9 @@ public:
                         influence;
             }
         }
-        const double exclusion = clamp(1.0 - mask_remaining, 0.0, 1.0);
-        const double mask_acceptance = exclusion >= kMaskHardCoreInfluence
-            ? 0.0
-            : clamp(1.0 - exclusion, 0.0, 1.0);
         return {
             clamp(density, 0.02, 16.0),
             clamp(size, 0.05, 8.0),
-            mask_acceptance,
         };
     }
 
@@ -5392,24 +5421,18 @@ void hash_distribution_guide(CacheHasher& hasher, const Guide& guide) {
     hash_guide_geometry(hasher, guide);
     const bool density = guide_uses_density(guide);
     const bool size = guide_uses_size(guide);
-    const bool mask = guide_uses_mask(guide);
     const bool curve_centerline =
         guide.points.size() > 1U &&
         guide_uses_direction(guide) &&
         guide.strength > kEpsilon;
     hasher.boolean(density);
     hasher.boolean(size);
-    hasher.boolean(mask);
     hasher.boolean(curve_centerline);
     if (density || size) {
         hasher.scalar(guide.radius);
         hasher.scalar(guide.falloff);
         hasher.scalar(guide.density_multiplier);
         hasher.scalar(guide.size_multiplier);
-    }
-    if (mask) {
-        hasher.scalar(guide.radius);
-        hasher.scalar(guide.falloff);
     }
     if (curve_centerline) {
         // Positive Direction Strength enables center candidates, but its
@@ -5447,7 +5470,6 @@ CacheKey distribution_cache_key(
         const bool curve = guide.points.size() > 1U;
         if (!guide.enabled ||
             !(guide_uses_density(guide) || guide_uses_size(guide) ||
-              guide_uses_mask(guide) ||
               (curve && guide_uses_direction(guide) &&
                guide.strength > kEpsilon))) {
             continue;
@@ -5489,7 +5511,8 @@ CacheKey cell_cache_key(
     const std::vector<SymmetryPlane>& symmetry_planes) {
     CacheHasher hasher;
     // Cell partitioning depends on distributed sample positions, normals,
-    // spacing, mask geometry and Cell settings. Direction Pair was retired in
+    // spacing and Cell settings. Mask is a post-Cell mesh visibility filter.
+    // Direction Pair was retired in
     // 0.8.9, so neither the oriented tangent nor Direction Guide influence can
     // change a Cell boundary. Key Cells from Distribution directly to preserve
     // the exact partition while reusing it for direction-only edits.
