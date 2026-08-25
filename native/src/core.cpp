@@ -4035,15 +4035,10 @@ std::optional<std::vector<OrientedSample>> try_gpu_orientation_field(
     GenerationProfile* profile) {
     gpu::ExecutionInfo availability_info;
     if (!gpu::should_attempt_orientation(samples.size(), availability_info)) {
-        if (profile != nullptr) {
-            profile->gpu_compute_requested = availability_info.requested;
-            profile->gpu_compute_available = availability_info.available;
-            profile->gpu_compute_used = false;
-            profile->gpu_compute_backend = availability_info.backend;
-            profile->gpu_device = availability_info.device;
-            profile->gpu_fallback_reason = availability_info.fallback_reason;
-            profile->gpu_sample_count = availability_info.sample_count;
-        }
+        merge_gpu_profile(
+            profile,
+            availability_info,
+            "interactive-orientation");
         return std::nullopt;
     }
     std::vector<gpu::DirectionInput> gpu_inputs;
@@ -4150,18 +4145,10 @@ std::optional<std::vector<OrientedSample>> try_gpu_orientation_field(
         static_cast<float>(settings.random_rotation_degrees),
         gpu_outputs,
         gpu_info);
-    if (profile != nullptr) {
-        profile->gpu_compute_requested = gpu_info.requested;
-        profile->gpu_compute_available = gpu_info.available;
-        profile->gpu_compute_used = gpu_info.used;
-        profile->gpu_compute_backend = gpu_info.backend;
-        profile->gpu_device = gpu_info.device;
-        profile->gpu_fallback_reason = gpu_info.fallback_reason;
-        profile->gpu_upload_ms = gpu_info.upload_ms;
-        profile->gpu_kernel_ms = gpu_info.kernel_ms;
-        profile->gpu_readback_ms = gpu_info.readback_ms;
-        profile->gpu_sample_count = gpu_info.sample_count;
-    }
+    merge_gpu_profile(
+        profile,
+        gpu_info,
+        "interactive-orientation");
     if (!gpu_used || gpu_outputs.size() != samples.size()) {
         return std::nullopt;
     }
@@ -4194,10 +4181,14 @@ std::optional<std::vector<OrientedSample>> try_gpu_orientation_field(
     }
     if (!finite) {
         if (profile != nullptr) {
-            profile->gpu_compute_used = false;
-            profile->gpu_compute_backend = "cpu-multicore";
-            profile->gpu_fallback_reason =
-                "OpenCL orientation produced non-finite output";
+            if (!profile->gpu_compute_used) {
+                profile->gpu_compute_backend = "cpu-multicore";
+            }
+            if (!profile->gpu_fallback_reason.empty()) {
+                profile->gpu_fallback_reason += "; ";
+            }
+            profile->gpu_fallback_reason +=
+                "interactive-orientation: OpenCL produced non-finite output";
         }
         return std::nullopt;
     }
@@ -4235,17 +4226,13 @@ std::vector<OrientedSample> orientation_field(
         gpu::ExecutionInfo availability_info;
         const bool would_attempt =
             gpu::should_attempt_orientation(samples.size(), availability_info);
-        if (profile != nullptr) {
-            profile->gpu_compute_requested = availability_info.requested;
-            profile->gpu_compute_available = availability_info.available;
-            profile->gpu_compute_used = false;
-            profile->gpu_compute_backend = availability_info.backend;
-            profile->gpu_device = availability_info.device;
-            profile->gpu_sample_count = availability_info.sample_count;
-            profile->gpu_fallback_reason = would_attempt
-                ? "Surface-connected Guide Falloff requires the CPU exact preview path"
-                : availability_info.fallback_reason;
-        }
+        availability_info.fallback_reason = would_attempt
+            ? "Surface-connected Guide Falloff requires the CPU exact preview path"
+            : availability_info.fallback_reason;
+        merge_gpu_profile(
+            profile,
+            availability_info,
+            "interactive-orientation");
     } else if (interactive_gpu_eligible) {
         auto gpu_result = try_gpu_orientation_field(
             samples, settings, guides, profile);
