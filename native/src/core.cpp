@@ -653,7 +653,7 @@ struct PreparedGuide {
     Vec3 bounds_min{};
     Vec3 bounds_max{};
     double radius{1.0};
-    double falloff{2.0};
+    double falloff{1.0};
     double total_length{0.0};
     std::size_t anchor_segment_count{0U};
     std::vector<PreparedCurveSegment> segments;
@@ -678,7 +678,7 @@ PreparedGuides prepare_guides(const std::vector<Guide>& guides) {
         prepared.fallback_point = guide.points.empty() ? Vec3{} : guide.points.front();
         prepared.fallback_tangent = normalize(guide.direction, {1.0, 0.0, 0.0});
         prepared.radius = std::max(1.0e-6, guide.radius);
-        prepared.falloff = clamp(guide.falloff, 0.1, 8.0);
+        prepared.falloff = clamp(guide.falloff, 0.0, 1.0);
         if (guide.points.empty()) {
             prepared.bounds_min = prepared.fallback_point;
             prepared.bounds_max = prepared.fallback_point;
@@ -822,10 +822,20 @@ double guide_influence_from_distance(
     if (distance >= radius) {
         return 0.0;
     }
-    const double normalized_distance = clamp(distance / radius, 0.0, 1.0);
-    const double smooth = 1.0 - normalized_distance * normalized_distance *
-                                    (3.0 - 2.0 * normalized_distance);
-    return std::pow(std::max(0.0, smooth), guide.falloff);
+    const double falloff_width = clamp(guide.falloff, 0.0, 1.0);
+    if (falloff_width <= kEpsilon) {
+        return 1.0;
+    }
+    const double full_effect_radius = radius * (1.0 - falloff_width);
+    if (distance <= full_effect_radius) {
+        return 1.0;
+    }
+    const double normalized_falloff = clamp(
+        (distance - full_effect_radius) / (radius - full_effect_radius),
+        0.0,
+        1.0);
+    return 1.0 - normalized_falloff * normalized_falloff *
+                     (3.0 - 2.0 * normalized_falloff);
 }
 
 double guide_influence(
