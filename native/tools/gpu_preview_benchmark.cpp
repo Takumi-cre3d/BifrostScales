@@ -80,7 +80,9 @@ double median(std::vector<double> values) {
 
 struct Measurement {
     bifrost_scales::GenerationResult result;
+    double distribution_ms{0.0};
     double orientation_ms{0.0};
+    double total_ms{0.0};
 };
 
 Measurement measure(
@@ -95,8 +97,15 @@ Measurement measure(
         settings,
         bifrost_scales::PreviewMode::Interactive,
         guides);
+    const double distribution_ms = result.profile.distribution_ms;
     const double orientation_ms = result.profile.orientation_ms;
-    return {std::move(result), orientation_ms};
+    const double total_ms = result.profile.total_ms;
+    return {
+        std::move(result),
+        distribution_ms,
+        orientation_ms,
+        total_ms,
+    };
 }
 
 }  // namespace
@@ -117,20 +126,28 @@ int main(int argc, char** argv) {
     settings.direction_relax_iterations = 0U;
     set_environment("BIFROST_SCALES_CPU_THREADS", "8");
 
-    std::vector<double> cpu_times;
-    std::vector<double> gpu_times;
+    std::vector<double> cpu_distribution_times;
+    std::vector<double> gpu_distribution_times;
+    std::vector<double> cpu_orientation_times;
+    std::vector<double> gpu_orientation_times;
+    std::vector<double> cpu_total_times;
+    std::vector<double> gpu_total_times;
     Measurement cpu;
     Measurement gpu;
     for (std::uint32_t iteration = 0U; iteration < 5U; ++iteration) {
         cpu = measure(mesh, settings, guides, "off");
-        cpu_times.push_back(cpu.orientation_ms);
+        cpu_distribution_times.push_back(cpu.distribution_ms);
+        cpu_orientation_times.push_back(cpu.orientation_ms);
+        cpu_total_times.push_back(cpu.total_ms);
     }
     // The first forced request creates the OpenCL context and builds the
     // program. Exclude that one-time warm-up from steady-state timing.
     gpu = measure(mesh, settings, guides, "force");
     for (std::uint32_t iteration = 0U; iteration < 5U; ++iteration) {
         gpu = measure(mesh, settings, guides, "force");
-        gpu_times.push_back(gpu.orientation_ms);
+        gpu_distribution_times.push_back(gpu.distribution_ms);
+        gpu_orientation_times.push_back(gpu.orientation_ms);
+        gpu_total_times.push_back(gpu.total_ms);
     }
 
     set_environment("BIFROST_SCALES_GPU", "off");
@@ -146,11 +163,15 @@ int main(int argc, char** argv) {
         settled_cpu.mesh.faces == settled_force.mesh.faces &&
         settled_cpu.mesh.cell_ids == settled_force.mesh.cell_ids;
 
-    const double cpu_median = median(cpu_times);
-    const double gpu_median = median(gpu_times);
+    const double cpu_distribution_median = median(cpu_distribution_times);
+    const double gpu_distribution_median = median(gpu_distribution_times);
+    const double cpu_orientation_median = median(cpu_orientation_times);
+    const double gpu_orientation_median = median(gpu_orientation_times);
+    const double cpu_total_median = median(cpu_total_times);
+    const double gpu_total_median = median(gpu_total_times);
     std::cout.imbue(std::locale::classic());
     std::cout << std::fixed << std::setprecision(6)
-              << "{\"schema\":\"bifrost-scales/gpu-preview-benchmark/1\""
+              << "{\"schema\":\"bifrost-scales/gpu-preview-benchmark/2\""
               << ",\"requested\":" << requested
               << ",\"accepted\":" << gpu.result.report.accepted_count
               << ",\"gpu_requested\":"
@@ -159,8 +180,14 @@ int main(int argc, char** argv) {
               << (gpu.result.profile.gpu_compute_available ? "true" : "false")
               << ",\"gpu_used\":"
               << (gpu.result.profile.gpu_compute_used ? "true" : "false")
-              << ",\"cpu_orientation_ms\":" << cpu_median
-              << ",\"gpu_orientation_ms\":" << gpu_median
+              << ",\"cpu_distribution_ms\":" << cpu_distribution_median
+              << ",\"gpu_distribution_ms\":" << gpu_distribution_median
+              << ",\"cpu_orientation_ms\":" << cpu_orientation_median
+              << ",\"gpu_orientation_ms\":" << gpu_orientation_median
+              << ",\"cpu_total_ms\":" << cpu_total_median
+              << ",\"gpu_total_ms\":" << gpu_total_median
+              << ",\"gpu_backend\":\""
+              << gpu.result.profile.gpu_compute_backend << "\""
               << ",\"gpu_upload_ms\":" << gpu.result.profile.gpu_upload_ms
               << ",\"gpu_kernel_ms\":" << gpu.result.profile.gpu_kernel_ms
               << ",\"gpu_readback_ms\":" << gpu.result.profile.gpu_readback_ms
