@@ -477,7 +477,8 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         self.guide_use_direction = QtWidgets.QCheckBox("Direction")
         self.guide_use_mask = QtWidgets.QCheckBox("Mask")
         self.guide_use_mask.setToolTip(
-            "中心は非配置、外周はFalloffに従って徐々に鱗が減ります。"
+            "Range内の完成Cellからメッシュ出力だけを除外します。"
+            "FalloffはRangeに対する減衰幅です。"
             "Mask GuideはViewportでマゼンタ表示されます。"
         )
         role_layout.addWidget(self.guide_use_density)
@@ -491,7 +492,10 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             0.000001, 1000000.0, 1.0, decimals=5, mapping="log"
         )
         form.addRow("Range", self.guide_radius)
-        self.guide_falloff = FloatParameterControl(0.1, 8.0, 2.0, decimals=3)
+        self.guide_falloff = FloatParameterControl(0.0, 1.0, 1.0, decimals=3)
+        self.guide_falloff.setToolTip(
+            "0: Range全域で完全効果。1: 中心からRange外端まで全域で減衰。"
+        )
         form.addRow("Falloff", self.guide_falloff)
         self.guide_density_multiplier = FloatParameterControl(
             0.0, 16.0, 1.75, decimals=3
