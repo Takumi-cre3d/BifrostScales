@@ -34,20 +34,17 @@ Bifrost Scales is a procedural scale-generation tool for Autodesk Maya 2026 and 
 
 ## Execution model
 
-Settled output uses the deterministic CPU-exact path. Interactive orientation can use OpenCL when the workload crosses the configured threshold and falls back to multicore CPU automatically.
+Settled output keeps the deterministic CPU-exact path. Interactive Distribution evaluates compact, deterministic, prefix-stable surface candidates in parallel and arbitrates spatial conflicts with OpenCL. It falls back automatically to the same-priority CPU reference when GPU execution is unavailable. CPU-authored open-boundary and Guide-curve anchors, surface-connected Guide fields, Stable Cell IDs, and post-Cell Mask filtering remain intact.
 
-The interactive distribution foundation contains two host-independent contracts:
+- `bifrost-scales/interactive-candidate-batch/1`: production Interactive surface candidates
+- `bifrost-scales/interactive-conflict-reference/1`: deterministic CPU fallback
+- `bifrost-scales/interactive-conflict-gpu/1`: exact-priority parallel OpenCL arbitration
 
-- `bifrost-scales/interactive-candidate-batch/1`: compact, deterministic, prefix-stable surface candidates
-- `bifrost-scales/interactive-conflict-reference/1`: deterministic CPU reference for density/mask gates and spatial conflict arbitration
-- `bifrost-scales/interactive-conflict-gpu/1`: exact-priority parallel OpenCL arbitration with automatic CPU-reference fallback
-
-These contracts are not connected to the Maya runtime yet. They cannot modify settled geometry, the Stage Cache, or Stable Cell IDs. GPU conflict arbitration uses an 8,192-candidate automatic crossover by default; `BIFROST_SCALES_GPU_MIN_CANDIDATES` overrides it.
+GPU conflict arbitration uses an 8,192-candidate automatic crossover by default; `BIFROST_SCALES_GPU_MIN_CANDIDATES` overrides it.
 
 ## Current limitations
 
 - Final and Bake controls remain hidden until their native contracts are complete.
-- Interactive distribution GPU arbitration is host-independent and is not connected to the Maya runtime.
 - Source builds require the Maya 2026 and Bifrost SDK development environment.
 
 ## Build and test

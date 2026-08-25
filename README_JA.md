@@ -34,20 +34,17 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 
 ## 実行モデル
 
-Settled出力は決定的CPU exact経路を使用します。Interactive Orientationは処理量が閾値を超えるとOpenCLを使用でき、利用できない場合はマルチコアCPUへ自動fallbackします。
+Settled出力は従来の決定的CPU exact経路を使用します。Interactive Distributionはcompact・決定的・prefix-stableなSurface Candidateを並列評価し、空間競合をOpenCLで裁定します。GPUを利用できない場合は同じ優先規則のCPU referenceへ自動fallbackします。CPUで生成するOpen Boundary／Guide Curve Anchor、表面接続Guide Field、Stable Cell ID、Maskのpost-Cell出力制御は維持されます。
 
-Interactive Distribution基盤には、Host非依存の2つのContractがあります。
+- `bifrost-scales/interactive-candidate-batch/1`: production Interactive Surface Candidate
+- `bifrost-scales/interactive-conflict-reference/1`: 決定的CPU fallback
+- `bifrost-scales/interactive-conflict-gpu/1`: CPUと同じ優先規則を保つ並列OpenCL裁定
 
-- `bifrost-scales/interactive-candidate-batch/1`: compact、決定的、prefix-stableなSurface Candidate
-- `bifrost-scales/interactive-conflict-reference/1`: Density／Mask gateと空間競合裁定の決定的CPU reference
-- `bifrost-scales/interactive-conflict-gpu/1`: CPUと同じ優先規則を保つ並列OpenCL裁定と自動CPU-reference fallback
-
-これらのContractはMaya Runtimeへ未接続です。Settled Geometry、Stage Cache、Stable Cell IDは変更しません。GPU Conflictの自動Crossoverは既定8,192候補で、`BIFROST_SCALES_GPU_MIN_CANDIDATES`から上書きできます。
+GPU Conflictの自動Crossoverは既定8,192候補で、`BIFROST_SCALES_GPU_MIN_CANDIDATES`から上書きできます。
 
 ## 現在の制限
 
 - Final／BakeはNative契約が完成するまでUIへ公開していません。
-- Interactive Distribution GPU裁定はHost非依存であり、Maya Runtimeへ未接続です。
 - 製品Native buildにはMaya 2026とBifrost SDKの開発環境が必要です。
 
 ## BuildとTest

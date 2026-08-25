@@ -176,6 +176,13 @@ def test_build_info_records_the_native_only_boundary():
     )
     assert info["gpu_generation_compute"] is True
     assert info["gpu_failure_policy"] == "automatic-cpu-multicore-fallback"
+    assert info["interactive_candidate_batch_runtime_enabled"] is True
+    assert info["interactive_conflict_reference_runtime_enabled"] is True
+    assert info["interactive_conflict_gpu_runtime_enabled"] is True
+    assert info["interactive_distribution_candidate_multiplier"] == 4
+    assert info["interactive_distribution_preserves_cpu_anchors"] is True
+    assert info["interactive_distribution_mask_stage"] == "post-cell-shape-only"
+    assert info["settled_distribution_unchanged"] is True
     assert info["open_boundary_density_adaptive"] is True
     assert info["native_stage_cache"] == (
         "process-shared-bounded-lru-exact-dual-hash"
@@ -200,6 +207,21 @@ def test_build_info_records_the_native_only_boundary():
     assert info["installer_native_preservation_scope"] == "installed-pack-only"
     assert info["installer_discards_transient_bifrost_out"] is True
     assert info["installer_revision"] == 2
+
+
+def test_interactive_distribution_uses_candidate_gpu_runtime_only():
+    core = (ROOT / "native/src/core.cpp").read_text(encoding="utf-8")
+    preview = (
+        ROOT / "native/include/bifrost_scales/preview_distribution.hpp"
+    ).read_text(encoding="utf-8")
+
+    assert '#include "bifrost_scales/preview_distribution.hpp"' in core
+    assert "mode == PreviewMode::Interactive && samples.size() < count" in core
+    assert "build_interactive_candidate_batch(mesh, settings, candidate_count)" in core
+    assert "arbitrate_interactive_candidates_accelerated(" in core
+    assert '"interactive-distribution"' in core
+    assert "mode != PreviewMode::Interactive" in core
+    assert "Settled output never uses this API" in preview
 
 
 def test_guide_falloff_is_a_normalized_width_inside_range():

@@ -17,10 +17,9 @@ inline constexpr const char* kInteractiveConflictGpuSchema =
     "bifrost-scales/interactive-conflict-gpu/1";
 inline constexpr std::size_t kInteractiveCandidateRandomStride = 6U;
 
-// GPU-transfer-friendly stochastic surface candidates for Interactive
-// Distribution. Boundary and authored Guide anchors intentionally remain in
-// the exact CPU path. Calling this API never mutates the Stage Cache or changes
-// settled output.
+// GPU-transfer-friendly stochastic surface candidates for production
+// Interactive Distribution. Boundary and authored Guide anchors remain on the
+// CPU and are inserted before this stream. Settled output never uses this API.
 struct InteractiveCandidateBatch {
     std::uint64_t seed{0U};
     std::uint32_t candidate_count{0U};
@@ -47,9 +46,9 @@ struct InteractiveCandidateFields {
         std::size_t candidate_count) const noexcept;
 };
 
-// Deterministic CPU reference for the future GPU conflict pass. Candidate
-// ordinal is the priority order; accepted indices therefore remain a prefix-
-// stable decision stream when candidate_count grows.
+// Deterministic CPU fallback for production GPU conflict arbitration.
+ // Candidate ordinal is the priority order; accepted indices therefore remain
+// a prefix-stable decision stream when candidate_count grows.
 struct InteractiveConflictResult {
     std::uint32_t considered_count{0U};
     std::uint32_t accepted_count{0U};
@@ -75,7 +74,8 @@ InteractiveCandidateBatch build_interactive_candidate_batch(
 
 // Applies density/mask stochastic gates, then deterministic spatial conflict
 // arbitration. Processing stops after max_accepted candidates have won.
-// This reference is Preview-only and never calls or mutates distribute().
+// This reference is Preview-only; production distribute() selects it
+// automatically whenever OpenCL arbitration is unavailable.
 InteractiveConflictResult arbitrate_interactive_candidates(
     const InteractiveCandidateBatch& batch,
     const Settings& settings,
@@ -85,7 +85,7 @@ InteractiveConflictResult arbitrate_interactive_candidates(
 // Attempts the OpenCL conflict kernel under BIFROST_SCALES_GPU policy and
 // falls back to the CPU reference on every unavailable or invalid GPU result.
 // The current correctness kernel preserves ordinal priority exactly and is
-// intentionally isolated from the Maya runtime.
+// used by the Maya runtime only for Interactive Distribution.
 InteractiveConflictResult arbitrate_interactive_candidates_accelerated(
     const InteractiveCandidateBatch& batch,
     const Settings& settings,
