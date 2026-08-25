@@ -16,18 +16,12 @@ from .parameter_controls import FloatParameterControl, IntParameterControl
 from .qt_compat import QtCore, QtWidgets
 from .qt_scheduler import QtPreviewScheduler
 from .scheduler import ChangeCategory
-from .settings import (
-    ScaleSettings,
-    ScaleTypeSettings,
-    UniqueScaleOverride,
-    UniqueScaleRegistration,
-)
+from .settings import ScaleSettings, ScaleTypeSettings
 from .version import VERSION
 
 _WINDOW = None
 _GUIDE_NODE_ROLE = int(QtCore.Qt.UserRole)
 _GUIDE_ITEM_KIND_ROLE = _GUIDE_NODE_ROLE + 1
-_UNIQUE_CELL_ID_ROLE = _GUIDE_ITEM_KIND_ROLE + 1
 
 
 class _GuideTreeWidget(QtWidgets.QTreeWidget):
@@ -59,8 +53,6 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         self._inactivity.timeout.connect(self._finish_interaction)
         self._updating_widgets = False
         self._scale_types = list(ScaleSettings().scale_types)
-        self._unique_scales: list[UniqueScaleRegistration] = []
-        self._unique_scale_statuses: dict[str, str] = {}
         self._guide_nodes: list[str] = []
         self._guide_data_by_node = {}
         self._guide_group_nodes: list[str] = []
@@ -118,7 +110,6 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         self._build_global_tab()
         self._build_guides_tab()
         self._build_scale_types_tab()
-        self._build_unique_scales_tab()
         self._build_preview_tab()
         self._build_maintenance_tab()
 
@@ -739,137 +730,6 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         outer.addWidget(scroll, 1)
         self.tabs.addTab(tab, "Scale Types")
 
-    def _build_unique_scales_tab(self) -> None:
-        tab = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(tab)
-        note = QtWidgets.QLabel(
-            "Native Cell Pickerでセルを選択して登録します。Stable Cell IDで保存されるため、"
-            "配列IndexやMaya Face選択には依存しません。"
-        )
-        note.setWordWrap(True)
-        layout.addWidget(note)
-
-        self.unique_scale_list = QtWidgets.QListWidget()
-        self.unique_scale_list.setSelectionMode(
-            QtWidgets.QAbstractItemView.ExtendedSelection
-        )
-        self.unique_scale_list.setAlternatingRowColors(True)
-        layout.addWidget(self.unique_scale_list, 1)
-
-        buttons = QtWidgets.QGridLayout()
-        self.register_unique_scale_button = QtWidgets.QPushButton(
-            "選択セルを登録"
-        )
-        self.unregister_unique_scale_button = QtWidgets.QPushButton(
-            "登録解除"
-        )
-        self.refresh_unique_scale_status_button = QtWidgets.QPushButton(
-            "状態を確認"
-        )
-        self.rebind_unique_scale_button = QtWidgets.QPushButton(
-            "選択セルへ再バインド"
-        )
-        buttons.addWidget(self.register_unique_scale_button, 0, 0)
-        buttons.addWidget(self.unregister_unique_scale_button, 0, 1)
-        buttons.addWidget(self.refresh_unique_scale_status_button, 1, 0)
-        buttons.addWidget(self.rebind_unique_scale_button, 1, 1)
-        layout.addLayout(buttons)
-
-        override_group = QtWidgets.QGroupBox("Unique Override Authoring")
-        override_form = QtWidgets.QFormLayout(override_group)
-        override_note = QtWidgets.QLabel(
-            "0.10.0では個別値の編集・Undo・Scene保存までを提供します。"
-            "Native Previewへの形状適用は次のNative契約更新で有効化します。"
-        )
-        override_note.setWordWrap(True)
-        override_form.addRow(override_note)
-
-        self.unique_override_enabled = QtWidgets.QCheckBox(
-            "Overrideを有効として保存"
-        )
-        override_form.addRow(self.unique_override_enabled)
-
-        def offset_spin():
-            widget = QtWidgets.QDoubleSpinBox()
-            widget.setRange(-2.0, 2.0)
-            widget.setDecimals(4)
-            widget.setSingleStep(0.05)
-            widget.setKeyboardTracking(False)
-            return widget
-
-        def multiplier_spin():
-            widget = QtWidgets.QDoubleSpinBox()
-            widget.setRange(0.05, 8.0)
-            widget.setDecimals(4)
-            widget.setSingleStep(0.05)
-            widget.setValue(1.0)
-            widget.setKeyboardTracking(False)
-            return widget
-
-        self.unique_override_offset_u = offset_spin()
-        self.unique_override_offset_v = offset_spin()
-        self.unique_override_offset_normal = offset_spin()
-        self.unique_override_rotation = QtWidgets.QDoubleSpinBox()
-        self.unique_override_rotation.setRange(-180.0, 180.0)
-        self.unique_override_rotation.setDecimals(3)
-        self.unique_override_rotation.setSingleStep(1.0)
-        self.unique_override_rotation.setSuffix(" deg")
-        self.unique_override_rotation.setKeyboardTracking(False)
-        self.unique_override_size = multiplier_spin()
-        self.unique_override_width = multiplier_spin()
-        self.unique_override_length = multiplier_spin()
-
-        self.unique_override_sides = QtWidgets.QSpinBox()
-        self.unique_override_sides.setRange(0, 64)
-        self.unique_override_sides.setSpecialValueText("Inherit")
-        self.unique_override_sides.setValue(0)
-        self.unique_override_divisions = QtWidgets.QSpinBox()
-        self.unique_override_divisions.setRange(0, 6)
-        self.unique_override_divisions.setSpecialValueText("Inherit")
-        self.unique_override_divisions.setValue(0)
-
-        override_form.addRow("Offset U (cell spacing)", self.unique_override_offset_u)
-        override_form.addRow("Offset V (cell spacing)", self.unique_override_offset_v)
-        override_form.addRow(
-            "Offset Normal (cell spacing)",
-            self.unique_override_offset_normal,
-        )
-        override_form.addRow("Rotation", self.unique_override_rotation)
-        override_form.addRow("Size", self.unique_override_size)
-        override_form.addRow("Width", self.unique_override_width)
-        override_form.addRow("Length", self.unique_override_length)
-        override_form.addRow("Sides", self.unique_override_sides)
-        override_form.addRow("Divisions", self.unique_override_divisions)
-
-        override_buttons = QtWidgets.QHBoxLayout()
-        self.select_picker_unique_scales_button = QtWidgets.QPushButton(
-            "Picker選択を一覧へ反映"
-        )
-        self.apply_unique_override_button = QtWidgets.QPushButton(
-            "選択登録へ適用"
-        )
-        self.reset_unique_override_button = QtWidgets.QPushButton(
-            "選択登録をリセット"
-        )
-        override_buttons.addWidget(self.select_picker_unique_scales_button)
-        override_buttons.addWidget(self.apply_unique_override_button)
-        override_buttons.addWidget(self.reset_unique_override_button)
-        override_form.addRow(override_buttons)
-
-        self.unique_override_selection_label = QtWidgets.QLabel(
-            "Unique Scale一覧から1つ以上選択してください。"
-        )
-        self.unique_override_selection_label.setWordWrap(True)
-        override_form.addRow(self.unique_override_selection_label)
-        layout.addWidget(override_group)
-
-        self.unique_scale_status_label = QtWidgets.QLabel(
-            "未確認。登録後または状態確認時にStable Cell IDを照合します。"
-        )
-        self.unique_scale_status_label.setWordWrap(True)
-        layout.addWidget(self.unique_scale_status_label)
-        self.tabs.addTab(tab, "Unique Scales")
-
     def _build_preview_tab(self) -> None:
         tab = QtWidgets.QWidget()
         form = QtWidgets.QFormLayout(tab)
@@ -998,31 +858,6 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         self.native_probe_button.clicked.connect(self._probe_native_backend)
         self.native_rebuild_graph_button.clicked.connect(self._rebuild_native_graph)
         self.native_delete_graph_button.clicked.connect(self._delete_native_graph)
-        self.register_unique_scale_button.clicked.connect(
-            self._register_selected_unique_scales
-        )
-        self.unregister_unique_scale_button.clicked.connect(
-            self._unregister_selected_unique_scales
-        )
-        self.refresh_unique_scale_status_button.clicked.connect(
-            self._refresh_unique_scale_status
-        )
-        self.rebind_unique_scale_button.clicked.connect(
-            self._rebind_selected_unique_scale
-        )
-        self.unique_scale_list.itemSelectionChanged.connect(
-            self._unique_scale_selection_changed
-        )
-        self.select_picker_unique_scales_button.clicked.connect(
-            self._select_picker_unique_scales_in_list
-        )
-        self.apply_unique_override_button.clicked.connect(
-            self._apply_selected_unique_override
-        )
-        self.reset_unique_override_button.clicked.connect(
-            self._reset_selected_unique_override
-        )
-
         for widget in (
             self.target_count,
             self.seed,
@@ -1339,7 +1174,6 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             "cell_projection_rings": self.cell_projection_rings.value(),
             "cell_project_to_surface": self.cell_project_to_surface.isChecked(),
             "scale_types": [asdict(item) for item in self._scale_types],
-            "unique_scales": [asdict(item) for item in self._unique_scales],
             "interactive_budget": self.interactive_budget.value(),
             "settled_budget": self.settled_budget.value(),
             "interactive_delay_ms": self.interactive_delay.value(),
@@ -1390,11 +1224,6 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             self.cell_projection_rings.setValue(settings.cell_projection_rings)
             self.cell_project_to_surface.setChecked(settings.cell_project_to_surface)
             self._scale_types = list(settings.scale_types)
-            self._unique_scales = list(settings.unique_scales)
-            self._unique_scale_statuses = {
-                item.cell_id: self._unique_scale_statuses.get(item.cell_id, "unchecked")
-                for item in self._unique_scales
-            }
             self._guide_link_undo_sync = False
             self.interactive_budget.setValue(settings.interactive_budget)
             self.settled_budget.setValue(settings.settled_budget)
@@ -1407,340 +1236,10 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                 settings.color_b,
             )
             self._refresh_scale_type_list(select_row=0)
-            self._refresh_unique_scale_list()
         finally:
             self._updating_widgets = False
         self._refresh_guides()
         self._configure_delays()
-
-    def _refresh_unique_scale_list(self) -> None:
-        if not hasattr(self, "unique_scale_list"):
-            return
-        selected = set(self._selected_unique_cell_ids())
-        self.unique_scale_list.blockSignals(True)
-        try:
-            self.unique_scale_list.clear()
-            resolved_count = 0
-            orphaned_count = 0
-            for registration in self._unique_scales:
-                status = self._unique_scale_statuses.get(
-                    registration.cell_id,
-                    "unchecked",
-                )
-                if status == "resolved":
-                    marker = "OK"
-                    resolved_count += 1
-                elif status == "orphaned":
-                    marker = "ORPHAN"
-                    orphaned_count += 1
-                else:
-                    marker = "?"
-                override_marker = " OVR" if registration.override.is_authored() else ""
-                item = QtWidgets.QListWidgetItem(
-                    "{}  [{}{}]\n{}".format(
-                        registration.name,
-                        marker,
-                        override_marker,
-                        registration.cell_id,
-                    )
-                )
-                item.setData(_UNIQUE_CELL_ID_ROLE, registration.cell_id)
-                item.setToolTip(
-                    "Triangle {} / Boundary {} / Topology {} / Override {}".format(
-                        registration.triangle_index,
-                        registration.boundary_signature,
-                        registration.topology_hash,
-                        "enabled" if registration.override.enabled else "stored",
-                    )
-                )
-                self.unique_scale_list.addItem(item)
-                item.setSelected(registration.cell_id in selected)
-            unchecked = len(self._unique_scales) - resolved_count - orphaned_count
-            self.unique_scale_status_label.setText(
-                "登録 {} / 解決 {} / 孤立 {} / 未確認 {}".format(
-                    len(self._unique_scales),
-                    resolved_count,
-                    orphaned_count,
-                    unchecked,
-                )
-            )
-        finally:
-            self.unique_scale_list.blockSignals(False)
-        self._unique_scale_selection_changed()
-
-    def _selected_unique_cell_ids(self) -> tuple[str, ...]:
-        if not hasattr(self, "unique_scale_list"):
-            return ()
-        return tuple(
-            str(item.data(_UNIQUE_CELL_ID_ROLE) or "")
-            for item in self.unique_scale_list.selectedItems()
-            if item.data(_UNIQUE_CELL_ID_ROLE)
-        )
-
-    @QtCore.Slot()
-    def _register_selected_unique_scales(self) -> None:
-        self._finish_guide_interaction()
-        if self.backend.binding is None:
-            self._append("Systemを先に作成してください")
-            return
-        try:
-            settings, added = self.backend.register_selected_unique_scales(
-                mode="settled"
-            )
-            self._unique_scales = list(settings.unique_scales)
-            for item in added:
-                self._unique_scale_statuses[item.cell_id] = "resolved"
-            self._refresh_unique_scale_list()
-            self._append(
-                "Unique Scale登録: {}件（合計{}件）".format(
-                    len(added),
-                    len(self._unique_scales),
-                )
-            )
-        except Exception as exc:
-            self._append("Unique Scale登録失敗: {}".format(exc))
-
-    @QtCore.Slot()
-    def _unregister_selected_unique_scales(self) -> None:
-        cell_ids = self._selected_unique_cell_ids()
-        if not cell_ids:
-            self._append("解除するUnique Scaleを一覧から選択してください")
-            return
-        try:
-            settings = self.backend.unregister_unique_scales(cell_ids)
-            self._unique_scales = list(settings.unique_scales)
-            for cell_id in cell_ids:
-                self._unique_scale_statuses.pop(cell_id, None)
-            self._refresh_unique_scale_list()
-            self._append("Unique Scale登録解除: {}件".format(len(cell_ids)))
-        except Exception as exc:
-            self._append("Unique Scale登録解除失敗: {}".format(exc))
-
-    @QtCore.Slot()
-    def _refresh_unique_scale_status(self) -> None:
-        if self.backend.binding is None:
-            self._append("Systemを先に作成してください")
-            return
-        try:
-            self._unique_scale_statuses = self.backend.unique_scale_status(
-                mode="settled"
-            )
-            self._refresh_unique_scale_list()
-            orphaned = sum(
-                status == "orphaned"
-                for status in self._unique_scale_statuses.values()
-            )
-            self._append(
-                "Unique Scale状態確認: {}件中、孤立{}件".format(
-                    len(self._unique_scales),
-                    orphaned,
-                )
-            )
-        except Exception as exc:
-            self._append("Unique Scale状態確認失敗: {}".format(exc))
-
-    @QtCore.Slot()
-    def _rebind_selected_unique_scale(self) -> None:
-        selected = self._selected_unique_cell_ids()
-        if len(selected) != 1:
-            self._append("再バインドするUnique Scaleを一覧から1つ選択してください")
-            return
-        try:
-            rebound = self.backend.rebind_unique_scale(
-                selected[0],
-                mode="settled",
-            )
-            settings = self.backend.read_settings()
-            self._unique_scales = list(settings.unique_scales)
-            self._unique_scale_statuses.pop(selected[0], None)
-            self._unique_scale_statuses[rebound.cell_id] = "resolved"
-            self._refresh_unique_scale_list()
-            self._append(
-                "Unique Scale再バインド: {} -> {}".format(
-                    selected[0],
-                    rebound.cell_id,
-                )
-            )
-        except Exception as exc:
-            self._append("Unique Scale再バインド失敗: {}".format(exc))
-
-    def _unique_registration_by_id(
-        self,
-        cell_id: str,
-    ) -> UniqueScaleRegistration | None:
-        for registration in self._unique_scales:
-            if registration.cell_id == cell_id:
-                return registration
-        return None
-
-    def _unique_override_widgets(self):
-        return (
-            self.unique_override_enabled,
-            self.unique_override_offset_u,
-            self.unique_override_offset_v,
-            self.unique_override_offset_normal,
-            self.unique_override_rotation,
-            self.unique_override_size,
-            self.unique_override_width,
-            self.unique_override_length,
-            self.unique_override_sides,
-            self.unique_override_divisions,
-            self.select_picker_unique_scales_button,
-            self.apply_unique_override_button,
-            self.reset_unique_override_button,
-        )
-
-    def _set_unique_override_widgets(
-        self,
-        override: UniqueScaleOverride,
-    ) -> None:
-        widgets = (
-            self.unique_override_enabled,
-            self.unique_override_offset_u,
-            self.unique_override_offset_v,
-            self.unique_override_offset_normal,
-            self.unique_override_rotation,
-            self.unique_override_size,
-            self.unique_override_width,
-            self.unique_override_length,
-            self.unique_override_sides,
-            self.unique_override_divisions,
-        )
-        for widget in widgets:
-            widget.blockSignals(True)
-        try:
-            self.unique_override_enabled.setChecked(override.enabled)
-            self.unique_override_offset_u.setValue(override.offset_u)
-            self.unique_override_offset_v.setValue(override.offset_v)
-            self.unique_override_offset_normal.setValue(override.offset_normal)
-            self.unique_override_rotation.setValue(override.rotation_degrees)
-            self.unique_override_size.setValue(override.size_multiplier)
-            self.unique_override_width.setValue(override.width_multiplier)
-            self.unique_override_length.setValue(override.length_multiplier)
-            self.unique_override_sides.setValue(override.sides)
-            self.unique_override_divisions.setValue(override.divisions)
-        finally:
-            for widget in widgets:
-                widget.blockSignals(False)
-
-    def _unique_override_from_widgets(self) -> UniqueScaleOverride:
-        return UniqueScaleOverride.from_mapping(
-            {
-                "enabled": self.unique_override_enabled.isChecked(),
-                "offset_u": self.unique_override_offset_u.value(),
-                "offset_v": self.unique_override_offset_v.value(),
-                "offset_normal": self.unique_override_offset_normal.value(),
-                "rotation_degrees": self.unique_override_rotation.value(),
-                "size_multiplier": self.unique_override_size.value(),
-                "width_multiplier": self.unique_override_width.value(),
-                "length_multiplier": self.unique_override_length.value(),
-                "sides": self.unique_override_sides.value(),
-                "divisions": self.unique_override_divisions.value(),
-            }
-        )
-
-    @QtCore.Slot()
-    def _unique_scale_selection_changed(self) -> None:
-        if not hasattr(self, "unique_override_selection_label"):
-            return
-        selected_ids = self._selected_unique_cell_ids()
-        registrations = [
-            item
-            for cell_id in selected_ids
-            for item in [self._unique_registration_by_id(cell_id)]
-            if item is not None
-        ]
-        has_selection = bool(registrations)
-        for widget in self._unique_override_widgets():
-            widget.setEnabled(has_selection or widget is self.select_picker_unique_scales_button)
-        if not registrations:
-            self._set_unique_override_widgets(UniqueScaleOverride())
-            self.unique_override_selection_label.setText(
-                "Unique Scale一覧から1つ以上選択してください。"
-            )
-            return
-
-        first = registrations[0].override
-        self._set_unique_override_widgets(first)
-        mixed = any(item.override != first for item in registrations[1:])
-        if mixed:
-            self.unique_override_selection_label.setText(
-                "{}件選択。値が混在しているため先頭項目を表示しています。適用すると全選択へ同じ値を書き込みます。".format(
-                    len(registrations)
-                )
-            )
-        else:
-            self.unique_override_selection_label.setText(
-                "{}件選択。Overrideは{}です。".format(
-                    len(registrations),
-                    "有効" if first.enabled else "無効（値は保存可能）",
-                )
-            )
-
-    @QtCore.Slot()
-    def _select_picker_unique_scales_in_list(self) -> None:
-        try:
-            from .cell_picker_maya import current_selection_records
-
-            selected_ids = {record.cell_id for record in current_selection_records()}
-        except Exception as exc:
-            self._append("Cell Picker選択取得失敗: {}".format(exc))
-            return
-        if not selected_ids:
-            self._append("Cell Pickerで登録済みセルを1つ以上選択してください")
-            return
-
-        matched = 0
-        self.unique_scale_list.blockSignals(True)
-        try:
-            self.unique_scale_list.clearSelection()
-            for row in range(self.unique_scale_list.count()):
-                item = self.unique_scale_list.item(row)
-                cell_id = str(item.data(_UNIQUE_CELL_ID_ROLE) or "")
-                selected = cell_id in selected_ids
-                item.setSelected(selected)
-                matched += int(selected)
-        finally:
-            self.unique_scale_list.blockSignals(False)
-        self._unique_scale_selection_changed()
-        self._append(
-            "Picker選択をUnique Scale一覧へ反映: {}件".format(matched)
-        )
-
-    @QtCore.Slot()
-    def _apply_selected_unique_override(self) -> None:
-        cell_ids = self._selected_unique_cell_ids()
-        if not cell_ids:
-            self._append("Overrideを適用するUnique Scaleを選択してください")
-            return
-        try:
-            updated = self.backend.set_unique_scale_overrides(
-                cell_ids,
-                self._unique_override_from_widgets(),
-            )
-            self._unique_scales = list(updated.unique_scales)
-            self._refresh_unique_scale_list()
-            self._append(
-                "Unique Override保存: {}件（Native形状適用は次段階）".format(
-                    len(cell_ids)
-                )
-            )
-        except Exception as exc:
-            self._append("Unique Override保存失敗: {}".format(exc))
-
-    @QtCore.Slot()
-    def _reset_selected_unique_override(self) -> None:
-        cell_ids = self._selected_unique_cell_ids()
-        if not cell_ids:
-            self._append("OverrideをリセットするUnique Scaleを選択してください")
-            return
-        try:
-            updated = self.backend.reset_unique_scale_overrides(cell_ids)
-            self._unique_scales = list(updated.unique_scales)
-            self._refresh_unique_scale_list()
-            self._append("Unique Overrideリセット: {}件".format(len(cell_ids)))
-        except Exception as exc:
-            self._append("Unique Overrideリセット失敗: {}".format(exc))
 
     def _current_guide_item(self):
         return self.guide_tree.currentItem()
