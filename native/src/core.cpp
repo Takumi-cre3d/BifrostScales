@@ -881,7 +881,10 @@ double mask_influence(
         if (!guide.source || !guide.source->enabled || !guide.uses_mask) {
             continue;
         }
-        const double influence = clamp(guide_influence(guide, position, 0.0, triangle_index), 0.0, 1.0);
+        const double influence = clamp(
+            guide_influence(guide, position, 0.0, triangle_index),
+            0.0,
+            1.0);
         remaining *= 1.0 - influence;
     }
     return clamp(1.0 - remaining, 0.0, 1.0);
@@ -1039,7 +1042,8 @@ std::pair<double, double> density_factors(
         if (!source.enabled || (!guide.uses_density && !guide.uses_size)) {
             continue;
         }
-        const double influence = guide_influence(guide, position, 0.0, triangle_index);
+        const double influence =
+            guide_influence(guide, position, 0.0, triangle_index);
         if (guide.uses_density) {
             density *= 1.0 +
                 (clamp(source.density_multiplier, 0.0, 16.0) - 1.0) * influence;
@@ -1255,7 +1259,11 @@ double influence_for_id(
             found_exact = true;
             exact = std::max(
                 exact,
-                guide_influence(guide, position, radius_override, triangle_index));
+                guide_influence(
+                    guide,
+                    position,
+                    radius_override,
+                    triangle_index));
         }
     }
     if (found_exact) {
@@ -1269,7 +1277,11 @@ double influence_for_id(
         }
         maximum = std::max(
             maximum,
-            guide_influence(guide, position, radius_override, triangle_index));
+            guide_influence(
+                    guide,
+                    position,
+                    radius_override,
+                    triangle_index));
     }
     return maximum;
 }
@@ -6035,6 +6047,7 @@ DistributionResult distribute(
     const Settings& settings,
     PreviewMode mode,
     const std::vector<Guide>& guides) {
+    validate_mesh(mesh);
     PreparedGuides prepared_guides = prepare_guides(guides);
     prepare_surface_guide_fields(mesh, prepared_guides);
     return distribute_impl(mesh, settings, mode, prepared_guides);
