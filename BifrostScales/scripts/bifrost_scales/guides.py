@@ -38,28 +38,6 @@ SYMMETRY_SPACES = frozenset({"world", "target_local"})
 MASK_HARD_CORE_INFLUENCE = 0.98
 
 
-def _mask_core_fraction(falloff: float) -> float:
-    """Return the normalized distance of the stable no-scale core.
-
-    Mask density fades across the full Guide radius.  Cell geometry is clipped
-    only at a small, near-fully-masked core so it cannot fill the guide center
-    without producing a visible hard boundary through the Falloff region.
-    """
-
-    exponent = max(0.1, min(8.0, float(falloff)))
-    target_smooth = math.pow(MASK_HARD_CORE_INFLUENCE, 1.0 / exponent)
-    lower = 0.0
-    upper = 1.0
-    for _iteration in range(48):
-        middle = 0.5 * (lower + upper)
-        smooth = 1.0 - middle * middle * (3.0 - 2.0 * middle)
-        if smooth > target_smooth:
-            lower = middle
-        else:
-            upper = middle
-    return 0.5 * (lower + upper)
-
-
 def _symmetry_axis(value: object) -> str:
     normalized = str(value).strip().lower()
     return normalized if normalized in SYMMETRY_AXES else "x"
@@ -720,9 +698,10 @@ class GuideSet:
         """Return a stage-specific cache and change-detection fingerprint.
 
         ``links`` covers the geometry and membership used by Scale Type Guide
-        Links, including guides whose Density/Size/Direction effects are off.
-        ``distribution`` covers Density/Size fields plus the Direction Curve
-        centerline-anchor contract.  Names remain presentation-only.
+        Links plus post-Cell Mask visibility, including guides whose
+        Density/Size/Direction effects are off.  ``distribution`` covers
+        Density/Size fields plus the Direction Curve centerline-anchor contract.
+        Names remain presentation-only.
         """
 
         normalized_stage = None if stage is None else str(stage).strip().lower()
@@ -735,7 +714,6 @@ class GuideSet:
                     guide.affects_density
                     or guide.affects_size
                     or (guide.kind.is_curve and guide.affects_direction)
-                    or guide.affects_mask
                 )
             )
             digest = hashlib.blake2b(digest_size=16)
@@ -777,9 +755,6 @@ class GuideSet:
                     # its magnitude affects orientation only. Density and
                     # Poisson spacing decide how many centers survive.
                     digest.update(struct.pack("<?", True))
-                digest.update(struct.pack("<?", guide.affects_mask))
-                if guide.affects_mask:
-                    digest.update(struct.pack("<dd", guide.radius, guide.falloff))
             return digest.hexdigest()
 
         if normalized_stage == "symmetry":
@@ -838,7 +813,7 @@ class GuideSet:
                 if normalized_stage is None:
                     digest.update(struct.pack("<ddd", *guide.direction))
                 digest.update(struct.pack("<dd", guide.strength, guide.angle_degrees))
-            if normalized_stage is None:
+            if normalized_stage in {None, "links"}:
                 digest.update(struct.pack("<?", guide.affects_mask))
         return digest.hexdigest()
 
@@ -1047,11 +1022,11 @@ class GuideSet:
         return max(0.0, min(1.0, 1.0 - remaining))
 
     def mask_acceptance_probability(self, position: Vec3) -> float:
-        """Probability that a distribution candidate survives Mask Falloff.
+        """Probability that a completed Cell emits mesh in Mask Falloff.
 
-        The full Guide radius feathers smoothly from an empty center to the
-        unmasked density.  The stable random stream turns that probability into
-        a deterministic sparse transition rather than a binary cutout.
+        Distribution and Cell topology remain unchanged.  A stable value
+        derived from the internal Cell ID turns this probability into a
+        deterministic sparse mesh-visibility transition.
         """
 
         influence = self.mask_influence(position)
@@ -1063,129 +1038,6 @@ class GuideSet:
         """Return True inside the small stable no-scale hard core."""
 
         return self.mask_influence(position) >= MASK_HARD_CORE_INFLUENCE
-
-    @staticmethod
-    def _ray_sphere_entry(
-        origin: Vec3,
-        direction: Vec3,
-        center: Vec3,
-        radius: float,
-        maximum: float,
-    ) -> float:
-        limit = max(0.0, float(maximum))
-        offset = sub(origin, center)
-        a = max(1.0e-20, dot(direction, direction))
-        b = dot(offset, direction)
-        c = dot(offset, offset) - radius * radius
-        discriminant = b * b - a * c
-        if discriminant < 0.0:
-            return limit
-        entry = (-b - math.sqrt(max(0.0, discriminant))) / a
-        if 0.0 <= entry < limit:
-            return entry
-        return limit
-
-    @classmethod
-    def _ray_capsule_entry(
-        cls,
-        origin: Vec3,
-        direction: Vec3,
-        start: Vec3,
-        end: Vec3,
-        radius: float,
-        maximum: float,
-    ) -> float:
-        """Return exact first entry into a finite segment capsule."""
-
-        limit = max(0.0, float(maximum))
-        ray = normalize(direction, (1.0, 0.0, 0.0))
-        axis = sub(end, start)
-        axis_length_sq = dot(axis, axis)
-        if axis_length_sq <= 1.0e-20:
-            return cls._ray_sphere_entry(
-                origin, ray, start, radius, limit
-            )
-        offset = sub(origin, start)
-        axis_ray = dot(axis, ray)
-        axis_offset = dot(axis, offset)
-        ray_offset = dot(ray, offset)
-        offset_sq = dot(offset, offset)
-        coefficient_a = axis_length_sq - axis_ray * axis_ray
-        coefficient_b = axis_length_sq * ray_offset - axis_offset * axis_ray
-        coefficient_c = (
-            axis_length_sq * offset_sq
-            - axis_offset * axis_offset
-            - radius * radius * axis_length_sq
-        )
-        best = limit
-        if abs(coefficient_a) > 1.0e-20:
-            discriminant = (
-                coefficient_b * coefficient_b
-                - coefficient_a * coefficient_c
-            )
-            if discriminant >= 0.0:
-                entry = (
-                    -coefficient_b
-                    - math.sqrt(max(0.0, discriminant))
-                ) / coefficient_a
-                axial = axis_offset + entry * axis_ray
-                if 0.0 <= entry < best and 0.0 < axial < axis_length_sq:
-                    best = entry
-        best = min(
-            best,
-            cls._ray_sphere_entry(origin, ray, start, radius, best),
-            cls._ray_sphere_entry(origin, ray, end, radius, best),
-        )
-        return best
-
-    def mask_entry_radius(
-        self,
-        origin: Vec3,
-        direction: Vec3,
-        maximum: float,
-    ) -> float:
-        """Return the exact first ray distance entering a Mask hard core.
-
-        Falloff controls stochastic scale removal over the full Guide radius.
-        Cell geometry is clipped only at the near-fully-masked contour,
-        preventing outside cells from filling the center while keeping the
-        visible transition sparse across the full Guide radius.
-        """
-
-        limit = max(0.0, float(maximum))
-        if limit <= 1.0e-12 or not self.mask:
-            return limit
-        if self.is_masked(origin):
-            return 0.0
-        ray = normalize(direction, (1.0, 0.0, 0.0))
-        best = limit
-        for guide in self.mask:
-            core_radius = guide.radius * _mask_core_fraction(guide.falloff)
-            if core_radius <= 1.0e-12:
-                continue
-            points = guide.points
-            if not guide.kind.is_curve or len(points) < 2:
-                best = min(
-                    best,
-                    self._ray_sphere_entry(
-                        origin, ray, points[0], core_radius, best
-                    ),
-                )
-                continue
-            segment_count = len(points) if guide.closed else len(points) - 1
-            for index in range(segment_count):
-                best = min(
-                    best,
-                    self._ray_capsule_entry(
-                        origin,
-                        ray,
-                        points[index],
-                        points[(index + 1) % len(points)],
-                        core_radius,
-                        best,
-                    ),
-                )
-        return best
 
     def influence_for_id(
         self,
