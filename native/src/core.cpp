@@ -10,11 +10,13 @@
 #include <cstring>
 #include <cstdlib>
 #include <exception>
+#include <functional>
 #include <limits>
 #include <iterator>
 #include <memory>
 #include <mutex>
 #include <numeric>
+#include <queue>
 #include <tuple>
 #include <map>
 #include <stdexcept>
@@ -648,6 +650,11 @@ struct PreparedCurveSegment {
     double length{0.0};
 };
 
+struct SurfaceGuideSeed {
+    std::uint32_t triangle_index{0U};
+    Vec3 point{};
+};
+
 struct PreparedGuide {
     const Guide* source{nullptr};
     bool curve{false};
@@ -665,6 +672,9 @@ struct PreparedGuide {
     double total_length{0.0};
     std::size_t anchor_segment_count{0U};
     std::vector<PreparedCurveSegment> segments;
+    const Mesh* surface_mesh{nullptr};
+    std::vector<double> surface_vertex_distances;
+    std::vector<SurfaceGuideSeed> surface_seeds;
 };
 
 using PreparedGuides = std::vector<PreparedGuide>;
@@ -781,6 +791,44 @@ GuideNearest nearest_on_guide(
     return {std::sqrt(best_distance_squared), best_point, best_tangent};
 }
 
+double guide_distance(
+    const PreparedGuide& guide,
+    const Vec3& position,
+    std::uint32_t triangle_index) {
+    const GuideNearest nearest = nearest_on_guide(guide, position);
+    if (guide.surface_mesh == nullptr ||
+        guide.surface_vertex_distances.size() != guide.surface_mesh->vertices.size() ||
+        triangle_index >= guide.surface_mesh->triangles.size()) {
+        return nearest.distance;
+    }
+
+    double best = std::numeric_limits<double>::infinity();
+    const auto first = std::lower_bound(
+        guide.surface_seeds.begin(),
+        guide.surface_seeds.end(),
+        triangle_index,
+        [](const SurfaceGuideSeed& seed, std::uint32_t value) {
+            return seed.triangle_index < value;
+        });
+    for (auto iterator = first;
+         iterator != guide.surface_seeds.end() &&
+         iterator->triangle_index == triangle_index;
+         ++iterator) {
+        best = std::min(best, length(sub(position, iterator->point)));
+    }
+
+    const Triangle& triangle = guide.surface_mesh->triangles[triangle_index];
+    for (const std::uint32_t vertex : {triangle.a, triangle.b, triangle.c}) {
+        const double distance = guide.surface_vertex_distances[vertex];
+        if (std::isfinite(distance)) {
+            best = std::min(
+                best,
+                distance + length(sub(position, guide.surface_mesh->vertices[vertex])));
+        }
+    }
+    return best;
+}
+
 double guide_influence_from_distance(
     const PreparedGuide& guide,
     double distance,
@@ -797,7 +845,8 @@ double guide_influence_from_distance(
 double guide_influence(
     const PreparedGuide& guide,
     const Vec3& position,
-    double radius_override = 0.0) {
+    double radius_override = 0.0,
+    std::uint32_t triangle_index = std::numeric_limits<std::uint32_t>::max()) {
     if (!guide.source || !guide.source->enabled) {
         return 0.0;
     }
@@ -809,19 +858,20 @@ double guide_influence(
     }
     return guide_influence_from_distance(
         guide,
-        nearest_on_guide(guide, position).distance,
+        guide_distance(guide, position, triangle_index),
         radius);
 }
 
 double mask_influence(
     const Vec3& position,
-    const PreparedGuides& guides) {
+    const PreparedGuides& guides,
+    std::uint32_t triangle_index = std::numeric_limits<std::uint32_t>::max()) {
     double remaining = 1.0;
     for (const PreparedGuide& guide : guides) {
         if (!guide.source || !guide.source->enabled || !guide.uses_mask) {
             continue;
         }
-        const double influence = clamp(guide_influence(guide, position), 0.0, 1.0);
+        const double influence = clamp(guide_influence(guide, position, 0.0, triangle_index), 0.0, 1.0);
         remaining *= 1.0 - influence;
     }
     return clamp(1.0 - remaining, 0.0, 1.0);
@@ -829,8 +879,12 @@ double mask_influence(
 
 double mask_acceptance_probability(
     const Vec3& position,
-    const PreparedGuides& guides) {
-    return clamp(1.0 - mask_influence(position, guides), 0.0, 1.0);
+    const PreparedGuides& guides,
+    std::uint32_t triangle_index = std::numeric_limits<std::uint32_t>::max()) {
+    return clamp(
+        1.0 - mask_influence(position, guides, triangle_index),
+        0.0,
+        1.0);
 }
 
 bool is_masked(
@@ -964,7 +1018,8 @@ std::uint32_t mask_guide_count(const PreparedGuides& guides) {
 
 std::pair<double, double> density_factors(
     const Vec3& position,
-    const PreparedGuides& guides) {
+    const PreparedGuides& guides,
+    std::uint32_t triangle_index = std::numeric_limits<std::uint32_t>::max()) {
     double density = 1.0;
     double size = 1.0;
     for (const PreparedGuide& guide : guides) {
@@ -972,7 +1027,7 @@ std::pair<double, double> density_factors(
         if (!source.enabled || (!guide.uses_density && !guide.uses_size)) {
             continue;
         }
-        const double influence = guide_influence(guide, position);
+        const double influence = guide_influence(guide, position, 0.0, triangle_index);
         if (guide.uses_density) {
             density *= 1.0 +
                 (clamp(source.density_multiplier, 0.0, 16.0) - 1.0) * influence;
@@ -1018,6 +1073,7 @@ DirectionSolution guided_direction_solution(
     const Vec3& position,
     const Vec3& normal,
     const Vec3& fallback,
+    std::uint32_t triangle_index,
     const PreparedGuides& guides) {
     const Vec3 base = normalize(project_on_plane(fallback, normal), fallback);
     Vec3 accumulated = base;
@@ -1035,7 +1091,7 @@ DirectionSolution guided_direction_solution(
             clamp(source.strength, 0.0, 1.0) *
                 guide_influence_from_distance(
                     guide,
-                    nearest.distance,
+                    guide_distance(guide, position, triangle_index),
                     guide.radius),
             0.0,
             1.0);
@@ -1069,6 +1125,7 @@ DirectionSolution guided_direction_solution(
 
 double point_direction_influence(
     const Vec3& position,
+    std::uint32_t triangle_index,
     const PreparedGuides& guides) {
     double remaining = 1.0;
     for (const PreparedGuide& guide : guides) {
@@ -1077,7 +1134,8 @@ double point_direction_influence(
             continue;
         }
         const double weight = clamp(
-            clamp(source.strength, 0.0, 1.0) * guide_influence(guide, position),
+            clamp(source.strength, 0.0, 1.0) *
+                guide_influence(guide, position, 0.0, triangle_index),
             0.0,
             1.0);
         remaining *= 1.0 - weight;
@@ -1172,6 +1230,7 @@ double influence_for_id(
     const std::string& guide_id,
     const Vec3& position,
     double radius_override,
+    std::uint32_t triangle_index,
     const PreparedGuides& guides) {
     if (guide_id.empty()) {
         return 0.0;
@@ -1184,7 +1243,7 @@ double influence_for_id(
             found_exact = true;
             exact = std::max(
                 exact,
-                guide_influence(guide, position, radius_override));
+                guide_influence(guide, position, radius_override, triangle_index));
         }
     }
     if (found_exact) {
@@ -1198,7 +1257,7 @@ double influence_for_id(
         }
         maximum = std::max(
             maximum,
-            guide_influence(guide, position, radius_override));
+            guide_influence(guide, position, radius_override, triangle_index));
     }
     return maximum;
 }
@@ -1896,6 +1955,119 @@ private:
     }
 };
 
+struct SurfaceGraphEdge {
+    std::uint32_t vertex{0U};
+    double length{0.0};
+};
+
+void prepare_surface_guide_fields(
+    const Mesh& mesh,
+    PreparedGuides& guides) {
+    if (mesh.vertices.empty() || mesh.triangles.empty() || guides.empty()) {
+        return;
+    }
+
+    std::vector<std::vector<SurfaceGraphEdge>> graph(mesh.vertices.size());
+    auto add_edge = [&](std::uint32_t first, std::uint32_t second) {
+        if (first == second ||
+            first >= mesh.vertices.size() ||
+            second >= mesh.vertices.size()) {
+            return;
+        }
+        const double edge_length = length(sub(mesh.vertices[first], mesh.vertices[second]));
+        graph[first].push_back({second, edge_length});
+        graph[second].push_back({first, edge_length});
+    };
+    for (const Triangle& triangle : mesh.triangles) {
+        add_edge(triangle.a, triangle.b);
+        add_edge(triangle.b, triangle.c);
+        add_edge(triangle.c, triangle.a);
+    }
+
+    SurfaceProjector projector(mesh, false, true);
+    using QueueItem = std::pair<double, std::uint32_t>;
+    for (PreparedGuide& guide : guides) {
+        if (guide.source == nullptr || !guide.source->enabled) {
+            continue;
+        }
+        guide.surface_mesh = &mesh;
+        guide.surface_vertex_distances.assign(
+            mesh.vertices.size(),
+            std::numeric_limits<double>::infinity());
+        guide.surface_seeds.clear();
+
+        std::vector<Vec3> source_points;
+        if (!guide.curve || guide.segments.empty()) {
+            source_points.push_back(guide.fallback_point);
+        } else {
+            constexpr std::uint32_t maximum_segment_samples = 256U;
+            constexpr std::size_t maximum_guide_samples = 4096U;
+            const double sample_spacing = std::max(1.0e-6, guide.radius * 0.25);
+            for (const PreparedCurveSegment& segment : guide.segments) {
+                const std::uint32_t steps = std::clamp<std::uint32_t>(
+                    static_cast<std::uint32_t>(
+                        std::ceil(segment.length / sample_spacing)),
+                    1U,
+                    maximum_segment_samples);
+                for (std::uint32_t index = 0U;
+                     index <= steps && source_points.size() < maximum_guide_samples;
+                     ++index) {
+                    source_points.push_back(add(
+                        segment.start,
+                        mul(segment.delta, static_cast<double>(index) /
+                            static_cast<double>(steps))));
+                }
+                if (source_points.size() >= maximum_guide_samples) {
+                    break;
+                }
+            }
+        }
+
+        std::priority_queue<
+            QueueItem,
+            std::vector<QueueItem>,
+            std::greater<QueueItem>> queue;
+        for (const Vec3& source_point : source_points) {
+            const SurfaceSampleProjection projected =
+                projector.project_sample_global(source_point);
+            guide.surface_seeds.push_back({
+                projected.triangle_index,
+                projected.point,
+            });
+            const Triangle& triangle = mesh.triangles[projected.triangle_index];
+            for (const std::uint32_t vertex : {triangle.a, triangle.b, triangle.c}) {
+                const double seed_distance =
+                    length(sub(mesh.vertices[vertex], projected.point));
+                if (seed_distance < guide.surface_vertex_distances[vertex]) {
+                    guide.surface_vertex_distances[vertex] = seed_distance;
+                    queue.push({seed_distance, vertex});
+                }
+            }
+        }
+        std::sort(
+            guide.surface_seeds.begin(),
+            guide.surface_seeds.end(),
+            [](const SurfaceGuideSeed& left, const SurfaceGuideSeed& right) {
+                return left.triangle_index < right.triangle_index;
+            });
+
+        while (!queue.empty()) {
+            const auto [distance, vertex] = queue.top();
+            queue.pop();
+            if (distance > guide.surface_vertex_distances[vertex]) {
+                continue;
+            }
+            for (const SurfaceGraphEdge& edge : graph[vertex]) {
+                const double candidate = distance + edge.length;
+                if (candidate < guide.surface_vertex_distances[edge.vertex]) {
+                    guide.surface_vertex_distances[edge.vertex] = candidate;
+                    queue.push({candidate, edge.vertex});
+                }
+            }
+        }
+    }
+}
+
 struct DistributionGuideField {
     double density{1.0};
     double size{1.0};
@@ -1933,6 +2105,7 @@ public:
 
     DistributionGuideField evaluate(
         const Vec3& position,
+        std::uint32_t triangle_index,
         std::vector<std::uint32_t>& scratch) const {
         scratch.clear();
         if (!nodes_.empty()) {
@@ -1945,10 +2118,9 @@ public:
         for (const std::uint32_t index : scratch) {
             const PreparedGuide& guide = guides_[index];
             const Guide& source = *guide.source;
-            const GuideNearest nearest = nearest_on_guide(guide, position);
             const double influence = guide_influence_from_distance(
                 guide,
-                nearest.distance,
+                guide_distance(guide, position, triangle_index),
                 guide.radius);
             if (guide.uses_mask) {
                 mask_remaining *= 1.0 - clamp(influence, 0.0, 1.0);
@@ -2497,7 +2669,10 @@ std::vector<BoundaryAnchor> boundary_anchor_positions(
                         0U,
                         1U);
                     const double density = midpoint.has_value()
-                        ? density_factors(midpoint->position, guides).first
+                        ? density_factors(
+                              midpoint->position,
+                              guides,
+                              midpoint->triangle_index).first
                         : 1.0;
                     const double density_sqrt = std::sqrt(
                         clamp(density, 0.02, 16.0));
@@ -3431,8 +3606,11 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
     std::uint32_t masked_candidates = 0U;
     double largest_accepted_spacing = initial_spacing;
 
-    auto rejected_by_mask = [&](const Vec3& position) {
-        const double acceptance = mask_acceptance_probability(position, guides);
+    auto rejected_by_mask = [&](
+        const Vec3& position,
+        std::uint32_t triangle_index) {
+        const double acceptance =
+            mask_acceptance_probability(position, guides, triangle_index);
         if (acceptance >= 1.0) {
             return false;
         }
@@ -3451,12 +3629,13 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
         if (samples.size() >= anchor_limit) {
             return;
         }
-        if (rejected_by_mask(projected.point)) {
+        if (rejected_by_mask(projected.point, projected.triangle_index)) {
             return;
         }
         const auto [density_multiplier, size_multiplier] = density_factors(
             projected.point,
-            guides);
+            guides,
+            projected.triangle_index);
         const double local_spacing = initial_spacing /
             std::sqrt(std::max(0.02, density_multiplier));
         const GridCell cell = cell_for(projected.point, cell_size);
@@ -3600,6 +3779,7 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
             const DistributionGuideField field =
                 distribution_guide_index.evaluate(
                     position,
+                    triangle_index,
                     distribution_guide_scratch);
             if (field.mask_acceptance < 1.0 &&
                 (field.mask_acceptance <= 0.0 ||
@@ -3691,8 +3871,13 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
     if (mask_guide_count(guides) > 0U) {
         for (std::size_t index = 0U; index < samples.size(); ++index) {
             const double before = mask_influence(
-                unrelaxed_samples[index].position, guides);
-            const double after = mask_influence(samples[index].position, guides);
+                unrelaxed_samples[index].position,
+                guides,
+                unrelaxed_samples[index].triangle_index);
+            const double after = mask_influence(
+                samples[index].position,
+                guides,
+                samples[index].triangle_index);
             if (after > before + 1.0e-12) {
                 samples[index] = unrelaxed_samples[index];
             }
@@ -3911,10 +4096,21 @@ std::vector<OrientedSample> orientation_field(
         *used_workers = 1U;
     }
     // GPU Preview deliberately covers the exact 0.10.2 full-orientation
-    // boundary, not the withdrawn 0.10.3 Dirty Region. Settled and Final stay
-    // on the deterministic double-precision CPU path.
+    // boundary, not the withdrawn 0.10.3 Dirty Region. Surface-connected
+    // Falloff currently stays on the exact CPU path until the compact GPU
+    // distance-field buffer is available.
+    const bool has_surface_direction_guides = std::any_of(
+        guides.begin(),
+        guides.end(),
+        [](const PreparedGuide& guide) {
+            return guide.source != nullptr &&
+                   guide.source->enabled &&
+                   guide.uses_direction &&
+                   !guide.surface_vertex_distances.empty();
+        });
     if (mode == PreviewMode::Interactive &&
-        effective_direction_relax_iterations(settings, mode) == 0U) {
+        effective_direction_relax_iterations(settings, mode) == 0U &&
+        !has_surface_direction_guides) {
         auto gpu_result = try_gpu_orientation_field(
             samples, settings, guides, profile);
         if (gpu_result.has_value()) {
@@ -3924,8 +4120,9 @@ std::vector<OrientedSample> orientation_field(
             return std::move(*gpu_result);
         }
     } else if (profile != nullptr && mode == PreviewMode::Interactive) {
-        profile->gpu_fallback_reason =
-            "Direction Relax requires the CPU exact preview path";
+        profile->gpu_fallback_reason = has_surface_direction_guides
+            ? "Surface-connected Guide Falloff requires the CPU exact preview path"
+            : "Direction Relax requires the CPU exact preview path";
     }
     std::vector<Vec3> tangents(samples.size());
     const std::uint32_t initial_workers = parallel_for_chunks(
@@ -3946,6 +4143,7 @@ std::vector<OrientedSample> orientation_field(
                     sample.position,
                     normal,
                     tangent,
+                    sample.triangle_index,
                     guides).tangent;
             }
         });
@@ -4056,6 +4254,7 @@ std::vector<OrientedSample> orientation_field(
                     sample.position,
                     normal,
                     tangents[index],
+                    sample.triangle_index,
                     guides);
                 const Vec3 partition_tangent = solution.tangent;
                 const double random_angle =
@@ -4071,7 +4270,10 @@ std::vector<OrientedSample> orientation_field(
                     sample,
                     final_tangent,
                     partition_tangent,
-                    point_direction_influence(sample.position, guides),
+                    point_direction_influence(
+                        sample.position,
+                        sample.triangle_index,
+                        guides),
                 };
             }
         });
@@ -4110,7 +4312,12 @@ SelectedType select_scale_type(
             continue;
         }
         const double amount = clamp(
-            influence_for_id(type.guide_id, sample.position, 0.0, guides),
+            influence_for_id(
+                type.guide_id,
+                sample.position,
+                0.0,
+                sample.triangle_index,
+                guides),
             0.0,
             1.0);
         // A Guide-linked type is a deterministic local assignment. The
@@ -5593,7 +5800,8 @@ GenerationResult generate(
     const auto total_started = Clock::now();
     validate_mesh(mesh);
     GenerationProfile profile;
-    const PreparedGuides prepared_guides = prepare_guides(guides);
+    PreparedGuides prepared_guides = prepare_guides(guides);
+    prepare_surface_guide_fields(mesh, prepared_guides);
     ProcessStageCache& cache = native_stage_cache();
     profile.stage_cache_capacity = cache.capacity();
 
@@ -5743,7 +5951,8 @@ DistributionResult distribute(
     const Settings& settings,
     PreviewMode mode,
     const std::vector<Guide>& guides) {
-    const PreparedGuides prepared_guides = prepare_guides(guides);
+    PreparedGuides prepared_guides = prepare_guides(guides);
+    prepare_surface_guide_fields(mesh, prepared_guides);
     return distribute_impl(mesh, settings, mode, prepared_guides);
 }
 
