@@ -1956,6 +1956,32 @@ int main() {
         CHECK(!gpu_attempt.profile.gpu_fallback_reason.empty());
         CHECK(gpu_attempt.profile.orientation_worker_threads >= 1U);
     }
+    // GPU and CPU-reference conflict arbitration must select the same
+    // integrated candidate stream and therefore produce identical Preview
+    // geometry and Stable Cell IDs.
+    CHECK(gpu_attempt.mesh.vertices == gpu_disabled.mesh.vertices);
+    CHECK(gpu_attempt.mesh.faces == gpu_disabled.mesh.faces);
+    CHECK(gpu_attempt.mesh.cell_ids == gpu_disabled.mesh.cell_ids);
+
+    // Settled never enters the approximate Interactive candidate path.
+    set_gpu_override("off");
+    bifrost_scales::clear_native_stage_cache();
+    const GenerationResult settled_gpu_off = bifrost_scales::generate(
+        mesh,
+        gpu_fallback_settings,
+        PreviewMode::Settled,
+        {cache_curve});
+    set_gpu_override("force");
+    bifrost_scales::clear_native_stage_cache();
+    const GenerationResult settled_gpu_force = bifrost_scales::generate(
+        mesh,
+        gpu_fallback_settings,
+        PreviewMode::Settled,
+        {cache_curve});
+    CHECK(!settled_gpu_force.profile.gpu_compute_used);
+    CHECK(settled_gpu_force.mesh.vertices == settled_gpu_off.mesh.vertices);
+    CHECK(settled_gpu_force.mesh.faces == settled_gpu_off.mesh.faces);
+    CHECK(settled_gpu_force.mesh.cell_ids == settled_gpu_off.mesh.cell_ids);
     set_gpu_override("auto");
 
     // Interactive Candidate Batch is the counter-based production Preview
