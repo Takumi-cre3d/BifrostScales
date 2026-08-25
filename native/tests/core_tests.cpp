@@ -1403,7 +1403,7 @@ int main() {
     mask_guide.id = "mask";
     mask_guide.kind = GuideKind::DensityPoint;
     mask_guide.points = {{0.0, 0.0, 0.0}};
-    mask_guide.radius = 0.55;
+    mask_guide.radius = 1.5;
     mask_guide.use_density = false;
     mask_guide.use_size = false;
     mask_guide.use_direction = false;
@@ -1412,84 +1412,138 @@ int main() {
     mask_settings.target_count = 96U;
     mask_settings.settled_budget = 96U;
     mask_settings.seed = 813U;
+
+    // Mask is evaluated after Distribution and Cell construction. Editing it
+    // must reuse the exact internal layout and change only emitted mesh Cells.
+    bifrost_scales::clear_native_stage_cache();
+    const GenerationResult unmasked = bifrost_scales::generate(
+        mesh,
+        mask_settings,
+        PreviewMode::Settled);
     const GenerationResult masked = bifrost_scales::generate(
         mesh,
         mask_settings,
         PreviewMode::Settled,
         {mask_guide});
+    CHECK(masked.profile.distribution_cache_hit);
+    CHECK(masked.profile.orientation_cache_hit);
+    CHECK(masked.profile.cell_cache_hit);
     CHECK(masked.report.mask_guide_count == 1U);
-    CHECK(masked.report.masked_candidate_count > 0U);
+    CHECK(masked.report.accepted_count == unmasked.report.accepted_count);
+    CHECK(masked.report.cell_count == unmasked.report.cell_count);
+    CHECK(masked.report.mask_clipped_rays == 0U);
+    CHECK(masked.mesh.scale_count > 0U);
+    CHECK(masked.mesh.scale_count < unmasked.mesh.scale_count);
+    CHECK(masked.report.masked_candidate_count ==
+          unmasked.mesh.scale_count - masked.mesh.scale_count);
+    for (const std::uint64_t visible_id : masked.mesh.cell_ids) {
+        CHECK(std::find(
+                  unmasked.mesh.cell_ids.begin(),
+                  unmasked.mesh.cell_ids.end(),
+                  visible_id) != unmasked.mesh.cell_ids.end());
+    }
+
+    const auto unmasked_distribution = bifrost_scales::distribute(
+        mesh,
+        mask_settings,
+        PreviewMode::Settled);
     const auto masked_distribution = bifrost_scales::distribute(
         mesh,
         mask_settings,
         PreviewMode::Settled,
         {mask_guide});
-    constexpr double default_mask_core_fraction = 0.05905480523664686;
-    const double mask_core_radius =
-        mask_guide.radius * default_mask_core_fraction;
-    bool survived_in_falloff = false;
-    for (const Sample& sample : masked_distribution.samples) {
-        const double radial = std::hypot(sample.position.x, sample.position.z);
-        CHECK(radial >= mask_core_radius - 1.0e-12);
-        survived_in_falloff = survived_in_falloff || radial < mask_guide.radius;
+    CHECK(masked_distribution.samples.size() ==
+          unmasked_distribution.samples.size());
+    for (std::size_t index = 0U;
+         index < masked_distribution.samples.size();
+         ++index) {
+        const Sample& left = unmasked_distribution.samples[index];
+        const Sample& right = masked_distribution.samples[index];
+        CHECK(left.position == right.position);
+        CHECK(left.normal == right.normal);
+        CHECK(left.triangle_index == right.triangle_index);
+        CHECK(left.barycentric == right.barycentric);
+        CHECK(left.density_multiplier == right.density_multiplier);
+        CHECK(left.size_multiplier == right.size_multiplier);
+        CHECK(left.local_spacing == right.local_spacing);
+        CHECK(left.stable_id == right.stable_id);
     }
-    CHECK(survived_in_falloff);
 
-    // Mask Falloff spacing controls center rejection only. Surviving Cells
-    // retain the density-only footprint instead of expanding across the holes
-    // and visually rebuilding a solid boundary.
-    bool found_mask_spacing_separation = false;
-    for (const Sample& sample : masked_distribution.samples) {
-        if (sample.cell_spacing > 0.0 &&
-            sample.local_spacing > sample.cell_spacing * 1.05) {
-            found_mask_spacing_separation = true;
-            break;
-        }
-    }
-    CHECK(found_mask_spacing_separation);
-    const auto masked_cells = bifrost_scales::build_cells(
+    const auto mask_orientation = bifrost_scales::orient_samples(
+        unmasked_distribution.samples,
+        mask_settings,
+        PreviewMode::Settled);
+    const auto unmasked_cells = bifrost_scales::build_cells(
         mesh,
-        masked_distribution.samples,
+        mask_orientation.samples,
         mask_settings,
         PreviewMode::Settled,
-        masked_distribution.report);
-    CHECK(masked_cells.cells.size() == masked_distribution.samples.size());
+        {},
+        {},
+        mask_orientation.report);
+    const auto masked_cells = bifrost_scales::build_cells(
+        mesh,
+        mask_orientation.samples,
+        mask_settings,
+        PreviewMode::Settled,
+        {mask_guide},
+        {},
+        mask_orientation.report);
+    CHECK(masked_cells.cells.size() == unmasked_cells.cells.size());
     for (std::size_t index = 0U; index < masked_cells.cells.size(); ++index) {
-        CHECK(std::abs(
-                  masked_cells.cells[index].local_spacing -
-                  masked_distribution.samples[index].cell_spacing) < 1.0e-12);
+        CHECK(masked_cells.cells[index].boundary ==
+              unmasked_cells.cells[index].boundary);
+        CHECK(masked_cells.cells[index].local_spacing ==
+              unmasked_cells.cells[index].local_spacing);
     }
 
+    // Surface-connected Mask evaluation remains a mesh-output concern: a
+    // nearby disconnected layer keeps all of its Cells visible while Cells on
+    // the guided layer are deterministically suppressed.
     const Mesh close_layers = close_disconnected_planes_mesh();
     Guide surface_mask = mask_guide;
     surface_mask.id = "surface-mask";
-    surface_mask.radius = 1.5;
     Settings surface_mask_settings = mask_settings;
     surface_mask_settings.target_count = 700U;
     surface_mask_settings.settled_budget = 700U;
     surface_mask_settings.spacing_factor = 0.15;
     surface_mask_settings.relax_iterations = 0U;
     surface_mask_settings.seed = 911U;
-    const auto surface_mask_distribution = bifrost_scales::distribute(
+    const auto surface_distribution = bifrost_scales::distribute(
+        close_layers,
+        surface_mask_settings,
+        PreviewMode::Settled);
+    const auto surface_masked = bifrost_scales::generate(
         close_layers,
         surface_mask_settings,
         PreviewMode::Settled,
         {surface_mask});
-    std::uint32_t guided_layer_near = 0U;
-    std::uint32_t disconnected_layer_near = 0U;
-    for (const Sample& sample : surface_mask_distribution.samples) {
+    std::set<std::uint64_t> visible_surface_ids(
+        surface_masked.mesh.cell_ids.begin(),
+        surface_masked.mesh.cell_ids.end());
+    std::uint32_t guided_layer_total = 0U;
+    std::uint32_t guided_layer_visible = 0U;
+    std::uint32_t disconnected_layer_total = 0U;
+    std::uint32_t disconnected_layer_visible = 0U;
+    for (const Sample& sample : surface_distribution.samples) {
         const double radial = std::hypot(sample.position.x, sample.position.z);
         if (radial >= 0.75) {
             continue;
         }
+        const bool visible =
+            visible_surface_ids.find(sample.stable_id) != visible_surface_ids.end();
         if (std::abs(sample.position.y) < 1.0e-9) {
-            ++guided_layer_near;
+            ++guided_layer_total;
+            guided_layer_visible += visible ? 1U : 0U;
         } else if (std::abs(sample.position.y - 0.08) < 1.0e-9) {
-            ++disconnected_layer_near;
+            ++disconnected_layer_total;
+            disconnected_layer_visible += visible ? 1U : 0U;
         }
     }
-    CHECK(disconnected_layer_near >= 1U);
-    CHECK(disconnected_layer_near > guided_layer_near * 2U);
+    CHECK(guided_layer_total > 0U);
+    CHECK(guided_layer_visible < guided_layer_total);
+    CHECK(disconnected_layer_total > 0U);
+    CHECK(disconnected_layer_visible == disconnected_layer_total);
 
     Sample seam_left;
     seam_left.position = {0.45, 0.0, 0.0};
