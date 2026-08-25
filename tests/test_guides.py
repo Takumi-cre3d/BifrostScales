@@ -278,7 +278,7 @@ def test_guide_group_modifiers_are_non_destructive_and_composed_at_read_time():
         points=((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)),
         group_id="group_primary",
         radius=2.0,
-        falloff=2.0,
+        falloff=1.0,
         density_multiplier=3.0,
         size_multiplier=1.5,
         strength=0.4,
