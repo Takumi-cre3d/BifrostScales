@@ -1803,6 +1803,32 @@ int main() {
     CHECK((disconnected.samples[0].position.x < 0.0) !=
           (disconnected.samples[1].position.x < 0.0));
 
+    // Mesh acceleration caches may reuse connectivity across a deformation,
+    // but geometry-dependent boundary and Guide fields must follow positions.
+    Mesh deformed_cache_mesh = mesh;
+    deformed_cache_mesh.vertices.front().y += 0.35;
+    cache_curve.strength = 0.75;
+    bifrost_scales::clear_native_stage_cache();
+    (void)bifrost_scales::generate(
+        mesh,
+        guide_cache_settings,
+        PreviewMode::Settled,
+        {cache_curve});
+    const GenerationResult deformed_cached = bifrost_scales::generate(
+        deformed_cache_mesh,
+        guide_cache_settings,
+        PreviewMode::Settled,
+        {cache_curve});
+    bifrost_scales::clear_native_stage_cache();
+    const GenerationResult deformed_cold = bifrost_scales::generate(
+        deformed_cache_mesh,
+        guide_cache_settings,
+        PreviewMode::Settled,
+        {cache_curve});
+    CHECK(deformed_cached.mesh.vertices == deformed_cold.mesh.vertices);
+    CHECK(deformed_cached.mesh.faces == deformed_cold.mesh.faces);
+    CHECK(deformed_cached.mesh.cell_ids == deformed_cold.mesh.cell_ids);
+
     // Stable Cell IDs are deterministic, unique, and metadata is opt-in.
     Settings identity_settings = coverage_settings;
     identity_settings.target_count = 24U;
