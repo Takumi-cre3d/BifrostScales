@@ -35,7 +35,7 @@ from .math3d import (
 
 SYMMETRY_AXES = frozenset({"x", "y", "z"})
 SYMMETRY_SPACES = frozenset({"world", "target_local"})
-MASK_HARD_CORE_INFLUENCE = 0.98
+MASK_FULL_SUPPRESSION_INFLUENCE = 0.98
 
 
 def _symmetry_axis(value: object) -> str:
@@ -1030,14 +1030,14 @@ class GuideSet:
         """
 
         influence = self.mask_influence(position)
-        if influence >= MASK_HARD_CORE_INFLUENCE:
+        if influence >= MASK_FULL_SUPPRESSION_INFLUENCE:
             return 0.0
         return max(0.0, min(1.0, 1.0 - influence))
 
     def is_masked(self, position: Vec3) -> bool:
-        """Return True inside the small stable no-scale hard core."""
+        """Return True where completed Cell mesh is fully suppressed."""
 
-        return self.mask_influence(position) >= MASK_HARD_CORE_INFLUENCE
+        return self.mask_influence(position) >= MASK_FULL_SUPPRESSION_INFLUENCE
 
     def influence_for_id(
         self,
