@@ -2951,6 +2951,9 @@ CellResult build_cells_impl(
     if (used_workers != nullptr) {
         *used_workers = 1U;
     }
+    // Guides no longer alter Cell topology. Mask is evaluated only while
+    // emitting the final mesh, after the complete Cell partition is cached.
+    (void)guides;
     const std::uint32_t ray_count = effective_cell_resolution(settings, mode);
     report.used_cells = true;
     report.cell_resolution = ray_count;
@@ -4538,7 +4541,6 @@ GeneratedMesh build_mesh_impl(
     const PreparedGuides& guides,
     const GenerationOptions& options) {
     GeneratedMesh result;
-    result.scale_count = static_cast<std::uint32_t>(oriented_samples.size());
     const bool interactive = mode == PreviewMode::Interactive;
     const std::size_t vertices_per_scale = interactive ? 3U : 6U;
     const std::size_t faces_per_scale = interactive ? 1U : 5U;
@@ -4575,6 +4577,9 @@ GeneratedMesh build_mesh_impl(
          ++source_index) {
         const OrientedSample& oriented = oriented_samples[source_index];
         const Sample& sample = oriented.sample;
+        if (!sample_visible_for_mask(sample, guides)) {
+            continue;
+        }
         const Vec3 normal = normalize(sample.normal);
         const Vec3 tangent = normalize(oriented.tangent, orthonormal_tangent(normal));
         const Vec3 bitangent = normalize(cross(normal, tangent));
@@ -4613,7 +4618,8 @@ GeneratedMesh build_mesh_impl(
                 result.scale_type_ids.push_back(shape.type_id);
             }
             append_cell_identity(
-                result, sample, source_index, 0U, options);
+                result, sample, result.scale_count, 0U, options);
+            ++result.scale_count;
             continue;
         }
 
@@ -4663,7 +4669,8 @@ GeneratedMesh build_mesh_impl(
         if (options.include_scale_type_ids) {
             result.scale_type_ids.push_back(shape.type_id);
         }
-        append_cell_identity(result, sample, source_index, 0U, options);
+        append_cell_identity(result, sample, result.scale_count, 0U, options);
+        ++result.scale_count;
     }
     return result;
 }
@@ -4823,7 +4830,8 @@ GeneratedMesh build_cell_mesh_range(
         const OrientedSample& oriented = oriented_samples[scale_index];
         const Sample& sample = oriented.sample;
         const CellData& cell = cells[scale_index];
-        if (cell.boundary.size() < 3U) {
+        if (cell.boundary.size() < 3U ||
+            !sample_visible_for_mask(sample, guides)) {
             continue;
         }
 
@@ -5218,7 +5226,8 @@ GeneratedMesh build_cell_mesh_impl(
     std::uint32_t next_scale_index = 0U;
     for (std::size_t index = 0U; index < available_count; ++index) {
         global_scale_indices[index] = next_scale_index;
-        if (cells[index].boundary.size() >= 3U) {
+        if (cells[index].boundary.size() >= 3U &&
+            sample_visible_for_mask(oriented_samples[index].sample, guides)) {
             ++next_scale_index;
         }
     }
