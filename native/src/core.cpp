@@ -4108,9 +4108,25 @@ std::vector<OrientedSample> orientation_field(
                    guide.uses_direction &&
                    !guide.surface_vertex_distances.empty();
         });
-    if (mode == PreviewMode::Interactive &&
-        effective_direction_relax_iterations(settings, mode) == 0U &&
-        !has_surface_direction_guides) {
+    const bool interactive_gpu_eligible =
+        mode == PreviewMode::Interactive &&
+        effective_direction_relax_iterations(settings, mode) == 0U;
+    if (interactive_gpu_eligible && has_surface_direction_guides) {
+        gpu::ExecutionInfo availability_info;
+        const bool would_attempt =
+            gpu::should_attempt_orientation(samples.size(), availability_info);
+        if (profile != nullptr) {
+            profile->gpu_compute_requested = availability_info.requested;
+            profile->gpu_compute_available = availability_info.available;
+            profile->gpu_compute_used = false;
+            profile->gpu_compute_backend = availability_info.backend;
+            profile->gpu_device = availability_info.device;
+            profile->gpu_sample_count = availability_info.sample_count;
+            profile->gpu_fallback_reason = would_attempt
+                ? "Surface-connected Guide Falloff requires the CPU exact preview path"
+                : availability_info.fallback_reason;
+        }
+    } else if (interactive_gpu_eligible) {
         auto gpu_result = try_gpu_orientation_field(
             samples, settings, guides, profile);
         if (gpu_result.has_value()) {
@@ -4120,9 +4136,8 @@ std::vector<OrientedSample> orientation_field(
             return std::move(*gpu_result);
         }
     } else if (profile != nullptr && mode == PreviewMode::Interactive) {
-        profile->gpu_fallback_reason = has_surface_direction_guides
-            ? "Surface-connected Guide Falloff requires the CPU exact preview path"
-            : "Direction Relax requires the CPU exact preview path";
+        profile->gpu_fallback_reason =
+            "Direction Relax requires the CPU exact preview path";
     }
     std::vector<Vec3> tangents(samples.size());
     const std::uint32_t initial_workers = parallel_for_chunks(
