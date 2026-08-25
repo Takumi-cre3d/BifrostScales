@@ -656,6 +656,11 @@ struct SurfaceGuideSeed {
     Vec3 point{};
 };
 
+struct SurfaceGuideTopology {
+    std::vector<Vec3> edge_midpoints;
+    std::vector<std::array<std::uint32_t, 3>> triangle_edge_nodes;
+};
+
 struct PreparedGuide {
     const Guide* source{nullptr};
     bool curve{false};
@@ -673,8 +678,8 @@ struct PreparedGuide {
     double total_length{0.0};
     std::size_t anchor_segment_count{0U};
     std::vector<PreparedCurveSegment> segments;
-    const Mesh* surface_mesh{nullptr};
-    std::vector<double> surface_vertex_distances;
+    std::shared_ptr<const SurfaceGuideTopology> surface_topology;
+    std::vector<double> surface_node_distances;
     std::vector<SurfaceGuideSeed> surface_seeds;
 };
 
@@ -797,9 +802,10 @@ double guide_distance(
     const Vec3& position,
     std::uint32_t triangle_index) {
     const GuideNearest nearest = nearest_on_guide(guide, position);
-    if (guide.surface_mesh == nullptr ||
-        guide.surface_vertex_distances.size() != guide.surface_mesh->vertices.size() ||
-        triangle_index >= guide.surface_mesh->triangles.size()) {
+    if (guide.surface_topology == nullptr ||
+        guide.surface_node_distances.size() !=
+            guide.surface_topology->edge_midpoints.size() ||
+        triangle_index >= guide.surface_topology->triangle_edge_nodes.size()) {
         return nearest.distance;
     }
 
@@ -818,13 +824,16 @@ double guide_distance(
         best = std::min(best, length(sub(position, iterator->point)));
     }
 
-    const Triangle& triangle = guide.surface_mesh->triangles[triangle_index];
-    for (const std::uint32_t vertex : {triangle.a, triangle.b, triangle.c}) {
-        const double distance = guide.surface_vertex_distances[vertex];
+    const auto& nodes =
+        guide.surface_topology->triangle_edge_nodes[triangle_index];
+    for (const std::uint32_t node : nodes) {
+        const double distance = guide.surface_node_distances[node];
         if (std::isfinite(distance)) {
             best = std::min(
                 best,
-                distance + length(sub(position, guide.surface_mesh->vertices[vertex])));
+                distance + length(sub(
+                    position,
+                    guide.surface_topology->edge_midpoints[node])));
         }
     }
     return best;
@@ -1970,24 +1979,55 @@ void prepare_surface_guide_fields(
         return;
     }
 
-    std::vector<std::vector<SurfaceGraphEdge>> graph(mesh.vertices.size());
-    double maximum_edge_length = 0.0;
-    auto add_edge = [&](std::uint32_t first, std::uint32_t second) {
-        if (first == second ||
-            first >= mesh.vertices.size() ||
-            second >= mesh.vertices.size()) {
-            return;
+    auto topology = std::make_shared<SurfaceGuideTopology>();
+    topology->triangle_edge_nodes.reserve(mesh.triangles.size());
+    std::unordered_map<std::uint64_t, std::uint32_t> edge_nodes;
+    edge_nodes.reserve(mesh.triangles.size() * 2U);
+    auto edge_node = [&](std::uint32_t first, std::uint32_t second) {
+        const std::uint32_t lower = std::min(first, second);
+        const std::uint32_t upper = std::max(first, second);
+        const std::uint64_t key =
+            (static_cast<std::uint64_t>(lower) << 32U) |
+            static_cast<std::uint64_t>(upper);
+        const auto found = edge_nodes.find(key);
+        if (found != edge_nodes.end()) {
+            return found->second;
         }
-        const double edge_length =
-            length(sub(mesh.vertices[first], mesh.vertices[second]));
-        maximum_edge_length = std::max(maximum_edge_length, edge_length);
-        graph[first].push_back({second, edge_length});
-        graph[second].push_back({first, edge_length});
+        const std::uint32_t node = static_cast<std::uint32_t>(
+            topology->edge_midpoints.size());
+        topology->edge_midpoints.push_back(mul(
+            add(mesh.vertices[lower], mesh.vertices[upper]),
+            0.5));
+        edge_nodes.emplace(key, node);
+        return node;
     };
     for (const Triangle& triangle : mesh.triangles) {
-        add_edge(triangle.a, triangle.b);
-        add_edge(triangle.b, triangle.c);
-        add_edge(triangle.c, triangle.a);
+        topology->triangle_edge_nodes.push_back({
+            edge_node(triangle.a, triangle.b),
+            edge_node(triangle.b, triangle.c),
+            edge_node(triangle.c, triangle.a),
+        });
+    }
+
+    std::vector<std::vector<SurfaceGraphEdge>> graph(
+        topology->edge_midpoints.size());
+    double maximum_connection_length = 0.0;
+    auto connect = [&](std::uint32_t first, std::uint32_t second) {
+        if (first == second) {
+            return;
+        }
+        const double connection_length = length(sub(
+            topology->edge_midpoints[first],
+            topology->edge_midpoints[second]));
+        maximum_connection_length =
+            std::max(maximum_connection_length, connection_length);
+        graph[first].push_back({second, connection_length});
+        graph[second].push_back({first, connection_length});
+    };
+    for (const auto& nodes : topology->triangle_edge_nodes) {
+        connect(nodes[0], nodes[1]);
+        connect(nodes[1], nodes[2]);
+        connect(nodes[2], nodes[0]);
     }
 
     SurfaceProjector projector(mesh, false, true);
@@ -1996,9 +2036,9 @@ void prepare_surface_guide_fields(
         if (guide.source == nullptr || !guide.source->enabled) {
             continue;
         }
-        guide.surface_mesh = &mesh;
-        guide.surface_vertex_distances.assign(
-            mesh.vertices.size(),
+        guide.surface_topology = topology;
+        guide.surface_node_distances.assign(
+            topology->edge_midpoints.size(),
             std::numeric_limits<double>::infinity());
         guide.surface_seeds.clear();
 
@@ -2033,9 +2073,10 @@ void prepare_surface_guide_fields(
             QueueItem,
             std::vector<QueueItem>,
             std::greater<QueueItem>> queue;
-        // One maximum edge beyond the authored radius keeps coarse adjacent
-        // triangles queryable while avoiding a full-mesh Dijkstra traversal.
-        const double search_limit = guide.radius + maximum_edge_length;
+        // One edge-midpoint connection beyond the authored radius keeps
+        // coarse adjacent triangles queryable while bounding local traversal.
+        const double search_limit =
+            guide.radius + maximum_connection_length;
         for (const Vec3& source_point : source_points) {
             const SurfaceSampleProjection projected =
                 projector.project_sample_global(source_point);
@@ -2043,14 +2084,16 @@ void prepare_surface_guide_fields(
                 projected.triangle_index,
                 projected.point,
             });
-            const Triangle& triangle = mesh.triangles[projected.triangle_index];
-            for (const std::uint32_t vertex : {triangle.a, triangle.b, triangle.c}) {
-                const double seed_distance =
-                    length(sub(mesh.vertices[vertex], projected.point));
+            const auto& nodes =
+                topology->triangle_edge_nodes[projected.triangle_index];
+            for (const std::uint32_t node : nodes) {
+                const double seed_distance = length(sub(
+                    topology->edge_midpoints[node],
+                    projected.point));
                 if (seed_distance <= search_limit &&
-                    seed_distance < guide.surface_vertex_distances[vertex]) {
-                    guide.surface_vertex_distances[vertex] = seed_distance;
-                    queue.push({seed_distance, vertex});
+                    seed_distance < guide.surface_node_distances[node]) {
+                    guide.surface_node_distances[node] = seed_distance;
+                    queue.push({seed_distance, node});
                 }
             }
         }
@@ -2062,19 +2105,19 @@ void prepare_surface_guide_fields(
             });
 
         while (!queue.empty()) {
-            const auto [distance, vertex] = queue.top();
+            const auto [distance, node] = queue.top();
             queue.pop();
-            if (distance > guide.surface_vertex_distances[vertex]) {
+            if (distance > guide.surface_node_distances[node]) {
                 continue;
             }
             if (distance > search_limit) {
                 break;
             }
-            for (const SurfaceGraphEdge& edge : graph[vertex]) {
+            for (const SurfaceGraphEdge& edge : graph[node]) {
                 const double candidate = distance + edge.length;
                 if (candidate <= search_limit &&
-                    candidate < guide.surface_vertex_distances[edge.vertex]) {
-                    guide.surface_vertex_distances[edge.vertex] = candidate;
+                    candidate < guide.surface_node_distances[edge.vertex]) {
+                    guide.surface_node_distances[edge.vertex] = candidate;
                     queue.push({candidate, edge.vertex});
                 }
             }
@@ -4132,7 +4175,7 @@ std::vector<OrientedSample> orientation_field(
             return guide.source != nullptr &&
                    guide.source->enabled &&
                    guide.uses_direction &&
-                   !guide.surface_vertex_distances.empty();
+                   !guide.surface_node_distances.empty();
         });
     const bool interactive_gpu_eligible =
         mode == PreviewMode::Interactive &&
