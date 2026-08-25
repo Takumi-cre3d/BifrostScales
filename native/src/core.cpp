@@ -34,6 +34,7 @@ namespace {
 constexpr double kEpsilon = 1.0e-12;
 constexpr double kPi = 3.1415926535897932384626433832795;
 constexpr double kMaskHardCoreInfluence = 0.98;
+constexpr double kMaskDensityFloor = 0.02;
 constexpr double kFixedScaleAspect = 1.65;
 constexpr std::array<double, 5> kRelaxationFactors{1.0, 0.86, 0.73, 0.61, 0.50};
 constexpr std::uint64_t kFnvOffsetBasis64 = 14695981039346656037ULL;
@@ -881,10 +882,12 @@ double mask_acceptance_probability(
     const Vec3& position,
     const PreparedGuides& guides,
     std::uint32_t triangle_index = std::numeric_limits<std::uint32_t>::max()) {
-    return clamp(
-        1.0 - mask_influence(position, guides, triangle_index),
-        0.0,
-        1.0);
+    const double influence =
+        mask_influence(position, guides, triangle_index);
+    if (influence >= kMaskHardCoreInfluence) {
+        return 0.0;
+    }
+    return clamp(1.0 - influence, 0.0, 1.0);
 }
 
 bool is_masked(
@@ -2148,10 +2151,13 @@ public:
             }
         }
         const double exclusion = clamp(1.0 - mask_remaining, 0.0, 1.0);
+        const double mask_acceptance = exclusion >= kMaskHardCoreInfluence
+            ? 0.0
+            : clamp(1.0 - exclusion, 0.0, 1.0);
         return {
             clamp(density, 0.02, 16.0),
             clamp(size, 0.05, 8.0),
-            clamp(1.0 - exclusion, 0.0, 1.0),
+            mask_acceptance,
         };
     }
 
@@ -3643,12 +3649,19 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
         if (rejected_by_mask(projected.point, projected.triangle_index)) {
             return;
         }
-        const auto [density_multiplier, size_multiplier] = density_factors(
+        auto [density_multiplier, size_multiplier] = density_factors(
             projected.point,
             guides,
             projected.triangle_index);
+        const double mask_density = std::max(
+            kMaskDensityFloor,
+            mask_acceptance_probability(
+                projected.point,
+                guides,
+                projected.triangle_index));
+        density_multiplier *= mask_density;
         const double local_spacing = initial_spacing /
-            std::sqrt(std::max(0.02, density_multiplier));
+            std::sqrt(std::max(kMaskDensityFloor, density_multiplier));
         const GridCell cell = cell_for(projected.point, cell_size);
         const double maximum_neighbor_threshold = 0.5 *
             (local_spacing + largest_accepted_spacing);
@@ -3798,7 +3811,9 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                 ++masked_candidates;
                 continue;
             }
-            const double density_multiplier = field.density;
+            const double density_multiplier =
+                field.density *
+                std::max(kMaskDensityFloor, field.mask_acceptance);
             const double size_multiplier = field.size;
             const double acceptance = clamp(
                 density_multiplier / maximum_density,
