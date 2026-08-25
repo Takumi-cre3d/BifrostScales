@@ -14,7 +14,7 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 
 ## 機能
 
-- メッシュ表面の接続距離でFalloffするDensity／Size／Direction／Flow／Mask Guide
+- Rangeを外端、0〜1のFalloffを減衰幅としてメッシュ表面接続距離で評価するDensity／Size／Direction／Flow／Mask Guide
 - Maskは完成Cellの配置・形状を保持し、Stable Cell IDによる決定的な確率でメッシュ出力のみを制御
 - Guide GroupとSymmetry authoring
 - Guide連動の複数Scale Type
