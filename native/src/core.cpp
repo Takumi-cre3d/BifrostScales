@@ -1968,13 +1968,16 @@ void prepare_surface_guide_fields(
     }
 
     std::vector<std::vector<SurfaceGraphEdge>> graph(mesh.vertices.size());
+    double maximum_edge_length = 0.0;
     auto add_edge = [&](std::uint32_t first, std::uint32_t second) {
         if (first == second ||
             first >= mesh.vertices.size() ||
             second >= mesh.vertices.size()) {
             return;
         }
-        const double edge_length = length(sub(mesh.vertices[first], mesh.vertices[second]));
+        const double edge_length =
+            length(sub(mesh.vertices[first], mesh.vertices[second]));
+        maximum_edge_length = std::max(maximum_edge_length, edge_length);
         graph[first].push_back({second, edge_length});
         graph[second].push_back({first, edge_length});
     };
@@ -2027,6 +2030,9 @@ void prepare_surface_guide_fields(
             QueueItem,
             std::vector<QueueItem>,
             std::greater<QueueItem>> queue;
+        // One maximum edge beyond the authored radius keeps coarse adjacent
+        // triangles queryable while avoiding a full-mesh Dijkstra traversal.
+        const double search_limit = guide.radius + maximum_edge_length;
         for (const Vec3& source_point : source_points) {
             const SurfaceSampleProjection projected =
                 projector.project_sample_global(source_point);
@@ -2038,7 +2044,8 @@ void prepare_surface_guide_fields(
             for (const std::uint32_t vertex : {triangle.a, triangle.b, triangle.c}) {
                 const double seed_distance =
                     length(sub(mesh.vertices[vertex], projected.point));
-                if (seed_distance < guide.surface_vertex_distances[vertex]) {
+                if (seed_distance <= search_limit &&
+                    seed_distance < guide.surface_vertex_distances[vertex]) {
                     guide.surface_vertex_distances[vertex] = seed_distance;
                     queue.push({seed_distance, vertex});
                 }
@@ -2057,9 +2064,13 @@ void prepare_surface_guide_fields(
             if (distance > guide.surface_vertex_distances[vertex]) {
                 continue;
             }
+            if (distance > search_limit) {
+                break;
+            }
             for (const SurfaceGraphEdge& edge : graph[vertex]) {
                 const double candidate = distance + edge.length;
-                if (candidate < guide.surface_vertex_distances[edge.vertex]) {
+                if (candidate <= search_limit &&
+                    candidate < guide.surface_vertex_distances[edge.vertex]) {
                     guide.surface_vertex_distances[edge.vertex] = candidate;
                     queue.push({candidate, edge.vertex});
                 }
