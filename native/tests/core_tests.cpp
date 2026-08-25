@@ -1443,6 +1443,45 @@ int main() {
                   visible_id) != unmasked.mesh.cell_ids.end());
     }
 
+    // Falloff is a normalized width inside Range. At a fixed 0.75 Range
+    // distance, zero Falloff is a hard full-strength Mask, 0.5 is halfway
+    // through its outer band, and 1.0 is farther through a full-Range band.
+    std::vector<OrientedSample> falloff_samples;
+    falloff_samples.reserve(512U);
+    for (std::uint64_t index = 1U; index <= 512U; ++index) {
+        OrientedSample sample;
+        sample.sample.position = {0.75, 0.0, 0.0};
+        sample.sample.normal = {0.0, 1.0, 0.0};
+        sample.sample.stable_id = index;
+        sample.tangent = {1.0, 0.0, 0.0};
+        falloff_samples.push_back(sample);
+    }
+    Guide falloff_mask = mask_guide;
+    falloff_mask.radius = 1.0;
+    falloff_mask.falloff = 0.0;
+    const GeneratedMesh hard_falloff_mesh = bifrost_scales::shape_samples(
+        falloff_samples,
+        mask_settings,
+        PreviewMode::Settled,
+        {falloff_mask});
+    falloff_mask.falloff = 0.5;
+    const GeneratedMesh half_falloff_mesh = bifrost_scales::shape_samples(
+        falloff_samples,
+        mask_settings,
+        PreviewMode::Settled,
+        {falloff_mask});
+    falloff_mask.falloff = 1.0;
+    const GeneratedMesh full_falloff_mesh = bifrost_scales::shape_samples(
+        falloff_samples,
+        mask_settings,
+        PreviewMode::Settled,
+        {falloff_mask});
+    CHECK(hard_falloff_mesh.scale_count == 0U);
+    CHECK(half_falloff_mesh.scale_count > 0U);
+    CHECK(half_falloff_mesh.scale_count < falloff_samples.size());
+    CHECK(full_falloff_mesh.scale_count > half_falloff_mesh.scale_count);
+    CHECK(full_falloff_mesh.scale_count < falloff_samples.size());
+
     const auto unmasked_distribution = bifrost_scales::distribute(
         mesh,
         mask_settings,
