@@ -225,6 +225,12 @@
       "stage_cache_evictions"
     ],
     "distribution_candidate_guide_index": "deterministic-authored-order-aabb-bvh",
+    "interactive_candidate_batch_runtime_enabled": true,
+    "interactive_conflict_gpu_runtime_enabled": true,
+    "interactive_distribution_candidate_multiplier": 4,
+    "interactive_distribution_preserves_cpu_anchors": true,
+    "interactive_distribution_mask_stage": "post-cell-shape-only",
+    "settled_distribution_unchanged": true,
     "distribution_neighbor_range": "exact-maximum-accepted-spacing-bound",
     "cell_hot_path": "exact-single-site-precomputed-rays-neighbor-metadata",
     "cell_ray_trigonometry": "shared-precomputed-table",
