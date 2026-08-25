@@ -6,7 +6,6 @@ import json
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Mapping, Sequence
 
-from .stable_ids import cell_id_hex, parse_cell_id
 from .version import SCHEMA_VERSION
 
 
@@ -38,33 +37,11 @@ def _clamp_int(value: Any, minimum: int, maximum: int, default: int) -> int:
     return max(int(minimum), min(int(maximum), numeric))
 
 
-def _inherit_int(value: Any, minimum: int, maximum: int) -> int:
-    """Clamp an integer override while reserving zero for "inherit"."""
-
-    try:
-        numeric = int(value)
-    except (TypeError, ValueError):
-        return 0
-    if numeric <= 0:
-        return 0
-    return max(int(minimum), min(int(maximum), numeric))
-
-
 def _safe_identifier(value: Any, fallback: str) -> str:
     text = str(value or "").strip()
     if not text:
         return fallback
     return "".join(character for character in text if character.isalnum() or character in "_-.")[:80] or fallback
-
-
-def _vec3(value: Any, default: tuple[float, float, float]) -> tuple[float, float, float]:
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) != 3:
-        return default
-    try:
-        result = tuple(float(component) for component in value)
-    except (TypeError, ValueError):
-        return default
-    return result if all(component == component and abs(component) != float("inf") for component in result) else default
 
 
 def _cell_mode(value: Any, default: str = "auto") -> str:
@@ -77,149 +54,6 @@ def _cell_mode(value: Any, default: str = "auto") -> str:
         "auto": "auto",
     }
     return aliases.get(normalized, default)
-
-
-UNIQUE_OVERRIDE_SCHEMA = "bifrost-scales/unique-overrides/1"
-
-
-@dataclass(frozen=True)
-class UniqueScaleOverride:
-    """Artist-authored per-cell values stored against a Stable Cell ID.
-
-    0.10.0 deliberately separates authoring persistence from Native mesh
-    application.  These values survive scene save/load, Undo/Redo, rebind, and
-    multi-selection editing.  The following Native stage consumes the same
-    canonical mapping without changing the authoring contract.
-
-    ``offset_u`` and ``offset_v`` are local tangent-frame offsets expressed in
-    multiples of the registered cell spacing. ``offset_normal`` uses the same
-    normalized unit. ``sides`` and ``divisions`` use zero as "inherit".
-    """
-
-    schema: str = UNIQUE_OVERRIDE_SCHEMA
-    enabled: bool = False
-    offset_u: float = 0.0
-    offset_v: float = 0.0
-    offset_normal: float = 0.0
-    rotation_degrees: float = 0.0
-    size_multiplier: float = 1.0
-    width_multiplier: float = 1.0
-    length_multiplier: float = 1.0
-    sides: int = 0
-    divisions: int = 0
-
-    @classmethod
-    def from_mapping(
-        cls,
-        values: Mapping[str, Any] | None,
-    ) -> "UniqueScaleOverride":
-        values = values or {}
-        return cls(
-            schema=UNIQUE_OVERRIDE_SCHEMA,
-            enabled=_as_bool(values.get("enabled"), False),
-            offset_u=_clamp(values.get("offset_u"), -2.0, 2.0, 0.0),
-            offset_v=_clamp(values.get("offset_v"), -2.0, 2.0, 0.0),
-            offset_normal=_clamp(
-                values.get("offset_normal"), -2.0, 2.0, 0.0
-            ),
-            rotation_degrees=_clamp(
-                values.get("rotation_degrees"), -180.0, 180.0, 0.0
-            ),
-            size_multiplier=_clamp(
-                values.get("size_multiplier"), 0.05, 8.0, 1.0
-            ),
-            width_multiplier=_clamp(
-                values.get("width_multiplier"), 0.05, 8.0, 1.0
-            ),
-            length_multiplier=_clamp(
-                values.get("length_multiplier"), 0.05, 8.0, 1.0
-            ),
-            sides=_inherit_int(values.get("sides"), 3, 64),
-            divisions=_inherit_int(values.get("divisions"), 1, 6),
-        )
-
-    def is_authored(self) -> bool:
-        return bool(
-            self.enabled
-            or abs(self.offset_u) > 1.0e-12
-            or abs(self.offset_v) > 1.0e-12
-            or abs(self.offset_normal) > 1.0e-12
-            or abs(self.rotation_degrees) > 1.0e-12
-            or abs(self.size_multiplier - 1.0) > 1.0e-12
-            or abs(self.width_multiplier - 1.0) > 1.0e-12
-            or abs(self.length_multiplier - 1.0) > 1.0e-12
-            or self.sides > 0
-            or self.divisions > 0
-        )
-
-
-@dataclass(frozen=True)
-class UniqueScaleRegistration:
-    """Persistent identity snapshot for one artist-registered generated cell."""
-
-    cell_id: str = ""
-    name: str = "Unique Scale"
-    position: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    normal: tuple[float, float, float] = (0.0, 1.0, 0.0)
-    triangle_index: int = 0
-    barycentric: tuple[float, float, float] = (1.0, 0.0, 0.0)
-    boundary_signature: str = "0000000000000000"
-    topology_hash: str = "0000000000000000"
-    seed: int = 1
-    override: UniqueScaleOverride = field(default_factory=UniqueScaleOverride)
-
-    @classmethod
-    def from_mapping(cls, values: Mapping[str, Any] | None) -> "UniqueScaleRegistration | None":
-        if not isinstance(values, Mapping):
-            return None
-        try:
-            normalized_id = cell_id_hex(parse_cell_id(values.get("cell_id", "")))
-        except ValueError:
-            return None
-
-        def normalized_hex(name: str) -> str:
-            raw = str(values.get(name, "") or "").strip().lower()
-            if raw.startswith("0x"):
-                raw = raw[2:]
-            try:
-                return "{:016x}".format(int(raw or "0", 16) & ((1 << 64) - 1))
-            except ValueError:
-                return "0000000000000000"
-
-        override_values = values.get("override")
-        if not isinstance(override_values, Mapping):
-            # Accept the short-lived flat prototype keys if a scene was saved
-            # with an internal development build.  They are immediately
-            # normalized to the public nested schema on the next save.
-            override_values = {
-                key: values.get(key)
-                for key in (
-                    "enabled",
-                    "offset_u",
-                    "offset_v",
-                    "offset_normal",
-                    "rotation_degrees",
-                    "size_multiplier",
-                    "width_multiplier",
-                    "length_multiplier",
-                    "sides",
-                    "divisions",
-                )
-                if key in values
-            }
-
-        return cls(
-            cell_id=normalized_id,
-            name=str(values.get("name", "Unique Scale"))[:64] or "Unique Scale",
-            position=_vec3(values.get("position"), (0.0, 0.0, 0.0)),
-            normal=_vec3(values.get("normal"), (0.0, 1.0, 0.0)),
-            triangle_index=max(0, int(values.get("triangle_index", 0) or 0)),
-            barycentric=_vec3(values.get("barycentric"), (1.0, 0.0, 0.0)),
-            boundary_signature=normalized_hex("boundary_signature"),
-            topology_hash=normalized_hex("topology_hash"),
-            seed=_clamp_int(values.get("seed"), -2147483647, 2147483647, 1),
-            override=UniqueScaleOverride.from_mapping(override_values),
-        )
 
 
 @dataclass(frozen=True)
@@ -370,7 +204,6 @@ class ScaleSettings:
     cell_project_to_surface: bool = True
 
     scale_types: tuple[ScaleTypeSettings, ...] = field(default_factory=default_scale_types)
-    unique_scales: tuple[UniqueScaleRegistration, ...] = ()
 
     interactive_budget: int = 128
     settled_budget: int = 512
@@ -389,7 +222,6 @@ class ScaleSettings:
             values.get("interactive_budget"), 1, 50000, defaults.interactive_budget
         )
         scale_types = cls._parse_scale_types(values.get("scale_types"), defaults.scale_types)
-        unique_scales = cls._parse_unique_scales(values.get("unique_scales"))
         return cls(
             target_count=_clamp_int(values.get("target_count"), 1, 50000, defaults.target_count),
             seed=_clamp_int(values.get("seed"), -2147483647, 2147483647, defaults.seed),
@@ -481,7 +313,6 @@ class ScaleSettings:
                 defaults.cell_project_to_surface,
             ),
             scale_types=scale_types,
-            unique_scales=unique_scales,
             interactive_budget=interactive_budget,
             settled_budget=_clamp_int(
                 values.get("settled_budget"), 1, 50000, defaults.settled_budget
@@ -497,20 +328,6 @@ class ScaleSettings:
             color_g=_clamp(values.get("color_g"), 0.0, 1.0, defaults.color_g),
             color_b=_clamp(values.get("color_b"), 0.0, 1.0, defaults.color_b),
         )
-
-    @staticmethod
-    def _parse_unique_scales(raw: Any) -> tuple[UniqueScaleRegistration, ...]:
-        if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
-            return ()
-        result: list[UniqueScaleRegistration] = []
-        seen: set[str] = set()
-        for item in raw[:4096]:
-            parsed = UniqueScaleRegistration.from_mapping(item if isinstance(item, Mapping) else None)
-            if parsed is None or parsed.cell_id in seen:
-                continue
-            seen.add(parsed.cell_id)
-            result.append(parsed)
-        return tuple(result)
 
     @staticmethod
     def _parse_scale_types(

@@ -136,19 +136,23 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "pair_influences" not in source
 
 
-def test_guide_authoring_cell_picker_and_unique_override_authoring_remain_available():
+def test_guide_authoring_and_internal_cell_identity_foundation_remain_available():
     ui = (PACKAGE / "ui.py").read_text(encoding="utf-8")
     scene = (PACKAGE / "scene.py").read_text(encoding="utf-8")
-    picker = (ROOT / "BifrostScales/plug-ins/bifrostScalesCellPicker.py").read_text(encoding="utf-8")
+    backend = (PACKAGE / "backend.py").read_text(encoding="utf-8")
     settings = (PACKAGE / "settings.py").read_text(encoding="utf-8")
+    native_payload = (PACKAGE / "native_payload.py").read_text(encoding="utf-8")
+    picker = (ROOT / "BifrostScales/plug-ins/bifrostScalesCellPicker.py").read_text(encoding="utf-8")
     assert "create_guide_point_button" in ui
     assert "draw_guide_curve_button" in ui
     assert "create_guide_group_button" in ui
-    assert "Native Cell Picker" in ui
-    assert "Unique Override Authoring" in ui
+    assert "Unique Scales" not in ui
+    assert "UniqueScale" not in settings
+    assert "register_selected_unique_scales" not in backend
     assert 'GUIDE_DISPLAY_NAME = "bsGuideDisplayName"' in scene
     assert "drawFeedback" in picker
-    assert "bifrost-scales/unique-overrides/1" in settings
+    assert "cell_metadata_for_indices" in backend
+    assert "resolve_cell_ids" in native_payload
 
 
 def test_build_info_records_the_native_only_boundary():

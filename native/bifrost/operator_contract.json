@@ -293,17 +293,13 @@
     "high_valence_projection_stability": true,
     "uv_boundary_feature": "removed-in-0.9.0-no-runtime-cost"
   },
-  "unique_scale_contract": {
-    "stage": "identity-registration-foundation",
+  "cell_identity_contract": {
+    "stage": "internal-query-foundation",
     "cell_id_schema": "bifrost-scales/cell-id/1",
     "metadata_schema": "bifrost-scales/cell-metadata/1",
     "identity_basis": "topology-hash-seed-authored-candidate-key",
     "normal_preview_metadata": "not-emitted",
     "query_limit": 4096,
-    "registration": "maya-settings-json",
-    "orphan_detection": true,
-    "automatic_nearest_rebind": false,
-    "manual_rebind": true,
-    "shape_overrides": "deferred-to-0.9.1"
+    "persistent_user_registration": false
   }
 }
