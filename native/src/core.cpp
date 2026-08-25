@@ -3508,7 +3508,8 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
     std::uint32_t count,
     PreviewMode mode,
     const PreparedGuides& guides,
-    std::uint32_t* used_workers = nullptr) {
+    std::uint32_t* used_workers = nullptr,
+    GenerationProfile* profile = nullptr) {
     if (used_workers != nullptr) {
         *used_workers = 1U;
     }
@@ -3720,6 +3721,170 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
             false);
     }
 
+    if (mode == PreviewMode::Interactive && samples.size() < count) {
+        const std::uint32_t remaining_count =
+            count - static_cast<std::uint32_t>(samples.size());
+        const std::uint64_t requested_candidates = std::max<std::uint64_t>(
+            static_cast<std::uint64_t>(remaining_count) * 4ULL,
+            static_cast<std::uint64_t>(remaining_count) + 1024ULL);
+        const std::uint32_t candidate_count = static_cast<std::uint32_t>(
+            std::min<std::uint64_t>(
+                requested_candidates,
+                std::numeric_limits<std::uint32_t>::max()));
+        const InteractiveCandidateBatch batch =
+            build_interactive_candidate_batch(mesh, settings, candidate_count);
+        InteractiveCandidateFields fields;
+        fields.density_acceptance.resize(candidate_count);
+        fields.local_spacing.resize(candidate_count);
+        std::vector<double> candidate_density(candidate_count, 1.0);
+        std::vector<double> candidate_size(candidate_count, 1.0);
+        const std::uint32_t field_worker_count = parallel_worker_count(
+            candidate_count,
+            512U);
+        std::vector<std::vector<std::uint32_t>> guide_scratches(
+            field_worker_count);
+        const std::uint32_t field_workers = parallel_for_chunks(
+            candidate_count,
+            512U,
+            [&](std::size_t begin, std::size_t end, std::uint32_t worker_index) {
+                std::vector<std::uint32_t>& scratch =
+                    guide_scratches[worker_index];
+                scratch.reserve(guides.size());
+                for (std::size_t index = begin; index < end; ++index) {
+                    const std::size_t position_offset = index * 3U;
+                    const Vec3 position{
+                        static_cast<double>(batch.positions_xyz[position_offset]),
+                        static_cast<double>(batch.positions_xyz[position_offset + 1U]),
+                        static_cast<double>(batch.positions_xyz[position_offset + 2U]),
+                    };
+                    const DistributionGuideField field =
+                        distribution_guide_index.evaluate(
+                            position,
+                            batch.triangle_indices[index],
+                            scratch);
+                    candidate_density[index] = field.density;
+                    candidate_size[index] = field.size;
+                    fields.density_acceptance[index] = static_cast<float>(clamp(
+                        field.density / maximum_density,
+                        0.002,
+                        1.0));
+                    fields.local_spacing[index] = static_cast<float>(
+                        initial_spacing /
+                        std::sqrt(std::max(0.02, field.density)));
+                }
+            });
+        if (used_workers != nullptr) {
+            *used_workers = std::max(*used_workers, field_workers);
+        }
+
+        gpu::ExecutionInfo conflict_execution;
+        const InteractiveConflictResult conflict =
+            arbitrate_interactive_candidates_accelerated(
+                batch,
+                settings,
+                remaining_count,
+                conflict_execution,
+                fields);
+        merge_gpu_profile(
+            profile,
+            conflict_execution,
+            "interactive-distribution");
+        attempts += conflict.considered_count;
+        if (conflict.default_spacing > 0.0F) {
+            final_spacing = static_cast<double>(conflict.default_spacing);
+        }
+
+        for (const std::uint32_t candidate_index :
+             conflict.accepted_candidate_indices) {
+            if (samples.size() >= count) {
+                break;
+            }
+            const std::size_t position_offset =
+                static_cast<std::size_t>(candidate_index) * 3U;
+            const std::size_t random_offset =
+                static_cast<std::size_t>(candidate_index) *
+                kInteractiveCandidateRandomStride;
+            const Vec3 position{
+                static_cast<double>(batch.positions_xyz[position_offset]),
+                static_cast<double>(batch.positions_xyz[position_offset + 1U]),
+                static_cast<double>(batch.positions_xyz[position_offset + 2U]),
+            };
+            const double local_spacing =
+                static_cast<double>(fields.local_spacing[candidate_index]);
+            const GridCell cell = cell_for(position, cell_size);
+            const double maximum_neighbor_threshold = 0.5 *
+                (local_spacing + largest_accepted_spacing);
+            const int neighbor_range = std::max(
+                1,
+                static_cast<int>(std::ceil(
+                    maximum_neighbor_threshold / cell_size)));
+            bool too_close = false;
+            for (int x = -neighbor_range; x <= neighbor_range && !too_close; ++x) {
+                for (int y = -neighbor_range; y <= neighbor_range && !too_close; ++y) {
+                    for (int z = -neighbor_range; z <= neighbor_range && !too_close; ++z) {
+                        const auto found = grid.find({
+                            cell.x + x,
+                            cell.y + y,
+                            cell.z + z,
+                        });
+                        if (found == grid.end()) {
+                            continue;
+                        }
+                        for (const std::uint32_t sample_index : found->second) {
+                            const Sample& other = samples[sample_index];
+                            const double threshold = 0.5 * (
+                                local_spacing +
+                                std::max(1.0e-12, other.local_spacing));
+                            if (length_squared(sub(position, other.position)) <
+                                threshold * threshold) {
+                                too_close = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if (too_close) {
+                continue;
+            }
+
+            const std::uint32_t triangle_index =
+                batch.triangle_indices[candidate_index];
+            samples.push_back({
+                position,
+                {
+                    static_cast<double>(batch.normals_xyz[position_offset]),
+                    static_cast<double>(batch.normals_xyz[position_offset + 1U]),
+                    static_cast<double>(batch.normals_xyz[position_offset + 2U]),
+                },
+                triangle_index,
+                {
+                    static_cast<double>(batch.barycentric[position_offset]),
+                    static_cast<double>(batch.barycentric[position_offset + 1U]),
+                    static_cast<double>(batch.barycentric[position_offset + 2U]),
+                },
+                static_cast<double>(batch.random_values[random_offset + 2U]),
+                static_cast<double>(batch.random_values[random_offset + 3U]),
+                static_cast<double>(batch.random_values[random_offset + 4U]),
+                static_cast<double>(batch.random_values[random_offset + 5U]),
+                candidate_density[candidate_index],
+                candidate_size[candidate_index],
+                local_spacing,
+                sample_stable_id(
+                    topology_hash,
+                    settings.seed,
+                    kRoleInteractiveSurfaceCandidate,
+                    {batch.candidate_keys[candidate_index]}),
+            });
+            grid[cell].push_back(
+                static_cast<std::uint32_t>(samples.size() - 1U));
+            largest_accepted_spacing = std::max(
+                largest_accepted_spacing,
+                local_spacing);
+        }
+    }
+
+    if (mode != PreviewMode::Interactive) {
     for (std::uint64_t pass_index = 0U;
          pass_index < kRelaxationFactors.size();
          ++pass_index) {
@@ -3823,6 +3988,7 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                 largest_accepted_spacing,
                 local_spacing);
         }
+    }
     }
 
     const std::uint32_t iterations = effective_relax_iterations(settings, mode);
