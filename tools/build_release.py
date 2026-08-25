@@ -1222,6 +1222,8 @@ def build() -> dict[str, str]:
         "guide_groups": True,
         "guide_symmetry": True,
         "guide_mask_effect": True,
+        "guide_mask_density_falloff": True,
+        "guide_falloff_distance": "mesh-edge-shortest-path",
         "scale_type_selection_mode": "strongest-positive-guide-or-group-link",
         "uv_boundary_feature": "removed",
         "preview_scale_limit": 50000,
