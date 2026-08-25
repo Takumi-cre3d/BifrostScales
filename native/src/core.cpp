@@ -33,7 +33,7 @@ namespace {
 
 constexpr double kEpsilon = 1.0e-12;
 constexpr double kPi = 3.1415926535897932384626433832795;
-constexpr double kMaskHardCoreInfluence = 0.98;
+constexpr double kMaskFullSuppressionInfluence = 0.98;
 constexpr double kFixedScaleAspect = 1.65;
 constexpr std::array<double, 5> kRelaxationFactors{1.0, 0.86, 0.73, 0.61, 0.50};
 constexpr std::uint64_t kFnvOffsetBasis64 = 14695981039346656037ULL;
@@ -872,7 +872,7 @@ double mask_acceptance_probability(
     std::uint32_t triangle_index = std::numeric_limits<std::uint32_t>::max()) {
     const double influence =
         mask_influence(position, guides, triangle_index);
-    if (influence >= kMaskHardCoreInfluence) {
+    if (influence >= kMaskFullSuppressionInfluence) {
         return 0.0;
     }
     return clamp(1.0 - influence, 0.0, 1.0);
