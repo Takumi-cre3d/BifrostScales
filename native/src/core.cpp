@@ -34,7 +34,6 @@ namespace {
 constexpr double kEpsilon = 1.0e-12;
 constexpr double kPi = 3.1415926535897932384626433832795;
 constexpr double kMaskHardCoreInfluence = 0.98;
-constexpr double kMaskDensityFloor = 0.02;
 constexpr double kFixedScaleAspect = 1.65;
 constexpr std::array<double, 5> kRelaxationFactors{1.0, 0.86, 0.73, 0.61, 0.50};
 constexpr std::uint64_t kFnvOffsetBasis64 = 14695981039346656037ULL;
@@ -617,25 +616,6 @@ bool is_curve(GuideKind kind) {
            kind == GuideKind::FlowCurve;
 }
 
-double mask_core_fraction(double falloff) {
-    const double exponent = clamp(falloff, 0.1, 8.0);
-    const double target_smooth = std::pow(
-        kMaskHardCoreInfluence,
-        1.0 / exponent);
-    double lower = 0.0;
-    double upper = 1.0;
-    for (std::uint32_t iteration = 0U; iteration < 48U; ++iteration) {
-        const double middle = 0.5 * (lower + upper);
-        const double smooth = 1.0 - middle * middle * (3.0 - 2.0 * middle);
-        if (smooth > target_smooth) {
-            lower = middle;
-        } else {
-            upper = middle;
-        }
-    }
-    return 0.5 * (lower + upper);
-}
-
 struct GuideNearest {
     double distance{0.0};
     Vec3 point{};
@@ -674,7 +654,6 @@ struct PreparedGuide {
     Vec3 bounds_max{};
     double radius{1.0};
     double falloff{2.0};
-    double mask_core_radius{0.0};
     double total_length{0.0};
     std::size_t anchor_segment_count{0U};
     std::vector<PreparedCurveSegment> segments;
@@ -700,9 +679,6 @@ PreparedGuides prepare_guides(const std::vector<Guide>& guides) {
         prepared.fallback_tangent = normalize(guide.direction, {1.0, 0.0, 0.0});
         prepared.radius = std::max(1.0e-6, guide.radius);
         prepared.falloff = clamp(guide.falloff, 0.1, 8.0);
-        prepared.mask_core_radius = prepared.radius *
-            mask_core_fraction(prepared.falloff);
-
         if (guide.points.empty()) {
             prepared.bounds_min = prepared.fallback_point;
             prepared.bounds_max = prepared.fallback_point;
@@ -900,126 +876,6 @@ double mask_acceptance_probability(
         return 0.0;
     }
     return clamp(1.0 - influence, 0.0, 1.0);
-}
-
-bool is_masked(
-    const Vec3& position,
-    const PreparedGuides& guides) {
-    return mask_influence(position, guides) >= kMaskHardCoreInfluence;
-}
-
-double ray_sphere_entry(
-    const Vec3& origin,
-    const Vec3& direction,
-    const Vec3& center,
-    double radius,
-    double maximum) {
-    const double limit = std::max(0.0, maximum);
-    const Vec3 offset = sub(origin, center);
-    const double a = std::max(1.0e-20, dot(direction, direction));
-    const double b = dot(offset, direction);
-    const double c = dot(offset, offset) - radius * radius;
-    const double discriminant = b * b - a * c;
-    if (discriminant < 0.0) {
-        return limit;
-    }
-    const double entry = (-b - std::sqrt(std::max(0.0, discriminant))) / a;
-    return entry >= 0.0 && entry < limit ? entry : limit;
-}
-
-double ray_capsule_entry(
-    const Vec3& origin,
-    const Vec3& direction,
-    const Vec3& start,
-    const Vec3& end,
-    double radius,
-    double maximum) {
-    const double limit = std::max(0.0, maximum);
-    const Vec3 ray = normalize(direction, {1.0, 0.0, 0.0});
-    const Vec3 axis = sub(end, start);
-    const double axis_length_squared = dot(axis, axis);
-    if (axis_length_squared <= 1.0e-20) {
-        return ray_sphere_entry(origin, ray, start, radius, limit);
-    }
-    const Vec3 offset = sub(origin, start);
-    const double axis_ray = dot(axis, ray);
-    const double axis_offset = dot(axis, offset);
-    const double ray_offset = dot(ray, offset);
-    const double offset_squared = dot(offset, offset);
-    const double coefficient_a =
-        axis_length_squared - axis_ray * axis_ray;
-    const double coefficient_b =
-        axis_length_squared * ray_offset - axis_offset * axis_ray;
-    const double coefficient_c =
-        axis_length_squared * offset_squared
-        - axis_offset * axis_offset
-        - radius * radius * axis_length_squared;
-    double best = limit;
-    if (std::abs(coefficient_a) > 1.0e-20) {
-        const double discriminant =
-            coefficient_b * coefficient_b - coefficient_a * coefficient_c;
-        if (discriminant >= 0.0) {
-            const double entry =
-                (-coefficient_b - std::sqrt(std::max(0.0, discriminant))) /
-                coefficient_a;
-            const double axial = axis_offset + entry * axis_ray;
-            if (entry >= 0.0 && entry < best &&
-                axial > 0.0 && axial < axis_length_squared) {
-                best = entry;
-            }
-        }
-    }
-    best = std::min(
-        best,
-        ray_sphere_entry(origin, ray, start, radius, best));
-    best = std::min(
-        best,
-        ray_sphere_entry(origin, ray, end, radius, best));
-    return best;
-}
-
-double mask_entry_radius(
-    const Vec3& origin,
-    const Vec3& direction,
-    double maximum,
-    const PreparedGuides& guides) {
-    const double limit = std::max(0.0, maximum);
-    if (limit <= kEpsilon) {
-        return limit;
-    }
-    if (is_masked(origin, guides)) {
-        return 0.0;
-    }
-    const Vec3 ray = normalize(direction, {1.0, 0.0, 0.0});
-    double best = limit;
-    for (const PreparedGuide& guide : guides) {
-        if (!guide.source || !guide.source->enabled || !guide.uses_mask) {
-            continue;
-        }
-        if (!guide.curve || guide.segments.empty()) {
-            best = std::min(
-                best,
-                ray_sphere_entry(
-                    origin,
-                    ray,
-                    guide.fallback_point,
-                    guide.mask_core_radius,
-                    best));
-            continue;
-        }
-        for (const PreparedCurveSegment& segment : guide.segments) {
-            best = std::min(
-                best,
-                ray_capsule_entry(
-                    origin,
-                    ray,
-                    segment.start,
-                    segment.end,
-                    guide.mask_core_radius,
-                    best));
-        }
-    }
-    return best;
 }
 
 std::uint32_t mask_guide_count(const PreparedGuides& guides) {
@@ -3111,7 +2967,6 @@ CellResult build_cells_impl(
     const std::uint32_t projection_rings = effective_cell_projection_rings(settings, mode);
     constexpr double normal_threshold = 0.0;
     constexpr std::size_t neighbor_limit = 64U;
-    const bool has_mask_guides = mask_guide_count(guides) > 0U;
 
     // Cell rays share the same angular table. Computing sin/cos once removes
     // hundreds of thousands of transcendental calls on 20-ray settled cells
@@ -3146,11 +3001,7 @@ CellResult build_cells_impl(
     for (const Sample& sample : samples) {
         const double spacing = std::max(
             1.0e-8,
-            sample.cell_spacing > 0.0
-                ? sample.cell_spacing
-                : (sample.local_spacing > 0.0
-                       ? sample.local_spacing
-                       : fallback_spacing));
+            sample.local_spacing > 0.0 ? sample.local_spacing : fallback_spacing);
         spacings.push_back(spacing);
         maximum_spacing = std::max(maximum_spacing, spacing);
     }
@@ -3191,7 +3042,6 @@ CellResult build_cells_impl(
         std::uint64_t neighbors{0U};
         std::uint64_t clipped_rays{0U};
         std::uint64_t boundary_clipped_rays{0U};
-        std::uint64_t mask_clipped_rays{0U};
         std::uint64_t symmetry_stabilized_cells{0U};
         std::uint64_t symmetry_competitor_count{0U};
     };
@@ -3361,18 +3211,6 @@ CellResult build_cells_impl(
                         radius = boundary_limit;
                         ++local_stats.boundary_clipped_rays;
                     }
-                    if (has_mask_guides) {
-                        const double mask_limit = mask_entry_radius(
-                            sample.position,
-                            ray,
-                            radius,
-                            guides);
-                        if (mask_limit < radius - 1.0e-10) {
-                            radius = mask_limit;
-                            hard_clipped = true;
-                            ++local_stats.mask_clipped_rays;
-                        }
-                    }
                     const double minimum_radius = hard_clipped
                         ? 1.0e-8
                         : fallback_spacing * 0.025;
@@ -3400,14 +3238,12 @@ CellResult build_cells_impl(
     std::uint64_t total_neighbors = 0U;
     std::uint64_t total_clipped_rays = 0U;
     std::uint64_t boundary_clipped_rays = 0U;
-    std::uint64_t mask_clipped_rays = 0U;
     std::uint64_t symmetry_stabilized_cells = 0U;
     std::uint64_t symmetry_competitor_count = 0U;
     for (const CellWorkerStats& stats : worker_stats) {
         total_neighbors += stats.neighbors;
         total_clipped_rays += stats.clipped_rays;
         boundary_clipped_rays += stats.boundary_clipped_rays;
-        mask_clipped_rays += stats.mask_clipped_rays;
         symmetry_stabilized_cells += stats.symmetry_stabilized_cells;
         symmetry_competitor_count += stats.symmetry_competitor_count;
     }
@@ -3428,10 +3264,7 @@ CellResult build_cells_impl(
         std::min<std::uint64_t>(
             boundary_clipped_rays,
             std::numeric_limits<std::uint32_t>::max()));
-    report.mask_clipped_rays = static_cast<std::uint32_t>(
-        std::min<std::uint64_t>(
-            mask_clipped_rays,
-            std::numeric_limits<std::uint32_t>::max()));
+    report.mask_clipped_rays = 0U;
     report.symmetry_stabilized_cells = static_cast<std::uint32_t>(
         std::min<std::uint64_t>(
             symmetry_stabilized_cells,
@@ -3679,23 +3512,7 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
     std::vector<Sample> anchor_samples;
     anchor_samples.reserve(boundary_anchors.size() + authored_anchors.size());
     std::uint32_t boundary_anchor_count = 0U;
-    std::uint32_t masked_candidates = 0U;
     double largest_accepted_spacing = initial_spacing;
-
-    auto rejected_by_mask = [&](
-        const Vec3& position,
-        std::uint32_t triangle_index) {
-        const double acceptance =
-            mask_acceptance_probability(position, guides, triangle_index);
-        if (acceptance >= 1.0) {
-            return false;
-        }
-        if (acceptance <= 0.0 || rng.random() > acceptance) {
-            ++masked_candidates;
-            return true;
-        }
-        return false;
-    };
 
     auto accept_anchor = [&](
         const SurfaceSampleProjection& projected,
@@ -3705,25 +3522,12 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
         if (samples.size() >= anchor_limit) {
             return;
         }
-        if (rejected_by_mask(projected.point, projected.triangle_index)) {
-            return;
-        }
         auto [density_multiplier, size_multiplier] = density_factors(
             projected.point,
             guides,
             projected.triangle_index);
-        const double mask_density = std::max(
-            kMaskDensityFloor,
-            mask_acceptance_probability(
-                projected.point,
-                guides,
-                projected.triangle_index));
-        const double cell_density_multiplier = density_multiplier;
-        density_multiplier *= mask_density;
-        const double cell_spacing = initial_spacing /
-            std::sqrt(std::max(kMaskDensityFloor, cell_density_multiplier));
         const double local_spacing = initial_spacing /
-            std::sqrt(std::max(kMaskDensityFloor, density_multiplier));
+            std::sqrt(std::max(0.02, density_multiplier));
         const GridCell cell = cell_for(projected.point, cell_size);
         const double maximum_neighbor_threshold = 0.5 *
             (local_spacing + largest_accepted_spacing);
@@ -3788,7 +3592,6 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
             local_spacing,
             stable_id,
         };
-        accepted.cell_spacing = cell_spacing;
         const std::uint32_t sample_index = static_cast<std::uint32_t>(samples.size());
         anchor_samples.push_back(accepted);
         samples.push_back(std::move(accepted));
@@ -3868,16 +3671,7 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                     position,
                     triangle_index,
                     distribution_guide_scratch);
-            if (field.mask_acceptance < 1.0 &&
-                (field.mask_acceptance <= 0.0 ||
-                 rng.random() > field.mask_acceptance)) {
-                ++masked_candidates;
-                continue;
-            }
-            const double mask_density =
-                std::max(kMaskDensityFloor, field.mask_acceptance);
-            const double density_multiplier =
-                field.density * mask_density;
+            const double density_multiplier = field.density;
             const double size_multiplier = field.size;
             const double acceptance = clamp(
                 density_multiplier / maximum_density,
@@ -3887,8 +3681,6 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                 continue;
             }
             const Vec3 normal = normals[triangle_index];
-            const double cell_spacing = spacing /
-                std::sqrt(std::max(0.02, field.density));
             const double local_spacing = spacing /
                 std::sqrt(std::max(0.02, density_multiplier));
             const GridCell cell = cell_for(position, cell_size);
@@ -3940,7 +3732,6 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                     kRoleSurfaceCandidate,
                     {pass_index, attempts}),
             });
-            samples.back().cell_spacing = cell_spacing;
             grid[cell].push_back(sample_index);
             largest_accepted_spacing = std::max(
                 largest_accepted_spacing,
@@ -3948,7 +3739,6 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
         }
     }
 
-    const std::vector<Sample> unrelaxed_samples = samples;
     const std::uint32_t iterations = effective_relax_iterations(settings, mode);
     std::uint32_t relax_worker_count = 1U;
     const std::uint32_t moved = relax_samples(
@@ -3960,21 +3750,6 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
         &relax_worker_count);
     if (used_workers != nullptr) {
         *used_workers = std::max(*used_workers, relax_worker_count);
-    }
-    if (mask_guide_count(guides) > 0U) {
-        for (std::size_t index = 0U; index < samples.size(); ++index) {
-            const double before = mask_influence(
-                unrelaxed_samples[index].position,
-                guides,
-                unrelaxed_samples[index].triangle_index);
-            const double after = mask_influence(
-                samples[index].position,
-                guides,
-                samples[index].triangle_index);
-            if (after > before + 1.0e-12) {
-                samples[index] = unrelaxed_samples[index];
-            }
-        }
     }
     for (std::size_t index = 0U;
          index < anchor_samples.size() && index < samples.size();
@@ -3993,7 +3768,7 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
     report.density_guide_count = guide_count(guides, true);
     report.direction_guide_count = guide_count(guides, false);
     report.mask_guide_count = mask_guide_count(guides);
-    report.masked_candidate_count = masked_candidates;
+    report.masked_candidate_count = 0U;
     report.open_boundary_edge_count = boundary_topology.open_edge_count;
     report.boundary_anchor_count = boundary_anchor_count;
     report.boundary_density_adapted = boundary_density_adapted;
