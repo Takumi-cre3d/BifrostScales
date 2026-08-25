@@ -185,6 +185,8 @@ def test_build_info_records_the_native_only_boundary():
         "single-site-precomputed-ray-table-normal-component-mask-gate"
     )
     assert info["direction_pair_partition_runtime"] is False
+    assert info["guide_mask_density_falloff"] is True
+    assert info["guide_falloff_distance"] == "mesh-edge-shortest-path"
     assert info["native_pack_rebuild_required_for_release"] is True
     assert info["installer_native_preservation_scope"] == "installed-pack-only"
     assert info["installer_discards_transient_bifrost_out"] is True
