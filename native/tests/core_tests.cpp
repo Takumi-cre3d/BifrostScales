@@ -1452,30 +1452,17 @@ int main() {
         {surface_mask});
     std::uint32_t guided_layer_near = 0U;
     std::uint32_t disconnected_layer_near = 0U;
-    std::uint32_t guided_layer_total = 0U;
-    std::uint32_t disconnected_layer_total = 0U;
-    double guided_minimum_radius = std::numeric_limits<double>::infinity();
-    double disconnected_minimum_radius = std::numeric_limits<double>::infinity();
     for (const Sample& sample : surface_mask_distribution.samples) {
         const double radial = std::hypot(sample.position.x, sample.position.z);
+        if (radial >= 0.75) {
+            continue;
+        }
         if (std::abs(sample.position.y) < 1.0e-9) {
-            ++guided_layer_total;
-            guided_minimum_radius = std::min(guided_minimum_radius, radial);
-            guided_layer_near += radial < 0.75;
+            ++guided_layer_near;
         } else if (std::abs(sample.position.y - 0.08) < 1.0e-9) {
-            ++disconnected_layer_total;
-            disconnected_minimum_radius =
-                std::min(disconnected_minimum_radius, radial);
-            disconnected_layer_near += radial < 0.75;
+            ++disconnected_layer_near;
         }
     }
-    std::cerr << "surface guide layer counts: guided="
-              << guided_layer_near << "/" << guided_layer_total
-              << " disconnected="
-              << disconnected_layer_near << "/" << disconnected_layer_total
-              << " minimum="
-              << guided_minimum_radius << "/" << disconnected_minimum_radius
-              << "\n";
     CHECK(disconnected_layer_near >= 1U);
     CHECK(disconnected_layer_near > guided_layer_near * 2U);
 
