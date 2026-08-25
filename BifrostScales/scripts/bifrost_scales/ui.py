@@ -2396,6 +2396,16 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                     report.native_stage_cache_evictions,
                 )
             )
+            if report.native_cells_ms > 0.0:
+                performance_text += (
+                    "\nCell: setup {:.1f} / neighbors {:.1f} / boundaries {:.1f} / "
+                    "projection {:.1f} ms".format(
+                        report.native_cell_setup_ms,
+                        report.native_cell_neighbors_ms,
+                        report.native_cell_boundaries_ms,
+                        report.native_cell_projection_ms,
+                    )
+                )
             if getattr(report, "native_gpu_compute", False):
                 performance_text += (
                     "\nGPU Orientation: {} samples | upload {:.2f} / kernel {:.2f} / "
@@ -2450,7 +2460,9 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             self._append(
                 "r{} native-profile: backend={} gpu={} workers={}/{}/{}/{} cache={}/{} evict={} "
                 "payload={:.2f} source={:.2f} distribution={:.2f} "
-                "orientation={:.2f} cells={:.2f} shape={:.2f} core={:.2f} "
+                "orientation={:.2f} cells={:.2f} "
+                "cellParts={:.2f}/{:.2f}/{:.2f}/{:.2f} "
+                "shape={:.2f} core={:.2f} "
                 "encode={:.2f} operator={:.2f} graphPublish={:.2f} ms".format(
                     revision,
                     report.native_compute_backend or "cpu",
@@ -2467,6 +2479,10 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                     report.native_distribution_ms,
                     report.native_orientation_ms,
                     report.native_cells_ms,
+                    report.native_cell_setup_ms,
+                    report.native_cell_neighbors_ms,
+                    report.native_cell_boundaries_ms,
+                    report.native_cell_projection_ms,
                     report.native_shape_ms,
                     report.native_core_total_ms,
                     report.native_encode_ms,

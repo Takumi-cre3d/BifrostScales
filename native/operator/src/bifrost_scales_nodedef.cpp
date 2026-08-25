@@ -334,6 +334,10 @@ std::string make_profile_json(
         << ",\"distribution_ms\":" << generation.distribution_ms
         << ",\"orientation_ms\":" << generation.orientation_ms
         << ",\"cells_ms\":" << generation.cells_ms
+        << ",\"cell_setup_ms\":" << generation.cell_setup_ms
+        << ",\"cell_neighbors_ms\":" << generation.cell_neighbors_ms
+        << ",\"cell_boundaries_ms\":" << generation.cell_boundaries_ms
+        << ",\"cell_projection_ms\":" << generation.cell_projection_ms
         << ",\"shape_ms\":" << generation.shape_ms
         << ",\"core_total_ms\":" << generation.total_ms
         << ",\"distribution_cache_hit\":"

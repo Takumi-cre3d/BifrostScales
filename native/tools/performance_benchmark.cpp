@@ -105,12 +105,21 @@ struct Row {
     double direction_warm_cells_ms{0.0};
     double direction_warm_shape_ms{0.0};
     double direction_warm_wall_ms{0.0};
+    double cold_cell_setup_ms{0.0};
+    double cold_cell_neighbors_ms{0.0};
+    double cold_cell_boundaries_ms{0.0};
+    double cold_cell_projection_ms{0.0};
+    double cell_warm_setup_ms{0.0};
+    double cell_warm_neighbors_ms{0.0};
+    double cell_warm_boundaries_ms{0.0};
+    double cell_warm_projection_ms{0.0};
 };
 
 Row run_case(
     const bifrost_scales::Mesh& mesh,
     std::uint32_t count,
-    std::uint32_t repeats) {
+    std::uint32_t repeats,
+    double density_multiplier) {
     bifrost_scales::Settings settings;
     settings.target_count = count;
     settings.settled_budget = count;
@@ -147,7 +156,20 @@ Row run_case(
     point.use_size = false;
     point.use_direction = true;
 
-    const std::vector<bifrost_scales::Guide> guides{curve, point};
+    std::vector<bifrost_scales::Guide> guides{curve, point};
+    if (density_multiplier > 0.0) {
+        bifrost_scales::Guide density;
+        density.id = "benchmark-density";
+        density.kind = bifrost_scales::GuideKind::DensityPoint;
+        density.points = {{0.0, 0.0, 0.0}};
+        density.radius = 2.5;
+        density.falloff = 1.0;
+        density.density_multiplier = density_multiplier;
+        density.use_density = true;
+        density.use_size = false;
+        density.use_direction = false;
+        guides.push_back(std::move(density));
+    }
 
     bifrost_scales::GenerationOptions options;
     options.include_uvs = false;
@@ -172,6 +194,14 @@ Row run_case(
     std::vector<double> direction_warm_cells;
     std::vector<double> direction_warm_shape;
     std::vector<double> direction_warm_wall;
+    std::vector<double> cold_cell_setup;
+    std::vector<double> cold_cell_neighbors;
+    std::vector<double> cold_cell_boundaries;
+    std::vector<double> cold_cell_projection;
+    std::vector<double> cell_warm_setup;
+    std::vector<double> cell_warm_neighbors;
+    std::vector<double> cell_warm_boundaries;
+    std::vector<double> cell_warm_projection;
 
     bifrost_scales::GenerationResult latest;
     for (std::uint32_t repeat = 0U; repeat < repeats; ++repeat) {
@@ -186,6 +216,10 @@ Row run_case(
         cold_distribution.push_back(cold.result.profile.distribution_ms);
         cold_orientation.push_back(cold.result.profile.orientation_ms);
         cold_cells.push_back(cold.result.profile.cells_ms);
+        cold_cell_setup.push_back(cold.result.profile.cell_setup_ms);
+        cold_cell_neighbors.push_back(cold.result.profile.cell_neighbors_ms);
+        cold_cell_boundaries.push_back(cold.result.profile.cell_boundaries_ms);
+        cold_cell_projection.push_back(cold.result.profile.cell_projection_ms);
         cold_shape.push_back(cold.result.profile.shape_ms);
         cold_core_total.push_back(cold.result.profile.total_ms);
         cold_wall.push_back(cold.wall_ms);
@@ -229,6 +263,10 @@ Row run_case(
             throw std::runtime_error("cell edit cache boundary is invalid");
         }
         cell_warm_cells.push_back(cell_edit.result.profile.cells_ms);
+        cell_warm_setup.push_back(cell_edit.result.profile.cell_setup_ms);
+        cell_warm_neighbors.push_back(cell_edit.result.profile.cell_neighbors_ms);
+        cell_warm_boundaries.push_back(cell_edit.result.profile.cell_boundaries_ms);
+        cell_warm_projection.push_back(cell_edit.result.profile.cell_projection_ms);
         cell_warm_shape.push_back(cell_edit.result.profile.shape_ms);
         cell_warm_wall.push_back(cell_edit.wall_ms);
     }
@@ -253,6 +291,14 @@ Row run_case(
         median(direction_warm_cells),
         median(direction_warm_shape),
         median(direction_warm_wall),
+        median(cold_cell_setup),
+        median(cold_cell_neighbors),
+        median(cold_cell_boundaries),
+        median(cold_cell_projection),
+        median(cell_warm_setup),
+        median(cell_warm_neighbors),
+        median(cell_warm_boundaries),
+        median(cell_warm_projection),
     };
 }
 
@@ -263,6 +309,7 @@ int main(int argc, char** argv) {
         std::string output_path;
         std::uint32_t repeats = 3U;
         std::uint32_t mesh_divisions = 100U;
+        double density_multiplier = 0.0;
         std::vector<std::uint32_t> counts{
             512U,
             2000U,
@@ -283,6 +330,12 @@ int main(int argc, char** argv) {
                 if (mesh_divisions == 0U) {
                     throw std::runtime_error(
                         "--mesh-divisions must be greater than zero");
+                }
+            } else if (argument == "--density-multiplier" && index + 1 < argc) {
+                density_multiplier = std::stod(argv[++index]);
+                if (density_multiplier <= 0.0) {
+                    throw std::runtime_error(
+                        "--density-multiplier must be greater than zero");
                 }
             } else if (argument == "--counts" && index + 1 < argc) {
                 counts.clear();
@@ -321,7 +374,11 @@ int main(int argc, char** argv) {
         std::vector<Row> rows;
         rows.reserve(counts.size());
         for (const std::uint32_t count : counts) {
-            rows.push_back(run_case(mesh, count, repeats));
+            rows.push_back(run_case(
+                mesh,
+                count,
+                repeats,
+                density_multiplier));
         }
 
         std::ofstream file;
@@ -342,7 +399,11 @@ int main(int argc, char** argv) {
                "shape_warm_shape_ms,shape_warm_wall_ms,"
                "cell_warm_cells_ms,cell_warm_shape_ms,cell_warm_wall_ms,"
                "direction_warm_orientation_ms,direction_warm_cells_ms,"
-               "direction_warm_shape_ms,direction_warm_wall_ms\n";
+               "direction_warm_shape_ms,direction_warm_wall_ms,"
+               "cold_cell_setup_ms,cold_cell_neighbors_ms,"
+               "cold_cell_boundaries_ms,cold_cell_projection_ms,"
+               "cell_warm_setup_ms,cell_warm_neighbors_ms,"
+               "cell_warm_boundaries_ms,cell_warm_projection_ms\n";
         for (const Row& row : rows) {
             *output
                 << row.requested << ','
@@ -363,7 +424,15 @@ int main(int argc, char** argv) {
                 << row.direction_warm_orientation_ms << ','
                 << row.direction_warm_cells_ms << ','
                 << row.direction_warm_shape_ms << ','
-                << row.direction_warm_wall_ms << '\n';
+                << row.direction_warm_wall_ms << ','
+                << row.cold_cell_setup_ms << ','
+                << row.cold_cell_neighbors_ms << ','
+                << row.cold_cell_boundaries_ms << ','
+                << row.cold_cell_projection_ms << ','
+                << row.cell_warm_setup_ms << ','
+                << row.cell_warm_neighbors_ms << ','
+                << row.cell_warm_boundaries_ms << ','
+                << row.cell_warm_projection_ms << '\n';
         }
         return 0;
     } catch (const std::exception& error) {
