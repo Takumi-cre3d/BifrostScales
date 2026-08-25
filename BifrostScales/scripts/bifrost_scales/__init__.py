@@ -82,8 +82,3 @@ __all__ = [
 ]
 
 
-try:
-    from .cell_picker_maya import install_ui_injector as _install_cell_picker_ui
-    _install_cell_picker_ui()
-except Exception:
-    pass
