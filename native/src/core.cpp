@@ -3718,10 +3718,12 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                 projected.point,
                 guides,
                 projected.triangle_index));
+        const double cell_density_multiplier = density_multiplier;
+        density_multiplier *= mask_density;
         const double cell_spacing = initial_spacing /
+            std::sqrt(std::max(kMaskDensityFloor, cell_density_multiplier));
+        const double local_spacing = initial_spacing /
             std::sqrt(std::max(kMaskDensityFloor, density_multiplier));
-        const double local_spacing = cell_spacing /
-            std::sqrt(mask_density);
         const GridCell cell = cell_for(projected.point, cell_size);
         const double maximum_neighbor_threshold = 0.5 *
             (local_spacing + largest_accepted_spacing);
@@ -3874,7 +3876,8 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
             }
             const double mask_density =
                 std::max(kMaskDensityFloor, field.mask_acceptance);
-            const double density_multiplier = field.density;
+            const double density_multiplier =
+                field.density * mask_density;
             const double size_multiplier = field.size;
             const double acceptance = clamp(
                 density_multiplier / maximum_density,
@@ -3885,9 +3888,9 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
             }
             const Vec3 normal = normals[triangle_index];
             const double cell_spacing = spacing /
+                std::sqrt(std::max(0.02, field.density));
+            const double local_spacing = spacing /
                 std::sqrt(std::max(0.02, density_multiplier));
-            const double local_spacing = cell_spacing /
-                std::sqrt(mask_density);
             const GridCell cell = cell_for(position, cell_size);
             const double maximum_neighbor_threshold = 0.5 *
                 (local_spacing + largest_accepted_spacing);
