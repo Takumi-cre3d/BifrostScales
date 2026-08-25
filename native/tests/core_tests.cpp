@@ -1943,18 +1943,24 @@ int main() {
     CHECK(gpu_attempt.mesh.scale_count > 0U);
     if (gpu_attempt.profile.gpu_compute_used) {
         CHECK(gpu_attempt.profile.gpu_compute_available);
-        CHECK(gpu_attempt.profile.orientation_worker_threads == 0U);
-        CHECK(gpu_attempt.profile.gpu_sample_count ==
+        CHECK(gpu_attempt.profile.gpu_sample_count >=
               gpu_attempt.report.accepted_count);
+        const bool distribution_conflict_gpu =
+            gpu_attempt.profile.gpu_compute_backend.find("conflict") !=
+            std::string::npos;
+        CHECK(distribution_conflict_gpu);
+        // Surface-connected Direction remains on the exact CPU path while
+        // Interactive Distribution conflict arbitration uses OpenCL.
+        CHECK(gpu_attempt.profile.orientation_worker_threads >= 1U);
     } else {
         CHECK(!gpu_attempt.profile.gpu_fallback_reason.empty());
         CHECK(gpu_attempt.profile.orientation_worker_threads >= 1U);
     }
     set_gpu_override("auto");
 
-    // Interactive Candidate Batch is an isolated, counter-based Preview
-    // foundation. It must be deterministic, prefix-stable, compact, and have
-    // no effect on the exact Stage Cache or settled output.
+    // Interactive Candidate Batch is the counter-based production Preview
+    // foundation. It must remain deterministic, prefix-stable, compact, and
+    // have no effect on Settled output.
     Settings candidate_settings;
     candidate_settings.seed = 1106U;
     const auto candidate_small =
