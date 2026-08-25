@@ -160,76 +160,21 @@ def test_cell_settings_clamp_and_round_trip():
     assert ScaleSettings.from_json(settings.to_json()) == settings
 
 
-def test_unique_scale_override_round_trip_and_clamping():
-    from dataclasses import asdict
-
-    from bifrost_scales.settings import (
-        UNIQUE_OVERRIDE_SCHEMA,
-        UniqueScaleOverride,
-        UniqueScaleRegistration,
-    )
-
-    registration = UniqueScaleRegistration.from_mapping(
+def test_removed_unique_scales_from_legacy_scene_are_ignored():
+    settings = ScaleSettings.from_mapping(
         {
-            "cell_id": "1",
-            "name": "Landmark",
-            "override": {
-                "schema": "obsolete-schema",
-                "enabled": True,
-                "offset_u": 99,
-                "offset_v": -99,
-                "offset_normal": 0.25,
-                "rotation_degrees": 999,
-                "size_multiplier": 0,
-                "width_multiplier": 99,
-                "length_multiplier": 1.75,
-                "sides": 2,
-                "divisions": 99,
-            },
+            "target_count": 17,
+            "unique_scales": [
+                {
+                    "cell_id": "00000000000000ab",
+                    "name": "Legacy Landmark",
+                    "override": {"enabled": True, "size_multiplier": 2.0},
+                }
+            ],
         }
     )
 
-    assert registration is not None
-    override = registration.override
-    assert override.schema == UNIQUE_OVERRIDE_SCHEMA
-    assert override.enabled is True
-    assert override.offset_u == 2.0
-    assert override.offset_v == -2.0
-    assert override.offset_normal == 0.25
-    assert override.rotation_degrees == 180.0
-    assert override.size_multiplier == 0.05
-    assert override.width_multiplier == 8.0
-    assert override.length_multiplier == 1.75
-    assert override.sides == 3
-    assert override.divisions == 6
-    assert override.is_authored()
-
-    settings = ScaleSettings(unique_scales=(registration,))
-    round_tripped = ScaleSettings.from_json(settings.to_json())
-    # Some installer tests deliberately reload the package under the same
-    # module name. Compare the canonical serialized contract rather than
-    # relying on dataclass class identity across those reload boundaries.
-    assert round_tripped.to_mapping() == settings.to_mapping()
-    assert asdict(round_tripped.unique_scales[0].override)["schema"] == UNIQUE_OVERRIDE_SCHEMA
-
-    neutral = UniqueScaleOverride()
-    assert neutral.is_authored() is False
-
-
-def test_unique_scale_override_accepts_inherit_and_flat_prototype_keys():
-    from bifrost_scales.settings import UniqueScaleRegistration
-
-    registration = UniqueScaleRegistration.from_mapping(
-        {
-            "cell_id": "2",
-            "enabled": True,
-            "offset_u": 0.4,
-            "sides": 0,
-            "divisions": -1,
-        }
-    )
-    assert registration is not None
-    assert registration.override.enabled is True
-    assert registration.override.offset_u == 0.4
-    assert registration.override.sides == 0
-    assert registration.override.divisions == 0
+    assert settings.target_count == 17
+    assert not hasattr(settings, "unique_scales")
+    assert "unique_scales" not in settings.to_mapping()
+    assert "unique_scales" not in settings.to_json()
