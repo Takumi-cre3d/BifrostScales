@@ -5853,6 +5853,11 @@ GenerationResult generate(
         report.symmetry_competitor_count = 0U;
         report.cell_shape_divisions = 0U;
     }
+    report.mask_guide_count = mask_guide_count(prepared_guides);
+    report.masked_candidate_count = masked_output_count(
+        orientation->samples,
+        prepared_guides);
+    report.mask_clipped_rays = 0U;
     if (options.include_scale_type_ids) {
         report.type_counts = type_counts(generated, settings);
     }
