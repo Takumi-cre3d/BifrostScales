@@ -4,7 +4,7 @@ import pytest
 
 from bifrost_scales.cell_identity import CellMetadata
 from bifrost_scales.native_payload import NATIVE_PAYLOAD_SCHEMA, build_native_payload
-from bifrost_scales.settings import ScaleSettings, UniqueScaleRegistration
+from bifrost_scales.settings import ScaleSettings
 from bifrost_scales.stable_ids import (
     ROLE_CURVE_CENTER,
     ROLE_OPEN_BOUNDARY,
@@ -57,17 +57,15 @@ def test_cell_metadata_is_a_lightweight_native_query_contract():
     assert item.scale_index == 7
 
 
-def test_unique_scale_settings_roundtrip_and_runtime_payload_separation():
-    registration = UniqueScaleRegistration(
-        cell_id="00000000000000ab",
-        name="Landmark",
-        position=(1.0, 2.0, 3.0),
-        topology_hash="00000000000000cd",
-        seed=19,
+def test_cell_id_queries_remain_available_without_unique_scale_settings():
+    settings = ScaleSettings.from_mapping(
+        {
+            "unique_scales": [
+                {"cell_id": "00000000000000ab", "name": "Legacy Landmark"}
+            ]
+        }
     )
-    settings = ScaleSettings(unique_scales=(registration,))
-    roundtrip = ScaleSettings.from_mapping(settings.to_mapping())
-    assert roundtrip.unique_scales == (registration,)
+    assert not hasattr(settings, "unique_scales")
 
     payload = json.loads(
         build_native_payload(
