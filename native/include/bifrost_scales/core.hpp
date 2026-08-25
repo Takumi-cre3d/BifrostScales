@@ -264,6 +264,10 @@ struct GenerationProfile {
     double distribution_ms{0.0};
     double orientation_ms{0.0};
     double cells_ms{0.0};
+    double cell_setup_ms{0.0};
+    double cell_neighbors_ms{0.0};
+    double cell_boundaries_ms{0.0};
+    double cell_projection_ms{0.0};
     double shape_ms{0.0};
     double total_ms{0.0};
     bool distribution_cache_hit{false};

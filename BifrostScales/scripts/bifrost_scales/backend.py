@@ -62,6 +62,10 @@ class BackendApplyReport:
     native_distribution_ms: float = 0.0
     native_orientation_ms: float = 0.0
     native_cells_ms: float = 0.0
+    native_cell_setup_ms: float = 0.0
+    native_cell_neighbors_ms: float = 0.0
+    native_cell_boundaries_ms: float = 0.0
+    native_cell_projection_ms: float = 0.0
     native_shape_ms: float = 0.0
     native_core_total_ms: float = 0.0
     native_encode_ms: float = 0.0
@@ -715,6 +719,10 @@ class NativeMayaBackend:
             native_distribution_ms=profile_ms("distribution_ms"),
             native_orientation_ms=profile_ms("orientation_ms"),
             native_cells_ms=profile_ms("cells_ms"),
+            native_cell_setup_ms=profile_ms("cell_setup_ms"),
+            native_cell_neighbors_ms=profile_ms("cell_neighbors_ms"),
+            native_cell_boundaries_ms=profile_ms("cell_boundaries_ms"),
+            native_cell_projection_ms=profile_ms("cell_projection_ms"),
             native_shape_ms=profile_ms("shape_ms"),
             native_core_total_ms=profile_ms("core_total_ms"),
             native_encode_ms=profile_ms("encode_ms"),

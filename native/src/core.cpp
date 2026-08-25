@@ -1487,8 +1487,40 @@ public:
         std::vector<std::uint32_t> unique = triangle_indices;
         std::sort(unique.begin(), unique.end());
         unique.erase(std::unique(unique.begin(), unique.end()), unique.end());
+        const std::uint32_t ring_count = std::min<std::uint32_t>(rings, 16U);
+        std::vector<std::uint32_t> visit_stamps(mesh_.triangles.size(), 0U);
+        std::uint32_t visit_stamp = 0U;
         for (const std::uint32_t triangle_index : unique) {
-            (void)candidates(clamped_triangle(triangle_index), rings);
+            const std::uint32_t source = clamped_triangle(triangle_index);
+            const std::uint64_t key =
+                (static_cast<std::uint64_t>(source) << 32U) |
+                static_cast<std::uint64_t>(ring_count);
+            if (candidate_cache_.find(key) != candidate_cache_.end()) {
+                continue;
+            }
+            ++visit_stamp;
+            std::vector<std::uint32_t> frontier{source};
+            std::vector<std::uint32_t> result{source};
+            visit_stamps[source] = visit_stamp;
+            for (std::uint32_t ring = 0U;
+                 ring < ring_count && !frontier.empty();
+                 ++ring) {
+                std::vector<std::uint32_t> next;
+                for (const std::uint32_t current : frontier) {
+                    for (const std::uint32_t neighbor :
+                         local_topology_->adjacency[current]) {
+                        if (visit_stamps[neighbor] == visit_stamp) {
+                            continue;
+                        }
+                        visit_stamps[neighbor] = visit_stamp;
+                        next.push_back(neighbor);
+                        result.push_back(neighbor);
+                    }
+                }
+                frontier = std::move(next);
+            }
+            std::sort(result.begin(), result.end());
+            candidate_cache_.emplace(key, std::move(result));
         }
     }
 
@@ -3179,6 +3211,13 @@ std::optional<std::pair<double, double>> ray_interval_for_constraints(
     return std::pair<double, double>{lower, upper};
 }
 
+struct CellStageTimings {
+    double setup_ms{0.0};
+    double neighbors_ms{0.0};
+    double boundaries_ms{0.0};
+    double projection_ms{0.0};
+};
+
 CellResult build_cells_impl(
     const Mesh& mesh,
     const std::vector<OrientedSample>& oriented_samples,
@@ -3187,6 +3226,7 @@ CellResult build_cells_impl(
     const PreparedGuides& guides,
     const std::vector<SymmetryPlane>& symmetry_planes,
     GenerationReport report,
+    CellStageTimings* stage_timings = nullptr,
     std::uint32_t* used_workers = nullptr) {
     if (used_workers != nullptr) {
         *used_workers = 1U;
@@ -3194,6 +3234,8 @@ CellResult build_cells_impl(
     // Guides no longer alter Cell topology. Mask is evaluated only while
     // emitting the final mesh, after the complete Cell partition is cached.
     (void)guides;
+    using Clock = std::chrono::steady_clock;
+    const auto setup_started = Clock::now();
     const std::uint32_t ray_count = effective_cell_resolution(settings, mode);
     report.used_cells = true;
     report.cell_resolution = ray_count;
@@ -3316,11 +3358,19 @@ CellResult build_cells_impl(
         std::uint64_t boundary_clipped_rays{0U};
         std::uint64_t symmetry_stabilized_cells{0U};
         std::uint64_t symmetry_competitor_count{0U};
+        double neighbors_ms{0.0};
+        double boundaries_ms{0.0};
+        double projection_ms{0.0};
     };
     const std::uint32_t requested_workers = parallel_worker_count(
         samples.size(),
         192U);
     std::vector<CellWorkerStats> worker_stats(requested_workers);
+
+    if (stage_timings != nullptr) {
+        stage_timings->setup_ms = std::chrono::duration<double, std::milli>(
+            Clock::now() - setup_started).count();
+    }
 
     const std::uint32_t actual_workers = parallel_for_chunks(
         samples.size(),
@@ -3354,6 +3404,7 @@ CellResult build_cells_impl(
                         search_radius / grid_size)));
                 const std::uint32_t component = components[sample_index];
 
+                const auto neighbors_started = Clock::now();
                 neighbors.clear();
                 for (std::int64_t x = -search_cells; x <= search_cells; ++x) {
                     for (std::int64_t y = -search_cells; y <= search_cells; ++y) {
@@ -3427,7 +3478,11 @@ CellResult build_cells_impl(
                     Vec2{0.0, 0.0},
                     competitors,
                     shared_gap_world);
+                local_stats.neighbors_ms +=
+                    std::chrono::duration<double, std::milli>(
+                        Clock::now() - neighbors_started).count();
 
+                const auto boundaries_started = Clock::now();
                 const std::vector<std::uint32_t> nearby_boundaries =
                     boundary_index.query(
                         sample.position,
@@ -3489,14 +3544,23 @@ CellResult build_cells_impl(
                     radius = std::max(
                         minimum_radius,
                         std::min(directional_maximum, radius));
-                    Vec3 endpoint = add(sample.position, mul(ray, radius));
-                    if (settings.cell_project_to_surface) {
+                    cell.boundary.push_back(
+                        add(sample.position, mul(ray, radius)));
+                }
+                local_stats.boundaries_ms +=
+                    std::chrono::duration<double, std::milli>(
+                        Clock::now() - boundaries_started).count();
+                if (settings.cell_project_to_surface) {
+                    const auto projection_started = Clock::now();
+                    for (Vec3& endpoint : cell.boundary) {
                         endpoint = projector.project_prepared(
                             endpoint,
                             sample.triangle_index,
                             projection_rings);
                     }
-                    cell.boundary.push_back(endpoint);
+                    local_stats.projection_ms +=
+                        std::chrono::duration<double, std::milli>(
+                            Clock::now() - projection_started).count();
                 }
                 local_stats.clipped_rays += cell.clipped_rays;
                 cells[sample_index] = std::move(cell);
@@ -3518,6 +3582,17 @@ CellResult build_cells_impl(
         boundary_clipped_rays += stats.boundary_clipped_rays;
         symmetry_stabilized_cells += stats.symmetry_stabilized_cells;
         symmetry_competitor_count += stats.symmetry_competitor_count;
+        if (stage_timings != nullptr) {
+            stage_timings->neighbors_ms = std::max(
+                stage_timings->neighbors_ms,
+                stats.neighbors_ms);
+            stage_timings->boundaries_ms = std::max(
+                stage_timings->boundaries_ms,
+                stats.boundaries_ms);
+            stage_timings->projection_ms = std::max(
+                stage_timings->projection_ms,
+                stats.projection_ms);
+        }
     }
 
     report.cell_count = static_cast<std::uint32_t>(cells.size());
@@ -6188,6 +6263,7 @@ GenerationResult generate(
             mode,
             symmetry_planes);
         const auto cells_started = Clock::now();
+        CellStageTimings cell_stage_timings;
         std::shared_ptr<const CellResult> cells = cache.find_cells(cells_key);
         if (cells) {
             profile.cell_cache_hit = true;
@@ -6200,6 +6276,7 @@ GenerationResult generate(
                 prepared_guides,
                 symmetry_planes,
                 report,
+                &cell_stage_timings,
                 &profile.cell_worker_threads));
             profile.stage_cache_evictions += cache.insert_cells(
                 cells_key,
@@ -6218,6 +6295,10 @@ GenerationResult generate(
             profile.cell_cache_hit && !profile.orientation_cache_hit;
         profile.cells_ms = std::chrono::duration<double, std::milli>(
             Clock::now() - cells_started).count();
+        profile.cell_setup_ms = cell_stage_timings.setup_ms;
+        profile.cell_neighbors_ms = cell_stage_timings.neighbors_ms;
+        profile.cell_boundaries_ms = cell_stage_timings.boundaries_ms;
+        profile.cell_projection_ms = cell_stage_timings.projection_ms;
 
         const auto shape_started = Clock::now();
         generated = build_cell_mesh_impl(
