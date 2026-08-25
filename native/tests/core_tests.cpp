@@ -82,6 +82,27 @@ Mesh plane_mesh() {
     };
 }
 
+Mesh close_disconnected_planes_mesh() {
+    return {
+        {
+            Vec3{-2.0, 0.0, -2.0},
+            Vec3{2.0, 0.0, -2.0},
+            Vec3{2.0, 0.0, 2.0},
+            Vec3{-2.0, 0.0, 2.0},
+            Vec3{-2.0, 0.08, -2.0},
+            Vec3{2.0, 0.08, -2.0},
+            Vec3{2.0, 0.08, 2.0},
+            Vec3{-2.0, 0.08, 2.0},
+        },
+        {
+            Triangle{0, 1, 2},
+            Triangle{0, 2, 3},
+            Triangle{4, 5, 6},
+            Triangle{4, 6, 7},
+        },
+    };
+}
+
 Mesh fan_mesh(std::uint32_t count = 12U) {
     Mesh mesh;
     mesh.vertices.push_back({0.0, 0.0, 0.0});
@@ -1409,6 +1430,36 @@ int main() {
         survived_in_falloff = survived_in_falloff || radial < mask_guide.radius;
     }
     CHECK(survived_in_falloff);
+
+    const Mesh close_layers = close_disconnected_planes_mesh();
+    Guide surface_mask = mask_guide;
+    surface_mask.id = "surface-mask";
+    surface_mask.radius = 1.5;
+    Settings surface_mask_settings = mask_settings;
+    surface_mask_settings.target_count = 700U;
+    surface_mask_settings.settled_budget = 700U;
+    surface_mask_settings.spacing_factor = 0.15;
+    surface_mask_settings.relax_iterations = 0U;
+    surface_mask_settings.seed = 911U;
+    const auto surface_mask_distribution = bifrost_scales::distribute(
+        close_layers,
+        surface_mask_settings,
+        PreviewMode::Settled,
+        {surface_mask});
+    std::uint32_t guided_layer_near = 0U;
+    std::uint32_t disconnected_layer_near = 0U;
+    for (const Sample& sample : surface_mask_distribution.samples) {
+        if (std::hypot(sample.position.x, sample.position.z) >= 0.45) {
+            continue;
+        }
+        if (std::abs(sample.position.y) < 1.0e-9) {
+            ++guided_layer_near;
+        } else if (std::abs(sample.position.y - 0.08) < 1.0e-9) {
+            ++disconnected_layer_near;
+        }
+    }
+    CHECK(disconnected_layer_near >= 8U);
+    CHECK(disconnected_layer_near > guided_layer_near * 2U);
 
     Sample seam_left;
     seam_left.position = {0.45, 0.0, 0.0};
