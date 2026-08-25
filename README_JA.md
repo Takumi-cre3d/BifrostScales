@@ -14,10 +14,10 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 
 ## 機能
 
-- Density／Size／Direction／Flow／Mask Guide
+- メッシュ表面の接続距離でFalloffするDensity／Size／Direction／Flow／Mask Guide
 - Guide GroupとSymmetry authoring
 - Guide連動の複数Scale Type
-- 64-bit Stable Cell IDとCell単位Override authoring
+- 64-bit Stable Cell IDとメッシュ不要のPicker metadata
 - 決定的マルチコアCPU Distribution／Cells／Shape
 - プロセス共有の上限付きStage Cache
 - OpenCL Interactive Orientationと自動CPU fallback
@@ -45,7 +45,6 @@ Interactive Distribution基盤には、Host非依存の2つのContractがあり�
 
 ## 現在の制限
 
-- Cell単位OverrideはMayaへ保存できますが、Native Shapeへの適用は未実装です。
 - Final／BakeはNative契約が完成するまでUIへ公開していません。
 - Interactive Distribution GPU裁定はHost非依存であり、Maya Runtimeへ未接続です。
 - 製品Native buildにはMaya 2026とBifrost SDKの開発環境が必要です。

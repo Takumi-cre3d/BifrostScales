@@ -1054,7 +1054,10 @@ class GuideSet:
         a deterministic sparse transition rather than a binary cutout.
         """
 
-        return max(0.0, min(1.0, 1.0 - self.mask_influence(position)))
+        influence = self.mask_influence(position)
+        if influence >= MASK_HARD_CORE_INFLUENCE:
+            return 0.0
+        return max(0.0, min(1.0, 1.0 - influence))
 
     def is_masked(self, position: Vec3) -> bool:
         """Return True inside the small stable no-scale hard core."""
