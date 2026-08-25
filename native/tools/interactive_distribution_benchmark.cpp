@@ -64,7 +64,7 @@ std::vector<bifrost_scales::Guide> make_guides() {
             {9.0, 0.0, offset},
         };
         guide.radius = 1.45;
-        guide.falloff = 1.8;
+        guide.falloff = 1.0;
         guide.strength = 0.85;
         guide.density_multiplier = 0.72 + 0.035 * index;
         guide.size_multiplier = 0.85 + 0.02 * index;
