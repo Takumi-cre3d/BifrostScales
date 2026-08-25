@@ -1,5 +1,6 @@
 #include "bifrost_scales/core.hpp"
 #include "bifrost_scales/gpu_compute.hpp"
+#include "bifrost_scales/preview_distribution.hpp"
 
 #include <algorithm>
 #include <array>
@@ -41,6 +42,7 @@ constexpr std::uint64_t kFnvPrime64 = 1099511628211ULL;
 constexpr std::uint64_t kRoleOpenBoundary = 1ULL;
 constexpr std::uint64_t kRoleCurveCenter = 2ULL;
 constexpr std::uint64_t kRoleSurfaceCandidate = 3ULL;
+constexpr std::uint64_t kRoleInteractiveSurfaceCandidate = 4ULL;
 constexpr std::uint32_t kAutomaticWorkerCap = 32U;
 
 std::uint32_t configured_worker_limit() {
@@ -124,6 +126,48 @@ std::uint32_t parallel_for_chunks(
         }
     }
     return worker_count;
+}
+
+void merge_gpu_profile(
+    GenerationProfile* profile,
+    const gpu::ExecutionInfo& execution,
+    std::string_view stage) {
+    if (profile == nullptr) {
+        return;
+    }
+    const bool had_gpu_work = profile->gpu_compute_used;
+    profile->gpu_compute_requested =
+        profile->gpu_compute_requested || execution.requested;
+    profile->gpu_compute_available =
+        profile->gpu_compute_available || execution.available;
+    profile->gpu_compute_used =
+        profile->gpu_compute_used || execution.used;
+    if (!execution.device.empty()) {
+        profile->gpu_device = execution.device;
+    }
+    profile->gpu_upload_ms += execution.upload_ms;
+    profile->gpu_kernel_ms += execution.kernel_ms;
+    profile->gpu_readback_ms += execution.readback_ms;
+    profile->gpu_sample_count = std::max(
+        profile->gpu_sample_count,
+        execution.sample_count);
+    if (execution.used) {
+        if (!had_gpu_work || profile->gpu_compute_backend == "cpu-multicore") {
+            profile->gpu_compute_backend = execution.backend;
+        } else if (profile->gpu_compute_backend.find(execution.backend) ==
+                   std::string::npos) {
+            profile->gpu_compute_backend += "+" + execution.backend;
+        }
+    } else if (!had_gpu_work && !execution.backend.empty()) {
+        profile->gpu_compute_backend = execution.backend;
+    }
+    if (!execution.used && !execution.fallback_reason.empty()) {
+        if (!profile->gpu_fallback_reason.empty()) {
+            profile->gpu_fallback_reason += "; ";
+        }
+        profile->gpu_fallback_reason +=
+            std::string(stage) + ": " + execution.fallback_reason;
+    }
 }
 
 std::uint64_t fnv_bytes(std::uint64_t seed, const unsigned char* values, std::size_t size) {
