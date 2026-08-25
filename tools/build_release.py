@@ -1227,6 +1227,8 @@ def build() -> dict[str, str]:
         "guide_mask_preserves_distribution_and_cells": True,
         "guide_mask_visibility_random_basis": "stable-cell-id",
         "guide_falloff_distance": "mesh-edge-shortest-path",
+        "guide_falloff_control": "normalized-width-within-range",
+        "guide_falloff_full_effect_radius": "range-times-one-minus-falloff",
         "scale_type_selection_mode": "strongest-positive-guide-or-group-link",
         "uv_boundary_feature": "removed",
         "preview_scale_limit": 50000,
