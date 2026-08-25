@@ -262,6 +262,7 @@ int main(int argc, char** argv) {
     try {
         std::string output_path;
         std::uint32_t repeats = 3U;
+        std::uint32_t mesh_divisions = 100U;
         std::vector<std::uint32_t> counts{
             512U,
             2000U,
@@ -276,6 +277,13 @@ int main(int argc, char** argv) {
             } else if (argument == "--repeats" && index + 1 < argc) {
                 repeats = static_cast<std::uint32_t>(std::stoul(argv[++index]));
                 repeats = std::max<std::uint32_t>(1U, repeats);
+            } else if (argument == "--mesh-divisions" && index + 1 < argc) {
+                mesh_divisions = static_cast<std::uint32_t>(
+                    std::stoul(argv[++index]));
+                if (mesh_divisions == 0U) {
+                    throw std::runtime_error(
+                        "--mesh-divisions must be greater than zero");
+                }
             } else if (argument == "--counts" && index + 1 < argc) {
                 counts.clear();
                 const std::string encoded = argv[++index];
@@ -309,7 +317,7 @@ int main(int argc, char** argv) {
             }
         }
 
-        const bifrost_scales::Mesh mesh = make_grid(100U, 10.0);
+        const bifrost_scales::Mesh mesh = make_grid(mesh_divisions, 10.0);
         std::vector<Row> rows;
         rows.reserve(counts.size());
         for (const std::uint32_t count : counts) {

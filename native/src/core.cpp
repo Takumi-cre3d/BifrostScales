@@ -228,6 +228,36 @@ std::uint64_t mesh_topology_hash(const Mesh& mesh) {
     return result == 0U ? 1U : result;
 }
 
+std::uint64_t mesh_geometry_hash(const Mesh& mesh) {
+    std::uint64_t result = fnv_text(
+        kFnvOffsetBasis64,
+        "bifrost-scales/mesh-geometry/1");
+    const unsigned char terminator = 0U;
+    result = fnv_bytes(result, &terminator, 1U);
+    result = fnv_u64(result, static_cast<std::uint64_t>(mesh.vertices.size()));
+    for (const Vec3& point : mesh.vertices) {
+        result = fnv_bytes(
+            result,
+            reinterpret_cast<const unsigned char*>(&point.x),
+            sizeof(point.x));
+        result = fnv_bytes(
+            result,
+            reinterpret_cast<const unsigned char*>(&point.y),
+            sizeof(point.y));
+        result = fnv_bytes(
+            result,
+            reinterpret_cast<const unsigned char*>(&point.z),
+            sizeof(point.z));
+    }
+    result = fnv_u64(result, static_cast<std::uint64_t>(mesh.triangles.size()));
+    for (const Triangle& triangle : mesh.triangles) {
+        result = fnv_u64(result, triangle.a);
+        result = fnv_u64(result, triangle.b);
+        result = fnv_u64(result, triangle.c);
+    }
+    return result == 0U ? 1U : result;
+}
+
 std::uint64_t sample_stable_id(
     std::uint64_t topology_hash,
     std::uint64_t distribution_seed,
@@ -680,9 +710,16 @@ struct SurfaceGuideSeed {
     Vec3 point{};
 };
 
+struct SurfaceGraphEdge {
+    std::uint32_t vertex{0U};
+    double length{0.0};
+};
+
 struct SurfaceGuideTopology {
     std::vector<Vec3> edge_midpoints;
     std::vector<std::array<std::uint32_t, 3>> triangle_edge_nodes;
+    std::vector<std::vector<SurfaceGraphEdge>> graph;
+    double maximum_connection_length{0.0};
 };
 
 struct PreparedGuide {
@@ -821,12 +858,11 @@ double guide_distance(
     const PreparedGuide& guide,
     const Vec3& position,
     std::uint32_t triangle_index) {
-    const GuideNearest nearest = nearest_on_guide(guide, position);
     if (guide.surface_topology == nullptr ||
         guide.surface_node_distances.size() !=
             guide.surface_topology->edge_midpoints.size() ||
         triangle_index >= guide.surface_topology->triangle_edge_nodes.size()) {
-        return nearest.distance;
+        return nearest_on_guide(guide, position).distance;
     }
 
     double best = std::numeric_limits<double>::infinity();
@@ -1352,20 +1388,24 @@ public:
         bool build_global_projection = false)
         : mesh_(mesh) {
         if (build_local_projection) {
-            adjacency_ = build_adjacency(mesh);
-            components_ = build_components(adjacency_);
-            vertex_stars_ = build_vertex_stars(mesh);
+            local_topology_ = shared_local_topology(mesh);
         }
         if (build_global_projection) {
             build_global_bvh();
         }
     }
 
+    static void clear_shared_local_topology_cache() {
+        LocalTopologyCache& cache = local_topology_cache();
+        std::lock_guard<std::mutex> lock(cache.mutex);
+        cache.entries.clear();
+    }
+
     [[nodiscard]] std::uint32_t component(std::uint32_t triangle_index) const {
-        if (components_.empty()) {
+        if (!local_topology_) {
             return 0U;
         }
-        return components_[clamped_triangle(triangle_index)];
+        return local_topology_->components[clamped_triangle(triangle_index)];
     }
 
     [[nodiscard]] Vec3 project(
@@ -1441,7 +1481,7 @@ public:
     void prepare_candidates(
         const std::vector<std::uint32_t>& triangle_indices,
         std::uint32_t rings) {
-        if (adjacency_.empty()) {
+        if (!local_topology_) {
             return;
         }
         std::vector<std::uint32_t> unique = triangle_indices;
@@ -1545,13 +1585,64 @@ private:
         }
     };
 
+    struct LocalTopology {
+        std::vector<std::vector<std::uint32_t>> adjacency;
+        std::vector<std::vector<std::uint32_t>> vertex_stars;
+        std::vector<std::uint32_t> components;
+    };
+
+    struct LocalTopologyCacheEntry {
+        std::uint64_t topology_hash{0U};
+        std::size_t vertex_count{0U};
+        std::size_t triangle_count{0U};
+        std::shared_ptr<const LocalTopology> topology;
+    };
+
+    struct LocalTopologyCache {
+        std::mutex mutex;
+        std::vector<LocalTopologyCacheEntry> entries;
+    };
+
     const Mesh& mesh_;
-    std::vector<std::vector<std::uint32_t>> adjacency_;
-    std::vector<std::vector<std::uint32_t>> vertex_stars_;
-    std::vector<std::uint32_t> components_;
+    std::shared_ptr<const LocalTopology> local_topology_;
     std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> candidate_cache_;
     std::vector<std::uint32_t> bvh_triangles_;
     std::vector<BvhNode> bvh_nodes_;
+
+    static LocalTopologyCache& local_topology_cache() {
+        static LocalTopologyCache cache;
+        return cache;
+    }
+
+    static std::shared_ptr<const LocalTopology> shared_local_topology(
+        const Mesh& mesh) {
+        LocalTopologyCache& cache = local_topology_cache();
+        std::lock_guard<std::mutex> lock(cache.mutex);
+        const std::uint64_t topology_hash = mesh_topology_hash(mesh);
+        for (const LocalTopologyCacheEntry& entry : cache.entries) {
+            if (entry.topology_hash == topology_hash &&
+                entry.vertex_count == mesh.vertices.size() &&
+                entry.triangle_count == mesh.triangles.size()) {
+                return entry.topology;
+            }
+        }
+
+        auto topology = std::make_shared<LocalTopology>();
+        topology->adjacency = build_adjacency(mesh);
+        topology->components = build_components(topology->adjacency);
+        topology->vertex_stars = build_vertex_stars(mesh);
+        constexpr std::size_t capacity = 2U;
+        if (cache.entries.size() >= capacity) {
+            cache.entries.erase(cache.entries.begin());
+        }
+        cache.entries.push_back({
+            topology_hash,
+            mesh.vertices.size(),
+            mesh.triangles.size(),
+            topology,
+        });
+        return topology;
+    }
 
     void update_local_projection(
         std::uint32_t candidate,
@@ -1604,9 +1695,9 @@ private:
             hit_triangle.b,
             hit_triangle.c,
         };
-        const std::uint32_t component_id = components_[source_triangle];
+        const std::uint32_t component_id = local_topology_->components[source_triangle];
         const auto consider = [&](std::uint32_t candidate) {
-            if (components_[candidate] != component_id ||
+            if (local_topology_->components[candidate] != component_id ||
                 std::binary_search(
                     base_candidates.begin(),
                     base_candidates.end(),
@@ -1621,7 +1712,7 @@ private:
                 best_triangle);
         };
 
-        const auto& first = vertex_stars_[vertices[support_slots[0U]]];
+        const auto& first = local_topology_->vertex_stars[vertices[support_slots[0U]]];
         if (support_count == 1U) {
             for (const std::uint32_t candidate : first) {
                 consider(candidate);
@@ -1633,7 +1724,7 @@ private:
         // hit-edge stars without allocating a temporary candidate vector;
         // this preserves Python's sorted-set tie order while keeping the
         // fallback cheap for large previews.
-        const auto& second = vertex_stars_[vertices[support_slots[1U]]];
+        const auto& second = local_topology_->vertex_stars[vertices[support_slots[1U]]];
         std::size_t first_index = 0U;
         std::size_t second_index = 0U;
         while (first_index < first.size() || second_index < second.size()) {
@@ -1912,7 +2003,7 @@ private:
         for (std::uint32_t ring = 0U; ring < ring_count && !frontier.empty(); ++ring) {
             std::vector<std::uint32_t> next;
             for (const std::uint32_t current : frontier) {
-                for (const std::uint32_t neighbor : adjacency_[current]) {
+                for (const std::uint32_t neighbor : local_topology_->adjacency[current]) {
                     if (visited[neighbor]) {
                         continue;
                     }
@@ -1928,16 +2019,34 @@ private:
     }
 };
 
-struct SurfaceGraphEdge {
-    std::uint32_t vertex{0U};
-    double length{0.0};
+struct SurfaceGuideTopologyCacheEntry {
+    std::uint64_t geometry_hash{0U};
+    std::size_t vertex_count{0U};
+    std::size_t triangle_count{0U};
+    std::shared_ptr<const SurfaceGuideTopology> topology;
 };
 
-void prepare_surface_guide_fields(
-    const Mesh& mesh,
-    PreparedGuides& guides) {
-    if (mesh.vertices.empty() || mesh.triangles.empty() || guides.empty()) {
-        return;
+struct SurfaceGuideTopologyCache {
+    std::mutex mutex;
+    std::vector<SurfaceGuideTopologyCacheEntry> entries;
+};
+
+SurfaceGuideTopologyCache& surface_guide_topology_cache() {
+    static SurfaceGuideTopologyCache cache;
+    return cache;
+}
+
+std::shared_ptr<const SurfaceGuideTopology> shared_surface_guide_topology(
+    const Mesh& mesh) {
+    SurfaceGuideTopologyCache& cache = surface_guide_topology_cache();
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    const std::uint64_t geometry_hash = mesh_geometry_hash(mesh);
+    for (const SurfaceGuideTopologyCacheEntry& entry : cache.entries) {
+        if (entry.geometry_hash == geometry_hash &&
+            entry.vertex_count == mesh.vertices.size() &&
+            entry.triangle_count == mesh.triangles.size()) {
+            return entry.topology;
+        }
     }
 
     auto topology = std::make_shared<SurfaceGuideTopology>();
@@ -1970,9 +2079,7 @@ void prepare_surface_guide_fields(
         });
     }
 
-    std::vector<std::vector<SurfaceGraphEdge>> graph(
-        topology->edge_midpoints.size());
-    double maximum_connection_length = 0.0;
+    topology->graph.resize(topology->edge_midpoints.size());
     auto connect = [&](std::uint32_t first, std::uint32_t second) {
         if (first == second) {
             return;
@@ -1980,10 +2087,11 @@ void prepare_surface_guide_fields(
         const double connection_length = length(sub(
             topology->edge_midpoints[first],
             topology->edge_midpoints[second]));
-        maximum_connection_length =
-            std::max(maximum_connection_length, connection_length);
-        graph[first].push_back({second, connection_length});
-        graph[second].push_back({first, connection_length});
+        topology->maximum_connection_length = std::max(
+            topology->maximum_connection_length,
+            connection_length);
+        topology->graph[first].push_back({second, connection_length});
+        topology->graph[second].push_back({first, connection_length});
     };
     for (const auto& nodes : topology->triangle_edge_nodes) {
         connect(nodes[0], nodes[1]);
@@ -1991,6 +2099,33 @@ void prepare_surface_guide_fields(
         connect(nodes[2], nodes[0]);
     }
 
+    constexpr std::size_t capacity = 2U;
+    if (cache.entries.size() >= capacity) {
+        cache.entries.erase(cache.entries.begin());
+    }
+    cache.entries.push_back({
+        geometry_hash,
+        mesh.vertices.size(),
+        mesh.triangles.size(),
+        topology,
+    });
+    return topology;
+}
+
+void clear_shared_surface_guide_topology_cache() {
+    SurfaceGuideTopologyCache& cache = surface_guide_topology_cache();
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    cache.entries.clear();
+}
+
+void prepare_surface_guide_fields(
+    const Mesh& mesh,
+    PreparedGuides& guides) {
+    if (mesh.vertices.empty() || mesh.triangles.empty() || guides.empty()) {
+        return;
+    }
+
+    const auto topology = shared_surface_guide_topology(mesh);
     SurfaceProjector projector(mesh, false, true);
     using QueueItem = std::pair<double, std::uint32_t>;
     for (PreparedGuide& guide : guides) {
@@ -2037,7 +2172,7 @@ void prepare_surface_guide_fields(
         // One edge-midpoint connection beyond the authored radius keeps
         // coarse adjacent triangles queryable while bounding local traversal.
         const double search_limit =
-            guide.radius + maximum_connection_length;
+            guide.radius + topology->maximum_connection_length;
         for (const Vec3& source_point : source_points) {
             const SurfaceSampleProjection projected =
                 projector.project_sample_global(source_point);
@@ -2074,7 +2209,7 @@ void prepare_surface_guide_fields(
             if (distance > search_limit) {
                 break;
             }
-            for (const SurfaceGraphEdge& edge : graph[node]) {
+            for (const SurfaceGraphEdge& edge : topology->graph[node]) {
                 const double candidate = distance + edge.length;
                 if (candidate <= search_limit &&
                     candidate < guide.surface_node_distances[edge.vertex]) {
@@ -2561,6 +2696,57 @@ BoundaryTopology build_boundary_topology(const Mesh& mesh) {
             return left.closed < right.closed;
         });
     return result;
+}
+
+struct BoundaryTopologyCacheEntry {
+    std::uint64_t geometry_hash{0U};
+    std::size_t vertex_count{0U};
+    std::size_t triangle_count{0U};
+    std::shared_ptr<const BoundaryTopology> topology;
+};
+
+struct BoundaryTopologyCache {
+    std::mutex mutex;
+    std::vector<BoundaryTopologyCacheEntry> entries;
+};
+
+BoundaryTopologyCache& boundary_topology_cache() {
+    static BoundaryTopologyCache cache;
+    return cache;
+}
+
+std::shared_ptr<const BoundaryTopology> shared_boundary_topology(
+    const Mesh& mesh) {
+    BoundaryTopologyCache& cache = boundary_topology_cache();
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    const std::uint64_t geometry_hash = mesh_geometry_hash(mesh);
+    for (const BoundaryTopologyCacheEntry& entry : cache.entries) {
+        if (entry.geometry_hash == geometry_hash &&
+            entry.vertex_count == mesh.vertices.size() &&
+            entry.triangle_count == mesh.triangles.size()) {
+            return entry.topology;
+        }
+    }
+
+    auto topology = std::make_shared<const BoundaryTopology>(
+        build_boundary_topology(mesh));
+    constexpr std::size_t capacity = 2U;
+    if (cache.entries.size() >= capacity) {
+        cache.entries.erase(cache.entries.begin());
+    }
+    cache.entries.push_back({
+        geometry_hash,
+        mesh.vertices.size(),
+        mesh.triangles.size(),
+        topology,
+    });
+    return topology;
+}
+
+void clear_shared_boundary_topology_cache() {
+    BoundaryTopologyCache& cache = boundary_topology_cache();
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    cache.entries.clear();
 }
 
 std::optional<BoundaryAnchor> point_on_boundary_chain(
@@ -3073,9 +3259,9 @@ CellResult build_cells_impl(
         projection_triangles.push_back(sample.triangle_index);
     }
     projector.prepare_candidates(projection_triangles, projection_rings);
-    const BoundaryTopology boundary_topology = build_boundary_topology(mesh);
+    const auto boundary_topology = shared_boundary_topology(mesh);
     const BoundaryIndex boundary_index(
-        boundary_topology.segments,
+        boundary_topology->segments,
         fallback_spacing);
     // 0.8.7's virtual reflected competitors introduced a hard center cut
     // and sparse seam. Symmetry remains an authoring/evaluation feature; Cell
@@ -3345,7 +3531,7 @@ CellResult build_cells_impl(
     report.partition_seed_count = static_cast<std::uint32_t>(std::min<std::size_t>(
         samples.size(),
         std::numeric_limits<std::uint32_t>::max()));
-    report.open_boundary_edge_count = boundary_topology.open_edge_count;
+    report.open_boundary_edge_count = boundary_topology->open_edge_count;
     report.boundary_clipped_rays = static_cast<std::uint32_t>(
         std::min<std::uint64_t>(
             boundary_clipped_rays,
@@ -3552,7 +3738,7 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
     double final_spacing = initial_spacing;
     const std::uint64_t per_pass_limit = std::max<std::uint64_t>(count * 48ULL, 128ULL);
 
-    const BoundaryTopology boundary_topology = build_boundary_topology(mesh);
+    const auto boundary_topology = shared_boundary_topology(mesh);
     // Cell Gap belongs to the Cell stage. Boundary center placement remains
     // stable so Gap edits can reuse Distribution and Orientation caches.
     const double gap_world = 0.0;
@@ -3560,18 +3746,18 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
         guides,
         initial_spacing,
         count);
-    const std::uint32_t minimum_boundary = boundary_topology.segments.empty()
+    const std::uint32_t minimum_boundary = boundary_topology->segments.empty()
         ? 0U
-        : static_cast<std::uint32_t>(boundary_topology.chains.size());
+        : static_cast<std::uint32_t>(boundary_topology->chains.size());
     const std::uint32_t curve_count = std::min<std::uint32_t>(
         count,
         static_cast<std::uint32_t>(authored_anchors.size()));
-    const std::uint32_t boundary_capacity = boundary_topology.segments.empty()
+    const std::uint32_t boundary_capacity = boundary_topology->segments.empty()
         ? 0U
         : std::max<std::uint32_t>(minimum_boundary, count - curve_count);
     bool boundary_density_adapted = false;
     const std::vector<BoundaryAnchor> boundary_anchors = boundary_anchor_positions(
-        boundary_topology,
+        *boundary_topology,
         initial_spacing,
         boundary_capacity,
         gap_world,
@@ -3591,9 +3777,11 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
     const std::uint64_t global_projection_work =
         static_cast<std::uint64_t>(authored_anchors.size()) *
         static_cast<std::uint64_t>(mesh.triangles.size());
+    // Distribution projects boundary anchors only onto their source triangle
+    // and curve anchors globally. Neither path needs local triangle adjacency.
     SurfaceProjector projector(
         mesh,
-        true,
+        false,
         global_projection_work >= global_projection_bvh_work_threshold);
 
     std::vector<Sample> anchor_samples;
@@ -4021,7 +4209,7 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
     report.direction_guide_count = guide_count(guides, false);
     report.mask_guide_count = mask_guide_count(guides);
     report.masked_candidate_count = 0U;
-    report.open_boundary_edge_count = boundary_topology.open_edge_count;
+    report.open_boundary_edge_count = boundary_topology->open_edge_count;
     report.boundary_anchor_count = boundary_anchor_count;
     report.boundary_density_adapted = boundary_density_adapted;
     report.direction_relax_iterations = effective_direction_relax_iterations(settings, mode);
@@ -5902,6 +6090,9 @@ ProcessStageCache& native_stage_cache() {
 
 void clear_native_stage_cache() {
     native_stage_cache().clear();
+    SurfaceProjector::clear_shared_local_topology_cache();
+    clear_shared_boundary_topology_cache();
+    clear_shared_surface_guide_topology_cache();
 }
 
 GenerationResult generate(
