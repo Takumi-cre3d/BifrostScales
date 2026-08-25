@@ -35,19 +35,19 @@ from .math3d import (
 
 SYMMETRY_AXES = frozenset({"x", "y", "z"})
 SYMMETRY_SPACES = frozenset({"world", "target_local"})
-MASK_CORE_INFLUENCE = 0.5
+MASK_HARD_CORE_INFLUENCE = 0.98
 
 
 def _mask_core_fraction(falloff: float) -> float:
     """Return the normalized distance of the stable no-scale core.
 
-    Mask density now fades according to the existing Guide Falloff control.
-    Cells are clipped only at the 50% influence contour, preserving an empty
-    center without turning the whole Guide radius into a hard cutout.
+    Mask density fades across the full Guide radius.  Cell geometry is clipped
+    only at a small, near-fully-masked core so it cannot fill the guide center
+    without producing a visible hard boundary through the Falloff region.
     """
 
     exponent = max(0.1, min(8.0, float(falloff)))
-    target_smooth = math.pow(MASK_CORE_INFLUENCE, 1.0 / exponent)
+    target_smooth = math.pow(MASK_HARD_CORE_INFLUENCE, 1.0 / exponent)
     lower = 0.0
     upper = 1.0
     for _iteration in range(48):
@@ -1049,18 +1049,17 @@ class GuideSet:
     def mask_acceptance_probability(self, position: Vec3) -> float:
         """Probability that a distribution candidate survives Mask Falloff.
 
-        Influence at or above the 50% contour is a deterministic empty core.
-        The outer half of the Guide radius feathers smoothly from no scales to
-        the unmasked density.
+        The full Guide radius feathers smoothly from an empty center to the
+        unmasked density.  The stable random stream turns that probability into
+        a deterministic sparse transition rather than a binary cutout.
         """
 
-        exclusion = min(1.0, self.mask_influence(position) / MASK_CORE_INFLUENCE)
-        return max(0.0, min(1.0, 1.0 - exclusion))
+        return max(0.0, min(1.0, 1.0 - self.mask_influence(position)))
 
     def is_masked(self, position: Vec3) -> bool:
-        """Return True inside the stable 50% no-scale core."""
+        """Return True inside the small stable no-scale hard core."""
 
-        return self.mask_influence(position) >= MASK_CORE_INFLUENCE
+        return self.mask_influence(position) >= MASK_HARD_CORE_INFLUENCE
 
     @staticmethod
     def _ray_sphere_entry(
@@ -1145,9 +1144,9 @@ class GuideSet:
         """Return the exact first ray distance entering a Mask hard core.
 
         Falloff controls stochastic scale removal over the full Guide radius.
-        Cell geometry is clipped only at the 50% influence contour, preventing
-        outside cells from filling the center while keeping a visible feathered
-        transition instead of a hard cut at the outer radius.
+        Cell geometry is clipped only at the near-fully-masked contour,
+        preventing outside cells from filling the center while keeping the
+        visible transition sparse across the full Guide radius.
         """
 
         limit = max(0.0, float(maximum))

@@ -31,7 +31,7 @@ namespace {
 
 constexpr double kEpsilon = 1.0e-12;
 constexpr double kPi = 3.1415926535897932384626433832795;
-constexpr double kMaskCoreInfluence = 0.5;
+constexpr double kMaskHardCoreInfluence = 0.98;
 constexpr double kFixedScaleAspect = 1.65;
 constexpr std::array<double, 5> kRelaxationFactors{1.0, 0.86, 0.73, 0.61, 0.50};
 constexpr std::uint64_t kFnvOffsetBasis64 = 14695981039346656037ULL;
@@ -617,7 +617,7 @@ bool is_curve(GuideKind kind) {
 double mask_core_fraction(double falloff) {
     const double exponent = clamp(falloff, 0.1, 8.0);
     const double target_smooth = std::pow(
-        kMaskCoreInfluence,
+        kMaskHardCoreInfluence,
         1.0 / exponent);
     double lower = 0.0;
     double upper = 1.0;
@@ -830,16 +830,13 @@ double mask_influence(
 double mask_acceptance_probability(
     const Vec3& position,
     const PreparedGuides& guides) {
-    const double exclusion = std::min(
-        1.0,
-        mask_influence(position, guides) / kMaskCoreInfluence);
-    return clamp(1.0 - exclusion, 0.0, 1.0);
+    return clamp(1.0 - mask_influence(position, guides), 0.0, 1.0);
 }
 
 bool is_masked(
     const Vec3& position,
     const PreparedGuides& guides) {
-    return mask_influence(position, guides) >= kMaskCoreInfluence;
+    return mask_influence(position, guides) >= kMaskHardCoreInfluence;
 }
 
 double ray_sphere_entry(
@@ -1967,10 +1964,7 @@ public:
                         influence;
             }
         }
-        const double exclusion = std::min(
-            1.0,
-            clamp(1.0 - mask_remaining, 0.0, 1.0) /
-                kMaskCoreInfluence);
+        const double exclusion = clamp(1.0 - mask_remaining, 0.0, 1.0);
         return {
             clamp(density, 0.02, 16.0),
             clamp(size, 0.05, 8.0),

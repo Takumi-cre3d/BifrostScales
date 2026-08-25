@@ -1399,7 +1399,7 @@ int main() {
         mask_settings,
         PreviewMode::Settled,
         {mask_guide});
-    constexpr double default_mask_core_fraction = 0.3581208328092611;
+    constexpr double default_mask_core_fraction = 0.05905480523664686;
     const double mask_core_radius =
         mask_guide.radius * default_mask_core_fraction;
     bool survived_in_falloff = false;
