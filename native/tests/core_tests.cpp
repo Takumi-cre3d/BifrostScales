@@ -184,6 +184,7 @@ void check_cell_center_faces_follow_normal(
 }  // namespace
 
 int main() {
+    try {
     const auto decoded_payload = bifrost_scales::decode_native_payload(R"json(
         {
           "schema":"bifrost-scales/native-payload/10",
@@ -1858,4 +1859,8 @@ int main() {
 
     std::cout << "bifrost_scales_core_tests: PASS\n";
     return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "bifrost_scales_core_tests: FAIL: " << error.what() << "\n";
+        return 1;
+    }
 }
