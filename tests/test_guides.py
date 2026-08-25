@@ -684,6 +684,9 @@ def test_mask_acceptance_feathers_across_the_full_guide_radius():
 
 
 def test_mask_geometry_changes_shape_but_not_distribution_or_direction_fingerprint():
+    from bifrost_scales.backend import NativeMayaBackend
+    from bifrost_scales.scheduler import ChangeCategory
+
     base = GuideData(
         guide_id="mask_fingerprint",
         name="Mask",
