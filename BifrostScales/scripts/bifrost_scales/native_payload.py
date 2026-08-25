@@ -71,7 +71,6 @@ def native_payload_mapping(
     settings_mapping = normalized_settings.to_mapping()
     # Registrations are a Maya authoring concern until pinned-site evaluation
     # lands. Do not resend them on every ordinary native preview update.
-    settings_mapping.pop("unique_scales", None)
     return {
         "schema": NATIVE_PAYLOAD_SCHEMA,
         "mode": normalized_mode,
