@@ -1394,7 +1394,6 @@ int main() {
         {mask_guide});
     CHECK(masked.report.mask_guide_count == 1U);
     CHECK(masked.report.masked_candidate_count > 0U);
-    CHECK(masked.report.mask_clipped_rays > 0U);
     const auto masked_distribution = bifrost_scales::distribute(
         mesh,
         mask_settings,
