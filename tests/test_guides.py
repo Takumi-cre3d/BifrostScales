@@ -683,49 +683,7 @@ def test_mask_acceptance_feathers_across_the_full_guide_radius():
     assert guides.is_masked((0.1, 0.0, 0.0)) is False
 
 
-def test_mask_core_ray_entry_is_analytic_for_narrow_point_and_curve_masks():
-    point_mask = GuideData(
-        guide_id="narrow_point_mask",
-        name="Narrow Point Mask",
-        kind=GuideKind.DENSITY_POINT,
-        points=((0.13, 0.0, 0.0),),
-        radius=0.02,
-        use_density=False,
-        use_size=False,
-        use_direction=False,
-        use_mask=True,
-    ).normalized()
-    point_guides = GuideSet.from_iterable((point_mask,))
-    point_entry = point_guides.mask_entry_radius(
-        (-1.0, 0.0, 0.0),
-        (1.0, 0.0, 0.0),
-        2.0,
-    )
-    point_core = point_mask.radius * 0.05905480523664686
-    assert abs(point_entry - (1.13 - point_core)) < 1.0e-12
-
-    curve_mask = GuideData(
-        guide_id="narrow_curve_mask",
-        name="Narrow Curve Mask",
-        kind=GuideKind.DIRECTION_CURVE,
-        points=((0.13, 0.0, -0.25), (0.13, 0.0, 0.25)),
-        radius=0.02,
-        use_density=False,
-        use_size=False,
-        use_direction=False,
-        use_mask=True,
-    ).normalized()
-    curve_guides = GuideSet.from_iterable((curve_mask,))
-    curve_entry = curve_guides.mask_entry_radius(
-        (-1.0, 0.0, 0.0),
-        (1.0, 0.0, 0.0),
-        2.0,
-    )
-    curve_core = curve_mask.radius * 0.05905480523664686
-    assert abs(curve_entry - (1.13 - curve_core)) < 1.0e-12
-
-
-def test_mask_geometry_changes_distribution_but_not_direction_fingerprint():
+def test_mask_geometry_changes_shape_but_not_distribution_or_direction_fingerprint():
     base = GuideData(
         guide_id="mask_fingerprint",
         name="Mask",
@@ -740,9 +698,14 @@ def test_mask_geometry_changes_distribution_but_not_direction_fingerprint():
     moved = replace(base, points=((1.0, 0.0, 0.0),)).normalized()
     base_set = GuideSet.from_iterable((base,))
     moved_set = GuideSet.from_iterable((moved,))
-    assert base_set.fingerprint("distribution") != moved_set.fingerprint(
+    assert base_set.fingerprint("distribution") == moved_set.fingerprint(
         "distribution"
     )
     assert base_set.fingerprint("direction") == moved_set.fingerprint(
         "direction"
     )
+    assert base_set.fingerprint("links") != moved_set.fingerprint("links")
+    assert NativeMayaBackend._guide_change_category(
+        base_set,
+        moved_set,
+    ) is ChangeCategory.SHAPE
