@@ -131,7 +131,9 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "std::vector<Vec2> ray_directions" in source
     assert "std::vector<Vec3> normals" in source
     assert "std::vector<std::uint32_t> components" in source
-    assert "const bool has_mask_guides" in source
+    assert "const bool has_mask_guides" not in source
+    assert "mask_entry_radius" not in source
+    assert "sample_visible_for_mask" in source
     assert "partition_sites" not in source
     assert "pair_influences" not in source
 
