@@ -85,7 +85,7 @@ Row run_case(
     point.kind = bifrost_scales::GuideKind::DirectionPoint;
     point.points = {{-2.5, 0.0, -1.5}};
     point.radius = 0.45;
-    point.falloff = 2.0;
+    point.falloff = 1.0;
     point.strength = 0.85;
     point.use_density = false;
     point.use_size = false;
