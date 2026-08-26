@@ -2399,11 +2399,14 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             if report.native_cells_ms > 0.0:
                 performance_text += (
                     "\nCell: setup {:.1f} / neighbors {:.1f} / boundaries {:.1f} / "
-                    "projection {:.1f} ms".format(
+                    "projection {:.1f} ms"
+                    "\nCell boundary: query {:.1f} / rays {:.1f} ms".format(
                         report.native_cell_setup_ms,
                         report.native_cell_neighbors_ms,
                         report.native_cell_boundaries_ms,
                         report.native_cell_projection_ms,
+                        report.native_cell_boundary_query_ms,
+                        report.native_cell_boundary_rays_ms,
                     )
                 )
             if getattr(report, "native_gpu_compute", False):
@@ -2462,6 +2465,7 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                 "payload={:.2f} source={:.2f} distribution={:.2f} "
                 "orientation={:.2f} cells={:.2f} "
                 "cellParts={:.2f}/{:.2f}/{:.2f}/{:.2f} "
+                "boundaryParts={:.2f}/{:.2f} "
                 "shape={:.2f} core={:.2f} "
                 "encode={:.2f} operator={:.2f} graphPublish={:.2f} ms".format(
                     revision,
@@ -2483,6 +2487,8 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                     report.native_cell_neighbors_ms,
                     report.native_cell_boundaries_ms,
                     report.native_cell_projection_ms,
+                    report.native_cell_boundary_query_ms,
+                    report.native_cell_boundary_rays_ms,
                     report.native_shape_ms,
                     report.native_core_total_ms,
                     report.native_encode_ms,

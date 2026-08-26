@@ -21,9 +21,10 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 - 64-bit Stable Cell IDとメッシュ不要のPicker metadata
 - 決定的マルチコアCPU Distribution／Cells／Shape
 - 大きなCell半径やDensity差に対応するexact BVH Cell近傍探索
+- Open Boundary候補走査を省略する閉メッシュ用Cell高速経路
 - プロセス共有の上限付きStage Cache
 - 編集間で再利用するTarget Mesh topology／境界／Surface Guide高速化データ
-- PerformanceログにCell setup／neighbor／boundary／surface projectionの処理時間内訳を表示
+- PerformanceログにCell setup／neighbor／boundary候補検索／boundary ray／surface projectionの処理時間内訳を表示
 - OpenCL Interactive Orientationと自動CPU fallback
 - Published Bifrost Graph v4とNative-only製品Runtime
 

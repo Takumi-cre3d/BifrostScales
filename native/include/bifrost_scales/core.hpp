@@ -267,6 +267,8 @@ struct GenerationProfile {
     double cell_setup_ms{0.0};
     double cell_neighbors_ms{0.0};
     double cell_boundaries_ms{0.0};
+    double cell_boundary_query_ms{0.0};
+    double cell_boundary_rays_ms{0.0};
     double cell_projection_ms{0.0};
     double shape_ms{0.0};
     double total_ms{0.0};

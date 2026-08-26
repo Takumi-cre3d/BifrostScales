@@ -337,6 +337,10 @@ std::string make_profile_json(
         << ",\"cell_setup_ms\":" << generation.cell_setup_ms
         << ",\"cell_neighbors_ms\":" << generation.cell_neighbors_ms
         << ",\"cell_boundaries_ms\":" << generation.cell_boundaries_ms
+        << ",\"cell_boundary_query_ms\":"
+        << generation.cell_boundary_query_ms
+        << ",\"cell_boundary_rays_ms\":"
+        << generation.cell_boundary_rays_ms
         << ",\"cell_projection_ms\":" << generation.cell_projection_ms
         << ",\"shape_ms\":" << generation.shape_ms
         << ",\"core_total_ms\":" << generation.total_ms
@@ -379,6 +383,8 @@ std::string make_profile_json(
         << ",\"boundary_anchor_count\":" << report.boundary_anchor_count
         << ",\"boundary_density_adapted\":"
         << (report.boundary_density_adapted ? "true" : "false")
+        << ",\"cell_clipped_rays\":" << report.cell_clipped_rays
+        << ",\"cell_mean_neighbors\":" << report.cell_mean_neighbors
         << ",\"boundary_clipped_rays\":" << report.boundary_clipped_rays
         << ",\"mask_clipped_rays\":" << report.mask_clipped_rays
         << ",\"symmetry_stabilized_cells\":"

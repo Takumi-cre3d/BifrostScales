@@ -44,6 +44,26 @@ bifrost_scales::Mesh make_grid(std::uint32_t divisions, double extent) {
     return mesh;
 }
 
+bifrost_scales::Mesh make_closed_box(double extent) {
+    const double half = extent * 0.5;
+    bifrost_scales::Mesh mesh;
+    mesh.vertices = {
+        {-half, -half, -half}, {half, -half, -half},
+        {half, half, -half}, {-half, half, -half},
+        {-half, -half, half}, {half, -half, half},
+        {half, half, half}, {-half, half, half},
+    };
+    mesh.triangles = {
+        {0U, 2U, 1U}, {0U, 3U, 2U},
+        {4U, 5U, 6U}, {4U, 6U, 7U},
+        {0U, 1U, 5U}, {0U, 5U, 4U},
+        {3U, 7U, 6U}, {3U, 6U, 2U},
+        {0U, 4U, 7U}, {0U, 7U, 3U},
+        {1U, 2U, 6U}, {1U, 6U, 5U},
+    };
+    return mesh;
+}
+
 double median(std::vector<double> values) {
     if (values.empty()) {
         return 0.0;
@@ -108,10 +128,14 @@ struct Row {
     double cold_cell_setup_ms{0.0};
     double cold_cell_neighbors_ms{0.0};
     double cold_cell_boundaries_ms{0.0};
+    double cold_cell_boundary_query_ms{0.0};
+    double cold_cell_boundary_rays_ms{0.0};
     double cold_cell_projection_ms{0.0};
     double cell_warm_setup_ms{0.0};
     double cell_warm_neighbors_ms{0.0};
     double cell_warm_boundaries_ms{0.0};
+    double cell_warm_boundary_query_ms{0.0};
+    double cell_warm_boundary_rays_ms{0.0};
     double cell_warm_projection_ms{0.0};
 };
 
@@ -120,7 +144,8 @@ Row run_case(
     std::uint32_t count,
     std::uint32_t repeats,
     double density_multiplier,
-    double cell_radius_multiplier) {
+    double cell_radius_multiplier,
+    std::uint32_t cell_resolution) {
     bifrost_scales::Settings settings;
     settings.target_count = count;
     settings.settled_budget = count;
@@ -131,7 +156,7 @@ Row run_case(
     settings.direction_relax_iterations = 2U;
     settings.direction_relax_strength = 0.35;
     settings.cell_mode = bifrost_scales::GeometryMode::Cells;
-    settings.cell_settled_resolution = 10U;
+    settings.cell_settled_resolution = cell_resolution;
     settings.cell_shape_divisions = 2U;
     settings.cell_project_to_surface = true;
     settings.cell_radius_multiplier = cell_radius_multiplier;
@@ -199,10 +224,14 @@ Row run_case(
     std::vector<double> cold_cell_setup;
     std::vector<double> cold_cell_neighbors;
     std::vector<double> cold_cell_boundaries;
+    std::vector<double> cold_cell_boundary_query;
+    std::vector<double> cold_cell_boundary_rays;
     std::vector<double> cold_cell_projection;
     std::vector<double> cell_warm_setup;
     std::vector<double> cell_warm_neighbors;
     std::vector<double> cell_warm_boundaries;
+    std::vector<double> cell_warm_boundary_query;
+    std::vector<double> cell_warm_boundary_rays;
     std::vector<double> cell_warm_projection;
 
     bifrost_scales::GenerationResult latest;
@@ -221,6 +250,10 @@ Row run_case(
         cold_cell_setup.push_back(cold.result.profile.cell_setup_ms);
         cold_cell_neighbors.push_back(cold.result.profile.cell_neighbors_ms);
         cold_cell_boundaries.push_back(cold.result.profile.cell_boundaries_ms);
+        cold_cell_boundary_query.push_back(
+            cold.result.profile.cell_boundary_query_ms);
+        cold_cell_boundary_rays.push_back(
+            cold.result.profile.cell_boundary_rays_ms);
         cold_cell_projection.push_back(cold.result.profile.cell_projection_ms);
         cold_shape.push_back(cold.result.profile.shape_ms);
         cold_core_total.push_back(cold.result.profile.total_ms);
@@ -268,6 +301,10 @@ Row run_case(
         cell_warm_setup.push_back(cell_edit.result.profile.cell_setup_ms);
         cell_warm_neighbors.push_back(cell_edit.result.profile.cell_neighbors_ms);
         cell_warm_boundaries.push_back(cell_edit.result.profile.cell_boundaries_ms);
+        cell_warm_boundary_query.push_back(
+            cell_edit.result.profile.cell_boundary_query_ms);
+        cell_warm_boundary_rays.push_back(
+            cell_edit.result.profile.cell_boundary_rays_ms);
         cell_warm_projection.push_back(cell_edit.result.profile.cell_projection_ms);
         cell_warm_shape.push_back(cell_edit.result.profile.shape_ms);
         cell_warm_wall.push_back(cell_edit.wall_ms);
@@ -296,10 +333,14 @@ Row run_case(
         median(cold_cell_setup),
         median(cold_cell_neighbors),
         median(cold_cell_boundaries),
+        median(cold_cell_boundary_query),
+        median(cold_cell_boundary_rays),
         median(cold_cell_projection),
         median(cell_warm_setup),
         median(cell_warm_neighbors),
         median(cell_warm_boundaries),
+        median(cell_warm_boundary_query),
+        median(cell_warm_boundary_rays),
         median(cell_warm_projection),
     };
 }
@@ -313,6 +354,8 @@ int main(int argc, char** argv) {
         std::uint32_t mesh_divisions = 100U;
         double density_multiplier = 0.0;
         double cell_radius_multiplier = 1.65;
+        std::uint32_t cell_resolution = 10U;
+        bool closed_mesh = false;
         std::vector<std::uint32_t> counts{
             512U,
             2000U,
@@ -347,6 +390,15 @@ int main(int argc, char** argv) {
                     throw std::runtime_error(
                         "--cell-radius-multiplier must be in [0.35, 6.0]");
                 }
+            } else if (argument == "--cell-resolution" && index + 1 < argc) {
+                cell_resolution = static_cast<std::uint32_t>(
+                    std::stoul(argv[++index]));
+                if (cell_resolution < 3U || cell_resolution > 64U) {
+                    throw std::runtime_error(
+                        "--cell-resolution must be in [3, 64]");
+                }
+            } else if (argument == "--closed-mesh") {
+                closed_mesh = true;
             } else if (argument == "--counts" && index + 1 < argc) {
                 counts.clear();
                 const std::string encoded = argv[++index];
@@ -380,7 +432,9 @@ int main(int argc, char** argv) {
             }
         }
 
-        const bifrost_scales::Mesh mesh = make_grid(mesh_divisions, 10.0);
+        const bifrost_scales::Mesh mesh = closed_mesh
+            ? make_closed_box(10.0)
+            : make_grid(mesh_divisions, 10.0);
         std::vector<Row> rows;
         rows.reserve(counts.size());
         for (const std::uint32_t count : counts) {
@@ -389,7 +443,8 @@ int main(int argc, char** argv) {
                 count,
                 repeats,
                 density_multiplier,
-                cell_radius_multiplier));
+                cell_radius_multiplier,
+                cell_resolution));
         }
 
         std::ofstream file;
@@ -412,9 +467,11 @@ int main(int argc, char** argv) {
                "direction_warm_orientation_ms,direction_warm_cells_ms,"
                "direction_warm_shape_ms,direction_warm_wall_ms,"
                "cold_cell_setup_ms,cold_cell_neighbors_ms,"
-               "cold_cell_boundaries_ms,cold_cell_projection_ms,"
+               "cold_cell_boundaries_ms,cold_cell_boundary_query_ms,"
+               "cold_cell_boundary_rays_ms,cold_cell_projection_ms,"
                "cell_warm_setup_ms,cell_warm_neighbors_ms,"
-               "cell_warm_boundaries_ms,cell_warm_projection_ms\n";
+               "cell_warm_boundaries_ms,cell_warm_boundary_query_ms,"
+               "cell_warm_boundary_rays_ms,cell_warm_projection_ms\n";
         for (const Row& row : rows) {
             *output
                 << row.requested << ','
@@ -439,10 +496,14 @@ int main(int argc, char** argv) {
                 << row.cold_cell_setup_ms << ','
                 << row.cold_cell_neighbors_ms << ','
                 << row.cold_cell_boundaries_ms << ','
+                << row.cold_cell_boundary_query_ms << ','
+                << row.cold_cell_boundary_rays_ms << ','
                 << row.cold_cell_projection_ms << ','
                 << row.cell_warm_setup_ms << ','
                 << row.cell_warm_neighbors_ms << ','
                 << row.cell_warm_boundaries_ms << ','
+                << row.cell_warm_boundary_query_ms << ','
+                << row.cell_warm_boundary_rays_ms << ','
                 << row.cell_warm_projection_ms << '\n';
         }
         return 0;

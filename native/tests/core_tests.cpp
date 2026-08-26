@@ -1339,6 +1339,8 @@ int main() {
     CHECK(optimized_output.profile.cell_setup_ms >= 0.0);
     CHECK(optimized_output.profile.cell_neighbors_ms >= 0.0);
     CHECK(optimized_output.profile.cell_boundaries_ms >= 0.0);
+    CHECK(optimized_output.profile.cell_boundary_query_ms >= 0.0);
+    CHECK(optimized_output.profile.cell_boundary_rays_ms >= 0.0);
     CHECK(optimized_output.profile.cell_projection_ms >= 0.0);
     CHECK(optimized_output.profile.shape_ms >= 0.0);
     CHECK(optimized_output.profile.total_ms >= 0.0);

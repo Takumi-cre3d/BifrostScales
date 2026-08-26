@@ -1202,9 +1202,22 @@ def test_native_profile_parser_rejects_invalid_or_unknown_payloads():
             {
                 "schema": "bifrost-scales/native-profile/9",
                 "distribution_ms": 1.25,
+                "cell_boundary_query_ms": 0.125,
+                "cell_mean_neighbors": 63.5,
             }
         )
     )["distribution_ms"] == 1.25
+    parsed = native_backend._parse_native_profile(
+        json.dumps(
+            {
+                "schema": "bifrost-scales/native-profile/9",
+                "cell_boundary_query_ms": 0.125,
+                "cell_mean_neighbors": 63.5,
+            }
+        )
+    )
+    assert parsed["cell_boundary_query_ms"] == 0.125
+    assert parsed["cell_mean_neighbors"] == 63.5
     assert native_backend._parse_native_profile("not-json") == {}
     assert native_backend._parse_native_profile(
         json.dumps({"schema": "bifrost-scales/native-profile/999"})
