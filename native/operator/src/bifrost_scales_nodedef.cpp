@@ -318,7 +318,7 @@ std::string make_profile_json(
         << ",\"gpu_compute_available\":"
         << (generation.gpu_compute_available ? "true" : "false")
         << ",\"gpu_stage\":\"interactive-orientation\""
-        << ",\"gpu_buffer_schema\":\"bifrost-scales/compact-orientation-buffer/1\""
+        << ",\"gpu_buffer_schema\":\"bifrost-scales/compact-orientation-buffer/2\""
         << ",\"gpu_device\":";
     append_json_string(stream, generation.gpu_device);
     stream << ",\"gpu_fallback_reason\":";

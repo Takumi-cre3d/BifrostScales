@@ -97,8 +97,10 @@ def test_native_operator_and_host_boundary_contracts_remain_immutable():
     assert policy["normal_updates"] == ["payload_json", "parent_visibility"]
     assert policy["target_binding"] == "maya-dg-worldMesh-once"
     assert performance["direction_anisotropic_partition_runtime"] is True
-    assert performance["direction_anisotropy_max_axis_ratio"] == 1.45
+    assert performance["direction_anisotropy_max_axis_ratio"] == 2.25
     assert performance["direction_only_edits_reuse_exact_cell_partition"] is False
+    assert performance["direction_strength_edits_reuse_exact_cell_partition"] is True
+    assert performance["gpu_buffer_schema"] == "bifrost-scales/compact-orientation-buffer/2"
     assert (
         performance["direction_only_edits_reuse_cell_partition_when_anisotropy_zero"]
         is True
@@ -136,7 +138,7 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "class BoundaryIndex" in source
     assert "bounds_distance_squared(node.bounds, position)" in source
     assert "direction_metric_weight" in source
-    assert "orientation-anisotropic" in source
+    assert "guide-anisotropic" in source
     assert "cell_direction_anisotropy" in header
     assert "cell_cache_basis" in operator
     assert "update_orientation_dirty_region" not in source
@@ -168,6 +170,8 @@ def test_guide_authoring_and_internal_cell_identity_foundation_remain_available(
     assert "UniqueScale" not in settings
     assert "register_selected_unique_scales" not in backend
     assert 'GUIDE_DISPLAY_NAME = "bsGuideDisplayName"' in scene
+    assert 'GUIDE_CENTER_ALIGNMENT = "bsGuideCenterAlignment"' in scene
+    assert 'GUIDE_CELL_ANISOTROPY = "bsGuideCellAnisotropy"' in scene
     assert "drawFeedback" in picker
     assert "cell_metadata_for_indices" in backend
     assert "resolve_cell_ids" in native_payload
@@ -185,8 +189,12 @@ def test_build_info_records_the_native_only_boundary():
         "selected-mesh-to-system-native-graph-and-first-settled-preview"
     )
     assert info["minimum_native_pack"] == "0.10.6"
-    assert info["cell_cache_key_basis"] == "distribution-or-orientation-anisotropic"
+    assert info["cell_cache_key_basis"] == "distribution-or-guide-anisotropic"
     assert info["direction_edits_reuse_exact_cell_partition"] is False
+    assert info["direction_strength_affects_orientation_only"] is True
+    assert info["direction_strength_edits_reuse_exact_cell_partition"] is True
+    assert info["direction_curve_center_alignment_default"] == 0.35
+    assert info["guide_cell_anisotropy_default"] == 1.0
     assert info["direction_edits_reuse_cell_partition_when_anisotropy_zero"] is True
     assert info["direction_edit_orientation_policy"] == (
         "0.10.2-full-rebuild-no-dirty-region"
@@ -212,7 +220,7 @@ def test_build_info_records_the_native_only_boundary():
     )
     assert info["direction_pair_partition_runtime"] is False
     assert info["direction_anisotropic_partition_runtime"] is True
-    assert info["direction_anisotropy_max_axis_ratio"] == 1.45
+    assert info["direction_anisotropy_max_axis_ratio"] == 2.25
     assert info["guide_mask_density_falloff"] is False
     assert info["guide_mask_post_cell_visibility"] is True
     assert info["guide_mask_preserves_distribution_and_cells"] is True

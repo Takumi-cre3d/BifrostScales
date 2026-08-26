@@ -41,6 +41,8 @@ GUIDE_FALLOFF = "bsGuideFalloff"
 GUIDE_DENSITY_MULTIPLIER = "bsGuideDensityMultiplier"
 GUIDE_SIZE_MULTIPLIER = "bsGuideSizeMultiplier"
 GUIDE_STRENGTH = "bsGuideStrength"
+GUIDE_CENTER_ALIGNMENT = "bsGuideCenterAlignment"
+GUIDE_CELL_ANISOTROPY = "bsGuideCellAnisotropy"
 GUIDE_ANGLE = "bsGuideAngle"
 GUIDE_CLOSED = "bsGuideClosed"
 GUIDE_USE_DENSITY = "bsGuideUseDensity"
@@ -584,6 +586,12 @@ class MayaSceneManager:
                 self.cmds.getAttr(node + "." + GUIDE_SIZE_MULTIPLIER)
             ),
             strength=float(self.cmds.getAttr(node + "." + GUIDE_STRENGTH)),
+            center_alignment=self._double_attr(
+                node, GUIDE_CENTER_ALIGNMENT, 0.35
+            ),
+            cell_anisotropy=self._double_attr(
+                node, GUIDE_CELL_ANISOTROPY, 1.0
+            ),
             angle_degrees=float(self.cmds.getAttr(node + "." + GUIDE_ANGLE)),
             closed=bool(self.cmds.getAttr(node + "." + GUIDE_CLOSED)),
             use_density=self._guide_role_value(
@@ -645,6 +653,8 @@ class MayaSceneManager:
             "density_multiplier": (GUIDE_DENSITY_MULTIPLIER, "double"),
             "size_multiplier": (GUIDE_SIZE_MULTIPLIER, "double"),
             "strength": (GUIDE_STRENGTH, "double"),
+            "center_alignment": (GUIDE_CENTER_ALIGNMENT, "double"),
+            "cell_anisotropy": (GUIDE_CELL_ANISOTROPY, "double"),
             "angle_degrees": (GUIDE_ANGLE, "double"),
             "closed": (GUIDE_CLOSED, "bool"),
             "use_density": (GUIDE_USE_DENSITY, "bool"),
@@ -1136,6 +1146,8 @@ class MayaSceneManager:
         self._ensure_double(node, GUIDE_DENSITY_MULTIPLIER, 1.75)
         self._ensure_double(node, GUIDE_SIZE_MULTIPLIER, 1.0)
         self._ensure_double(node, GUIDE_STRENGTH, 1.0)
+        self._ensure_double(node, GUIDE_CENTER_ALIGNMENT, 0.35)
+        self._ensure_double(node, GUIDE_CELL_ANISOTROPY, 1.0)
         self._ensure_double(node, GUIDE_ANGLE, 0.0)
         self._ensure_bool(node, GUIDE_CLOSED, False)
         self._ensure_bool(node, GUIDE_USE_DENSITY, kind.default_use_density)
@@ -1292,6 +1304,14 @@ class MayaSceneManager:
                     self._ensure_string(node, GUIDE_SYMMETRY_SPACE, "world")
                 if not self.cmds.attributeQuery(GUIDE_USE_MASK, node=node, exists=True):
                     self._ensure_bool(node, GUIDE_USE_MASK, False)
+                if not self.cmds.attributeQuery(
+                    GUIDE_CENTER_ALIGNMENT, node=node, exists=True
+                ):
+                    self._ensure_double(node, GUIDE_CENTER_ALIGNMENT, 0.35)
+                if not self.cmds.attributeQuery(
+                    GUIDE_CELL_ANISOTROPY, node=node, exists=True
+                ):
+                    self._ensure_double(node, GUIDE_CELL_ANISOTROPY, 1.0)
                 try:
                     kind = GuideKind(self._string_attr(node, GUIDE_KIND, GuideKind.DENSITY_POINT.value))
                 except Exception:

@@ -949,13 +949,13 @@ int main() {
     const auto cell_x = bifrost_scales::build_cells(
         mesh,
         std::vector<bifrost_scales::OrientedSample>{
-            {direction_only_sample, {1.0, 0.0, 0.0}, {1.0, 0.0, 0.0}, 1.0}},
+            {direction_only_sample, {1.0, 0.0, 0.0}, {1.0, 0.0, 0.0}, 1.0, 1.0}},
         direction_only_cell_settings,
         PreviewMode::Settled);
     const auto cell_z = bifrost_scales::build_cells(
         mesh,
         std::vector<bifrost_scales::OrientedSample>{
-            {direction_only_sample, {0.0, 0.0, 1.0}, {0.0, 0.0, 1.0}, 1.0}},
+            {direction_only_sample, {0.0, 0.0, 1.0}, {0.0, 0.0, 1.0}, 1.0, 1.0}},
         direction_only_cell_settings,
         PreviewMode::Settled);
     CHECK(cell_x.cells.size() == 1U);
@@ -980,7 +980,7 @@ int main() {
         std::vector<OrientedSample> oriented;
         oriented.reserve(irregular_samples.size());
         for (const Sample& sample : irregular_samples) {
-            oriented.push_back({sample, tangent, tangent, 1.0});
+            oriented.push_back({sample, tangent, tangent, 1.0, 1.0});
         }
         return bifrost_scales::build_cells(
             mesh,
@@ -1042,6 +1042,34 @@ int main() {
         {reverse_curve});
     CHECK(reverse_orientation.samples.size() == 1U);
     CHECK(reverse_orientation.samples.front().tangent.x < -0.999);
+
+    Guide independent_curve = forward_curve;
+    independent_curve.id = "independent_curve";
+    independent_curve.points = {{0.0, 0.0, -1.0}, {0.0, 0.0, 1.0}};
+    independent_curve.center_alignment = 0.0;
+    independent_curve.strength = 0.0;
+    independent_curve.cell_anisotropy = 1.0;
+    const auto cell_only_orientation = bifrost_scales::orient_samples(
+        {directed_sample},
+        directed_settings,
+        PreviewMode::Final,
+        {independent_curve});
+    CHECK(cell_only_orientation.samples.front().tangent.x > 0.999);
+    CHECK(cell_only_orientation.samples.front().partition_tangent.z > 0.999);
+    CHECK(cell_only_orientation.samples.front().direction_influence < 1.0e-12);
+    CHECK(cell_only_orientation.samples.front().cell_anisotropy_influence > 0.999);
+
+    independent_curve.strength = 1.0;
+    independent_curve.cell_anisotropy = 0.0;
+    const auto direction_only_orientation = bifrost_scales::orient_samples(
+        {directed_sample},
+        directed_settings,
+        PreviewMode::Final,
+        {independent_curve});
+    CHECK(direction_only_orientation.samples.front().tangent.z > 0.999);
+    CHECK(direction_only_orientation.samples.front().partition_tangent.x > 0.999);
+    CHECK(direction_only_orientation.samples.front().direction_influence > 0.999);
+    CHECK(direction_only_orientation.samples.front().cell_anisotropy_influence < 1.0e-12);
 
     Guide point_attractor;
     point_attractor.id = "point_attractor";
@@ -1845,7 +1873,7 @@ int main() {
     CHECK(!radius_edit.profile.orientation_cache_hit);
     CHECK(!radius_edit.profile.cell_cache_hit);
     CHECK(!radius_edit.profile.cell_cache_reused_after_orientation_change);
-    CHECK(radius_edit.profile.cell_cache_basis == "orientation-anisotropic");
+    CHECK(radius_edit.profile.cell_cache_basis == "guide-anisotropic");
     bifrost_scales::clear_native_stage_cache();
     const GenerationResult radius_edit_cold = bifrost_scales::generate(
         mesh,
@@ -1863,9 +1891,9 @@ int main() {
         {cache_curve});
     CHECK(centerline_edit.profile.distribution_cache_hit);
     CHECK(!centerline_edit.profile.orientation_cache_hit);
-    CHECK(!centerline_edit.profile.cell_cache_hit);
-    CHECK(!centerline_edit.profile.cell_cache_reused_after_orientation_change);
-    CHECK(centerline_edit.profile.cell_cache_basis == "orientation-anisotropic");
+    CHECK(centerline_edit.profile.cell_cache_hit);
+    CHECK(centerline_edit.profile.cell_cache_reused_after_orientation_change);
+    CHECK(centerline_edit.profile.cell_cache_basis == "guide-anisotropic");
 
     bifrost_scales::clear_native_stage_cache();
     Settings isotropic_guide_settings = guide_cache_settings;
@@ -1889,14 +1917,14 @@ int main() {
     CHECK(isotropic_radius_edit.profile.cell_cache_reused_after_orientation_change);
     CHECK(isotropic_radius_edit.profile.cell_cache_basis == "distribution");
 
-    cache_curve.strength = 0.0;
+    cache_curve.center_alignment = 0.0;
     const GenerationResult centerline_disabled = bifrost_scales::generate(
         mesh,
         guide_cache_settings,
         PreviewMode::Settled,
         {cache_curve});
     CHECK(!centerline_disabled.profile.distribution_cache_hit);
-    CHECK(centerline_disabled.profile.cell_cache_basis == "distribution");
+    CHECK(centerline_disabled.profile.cell_cache_basis == "guide-anisotropic");
 
     Mesh disconnected_boundary;
     disconnected_boundary.vertices = {

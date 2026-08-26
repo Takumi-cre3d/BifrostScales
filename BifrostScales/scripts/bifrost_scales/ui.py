@@ -219,7 +219,7 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             0.0, 1.0, 0.4, decimals=3, single_step=0.05
         )
         self.cell_direction_anisotropy.setToolTip(
-            "0は従来の等方Cell、1はGuide効果内で最大1.45倍の方向性を与えます。"
+            "0は従来の等方Cell、1はGuide効果内で最大2.25倍の方向性を与えます。"
         )
         cells.addRow("Cell Direction Anisotropy", self.cell_direction_anisotropy)
         self.cell_interactive_resolution = QtWidgets.QSpinBox()
@@ -405,7 +405,7 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             0.0, 1.0, 0.4, decimals=3, single_step=0.05
         )
         self.cell_direction_anisotropy.setToolTip(
-            "0は従来の等方Cell、1はGuide効果内で最大1.45倍の方向性を与えます。"
+            "0は従来の等方Cell、1はGuide効果内で最大2.25倍の方向性を与えます。"
         )
         form.addRow("Cell Direction Anisotropy", self.cell_direction_anisotropy)
 
@@ -521,11 +521,26 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         form.addRow("Size Multiplier", self.guide_size_multiplier)
         self.guide_strength = FloatParameterControl(0.0, 1.0, 1.0, decimals=3)
         self.guide_strength.setToolTip(
-            "Point: 範囲内の鱗をGuide Pointの位置へ向けます。 "
-            "Curve: 接線方向への整列強度だけを0〜1で設定します。"
-            "Cell中心列の本数はDensityと分布間隔で決まり、Strengthでは増減しません。"
+            "鱗のOrientationがPointまたはCurve方向へ沿う強さです。"
+            "Cell中心配置とCell境界の異方性には影響しません。"
         )
         form.addRow("Direction Strength", self.guide_strength)
+        self.guide_center_alignment = FloatParameterControl(
+            0.0, 1.0, 0.35, decimals=3
+        )
+        self.guide_center_alignment.setToolTip(
+            "Direction Curve上へ配置するCell中心候補の量です。"
+            "0で中心列なし、1で分布間隔ごとに候補を作成します。"
+        )
+        form.addRow("Center Alignment", self.guide_center_alignment)
+        self.guide_cell_anisotropy = FloatParameterControl(
+            0.0, 1.0, 1.0, decimals=3
+        )
+        self.guide_cell_anisotropy.setToolTip(
+            "このGuideがCell境界を方向付ける強さです。"
+            "Direction StrengthやCenter Alignmentとは独立しています。"
+        )
+        form.addRow("Cell Anisotropy", self.guide_cell_anisotropy)
         self.guide_angle = FloatParameterControl(
             -360.0, 360.0, 0.0, decimals=2, suffix=" deg"
         )
@@ -962,6 +977,8 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             self.guide_density_multiplier,
             self.guide_size_multiplier,
             self.guide_strength,
+            self.guide_center_alignment,
+            self.guide_cell_anisotropy,
             self.guide_angle,
         ):
             self._connect_guide_parameter(widget)
@@ -1503,6 +1520,8 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                 self.guide_density_multiplier.setValue(guide.density_multiplier)
                 self.guide_size_multiplier.setValue(guide.size_multiplier)
                 self.guide_strength.setValue(guide.strength)
+                self.guide_center_alignment.setValue(guide.center_alignment)
+                self.guide_cell_anisotropy.setValue(guide.cell_anisotropy)
                 self.guide_angle.setValue(guide.angle_degrees)
                 self.guide_symmetry_enabled.setChecked(
                     guide.symmetry_enabled
@@ -1522,6 +1541,10 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                 self.guide_density_multiplier.setEnabled(guide.affects_density)
                 self.guide_size_multiplier.setEnabled(guide.affects_size)
                 self.guide_strength.setEnabled(guide.affects_direction)
+                self.guide_center_alignment.setEnabled(
+                    guide.affects_direction and guide.kind.is_curve
+                )
+                self.guide_cell_anisotropy.setEnabled(guide.affects_direction)
                 self.guide_angle.setEnabled(guide.affects_direction)
                 self.guide_closed.setEnabled(guide.kind.is_curve)
                 self.guide_symmetry_axis.setEnabled(guide.symmetry_enabled)
@@ -1929,6 +1952,8 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                 density_multiplier=self.guide_density_multiplier.value(),
                 size_multiplier=self.guide_size_multiplier.value(),
                 strength=self.guide_strength.value(),
+                center_alignment=self.guide_center_alignment.value(),
+                cell_anisotropy=self.guide_cell_anisotropy.value(),
                 use_density=self.guide_use_density.isChecked(),
                 use_size=self.guide_use_size.isChecked(),
                 use_direction=self.guide_use_direction.isChecked(),
@@ -1956,6 +1981,10 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                 self.guide_density_multiplier.setEnabled(updated.affects_density)
                 self.guide_size_multiplier.setEnabled(updated.affects_size)
                 self.guide_strength.setEnabled(updated.affects_direction)
+                self.guide_center_alignment.setEnabled(
+                    updated.affects_direction and updated.kind.is_curve
+                )
+                self.guide_cell_anisotropy.setEnabled(updated.affects_direction)
                 self.guide_angle.setEnabled(updated.affects_direction)
                 self.guide_closed.setEnabled(updated.kind.is_curve)
                 self.guide_symmetry_axis.setEnabled(updated.symmetry_enabled)

@@ -30,7 +30,7 @@ Maya Viewport 2.0 GPU display
 
 OpenCL 1.2を実行時に動的ロードします。OpenCL DLLやGPU Deviceを取得できなくてもOperatorロードは失敗せず、同じ入力をマルチコアCPUで評価します。
 
-GPU入力はSample位置、法線、Random Rotation、Direction Guide、Curve Segmentをまとめた`bifrost-scales/compact-orientation-buffer/1`です。GPU出力はTangent、Partition Tangent、Point Influenceです。
+GPU入力はSample位置、法線、Random Rotation、Direction Guide、Curve Segmentをまとめた`bifrost-scales/compact-orientation-buffer/2`です。GPU出力はOrientation Tangent、Cell Partition Tangent、Direction Influence、Cell Anisotropy Influenceです。
 
 GPU float計算は操作中表示だけに限定します。Settled／Final、Direction Relax、Cell境界、Stable Cell IDは倍精度CPU exactなので、GPU固有の丸めが制作データの正本にはなりません。
 

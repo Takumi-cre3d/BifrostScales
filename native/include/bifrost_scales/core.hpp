@@ -103,6 +103,8 @@ struct Guide {
     double density_multiplier{1.75};
     double size_multiplier{1.0};
     double strength{1.0};
+    double center_alignment{0.35};
+    double cell_anisotropy{1.0};
     double angle_degrees{0.0};
     bool closed{false};
     std::optional<bool> use_density;
@@ -193,6 +195,7 @@ struct OrientedSample {
     Vec3 tangent{1.0, 0.0, 0.0};
     Vec3 partition_tangent{1.0, 0.0, 0.0};
     double direction_influence{0.0};
+    double cell_anisotropy_influence{0.0};
 };
 
 struct CellData {

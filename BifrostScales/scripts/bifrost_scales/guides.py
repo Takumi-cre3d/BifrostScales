@@ -241,6 +241,8 @@ class GuideData:
     density_multiplier: float = 1.0
     size_multiplier: float = 1.0
     strength: float = 1.0
+    center_alignment: float = 0.35
+    cell_anisotropy: float = 1.0
     angle_degrees: float = 0.0
     closed: bool = False
     use_density: bool | None = None
@@ -316,6 +318,14 @@ class GuideData:
                 min(8.0, float(values.get("size_multiplier", 1.0))),
             ),
             strength=max(0.0, min(1.0, float(values.get("strength", 1.0)))),
+            center_alignment=max(
+                0.0,
+                min(1.0, float(values.get("center_alignment", 0.35))),
+            ),
+            cell_anisotropy=max(
+                0.0,
+                min(1.0, float(values.get("cell_anisotropy", 1.0))),
+            ),
             angle_degrees=float(values.get("angle_degrees", 0.0)),
             closed=bool(values.get("closed", False)),
             use_density=optional_bool("use_density"),
@@ -370,6 +380,8 @@ class GuideData:
             density_multiplier=max(0.0, min(16.0, float(self.density_multiplier))),
             size_multiplier=max(0.05, min(8.0, float(self.size_multiplier))),
             strength=max(0.0, min(1.0, float(self.strength))),
+            center_alignment=max(0.0, min(1.0, float(self.center_alignment))),
+            cell_anisotropy=max(0.0, min(1.0, float(self.cell_anisotropy))),
             angle_degrees=float(self.angle_degrees),
             closed=bool(self.closed),
             use_density=self._resolved_role(
@@ -530,6 +542,8 @@ class PointGuide:
     direction: Vec3 = (0.0, 1.0, 0.0)
     radius: float = 1.0
     strength: float = 1.0
+    center_alignment: float = 0.35
+    cell_anisotropy: float = 1.0
     falloff: float = 1.0
     enabled: bool = True
     name: str = ""
@@ -559,6 +573,8 @@ class PointGuide:
             falloff=self.falloff,
             density_multiplier=density_multiplier,
             strength=strength,
+            center_alignment=self.center_alignment,
+            cell_anisotropy=self.cell_anisotropy,
         ).normalized()
 
     def influence(self, position: Vec3) -> float:
@@ -738,7 +754,7 @@ class GuideSet:
                 curve_centerline = (
                     guide.kind.is_curve
                     and guide.affects_direction
-                    and guide.strength > 1.0e-12
+                    and guide.center_alignment > 1.0e-12
                 )
                 digest.update(
                     struct.pack(
@@ -759,10 +775,7 @@ class GuideSet:
                         )
                     )
                 if curve_centerline:
-                    # A positive Direction Strength enables the center row, but
-                    # its magnitude affects orientation only. Density and
-                    # Poisson spacing decide how many centers survive.
-                    digest.update(struct.pack("<?", True))
+                    digest.update(struct.pack("<d", guide.center_alignment))
             return digest.hexdigest()
 
         if normalized_stage == "symmetry":
@@ -820,7 +833,14 @@ class GuideSet:
                 digest.update(struct.pack("<?", guide.affects_direction))
                 if normalized_stage is None:
                     digest.update(struct.pack("<ddd", *guide.direction))
-                digest.update(struct.pack("<dd", guide.strength, guide.angle_degrees))
+                digest.update(
+                    struct.pack(
+                        "<ddd",
+                        guide.strength,
+                        guide.cell_anisotropy,
+                        guide.angle_degrees,
+                    )
+                )
             if normalized_stage in {None, "links"}:
                 digest.update(struct.pack("<?", guide.affects_mask))
         return digest.hexdigest()
@@ -936,12 +956,12 @@ class GuideSet:
 
     @cached_property
     def curve_center_guides(self) -> tuple[GuideData, ...]:
-        """Direction curves whose positive strength enables a center row."""
+        """Direction curves whose Center Alignment enables a center row."""
 
         return tuple(
             guide
             for guide in self.direction
-            if guide.kind.is_curve and guide.strength > 1.0e-12
+            if guide.kind.is_curve and guide.center_alignment > 1.0e-12
         )
 
     def curve_center_anchors(
@@ -971,7 +991,13 @@ class GuideSet:
             total_length = sum(segment[2] for segment in segments)
             if total_length <= 1.0e-12:
                 continue
-            requested = int(math.floor(total_length / base_spacing))
+            requested = int(
+                math.floor(
+                    total_length
+                    / base_spacing
+                    * guide.center_alignment
+                )
+            )
             count = min(remaining, max(1, requested))
             occurrence = guide_occurrences.get(guide.guide_id, 0)
             guide_occurrences[guide.guide_id] = occurrence + 1
@@ -1114,6 +1140,8 @@ class GuideSet:
                 "density_multiplier": guide.density_multiplier,
                 "size_multiplier": guide.size_multiplier,
                 "strength": guide.strength,
+                "center_alignment": guide.center_alignment,
+                "cell_anisotropy": guide.cell_anisotropy,
                 "angle_degrees": guide.angle_degrees,
                 "closed": guide.closed,
                 "use_density": guide.affects_density,

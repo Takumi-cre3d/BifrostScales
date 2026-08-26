@@ -36,7 +36,7 @@ struct alignas(16) DirectionGuide {
     std::uint32_t segment_offset{0U};
     std::uint32_t segment_count{0U};
     std::uint32_t curve{0U};
-    std::uint32_t point_guide{0U};
+    float cell_anisotropy{1.0F};
 };
 
 struct alignas(16) DirectionSegment {
@@ -52,8 +52,8 @@ struct alignas(16) DirectionSegment {
 struct alignas(16) DirectionOutput {
     Float4 tangent{};
     Float4 partition_tangent{};
-    float point_influence{0.0F};
-    float padding0{0.0F};
+    float direction_influence{0.0F};
+    float cell_anisotropy_influence{0.0F};
     float padding1{0.0F};
     float padding2{0.0F};
 };
