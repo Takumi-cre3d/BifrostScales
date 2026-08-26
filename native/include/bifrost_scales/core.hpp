@@ -159,6 +159,7 @@ struct Settings {
     double cell_gap{0.06};
     double cell_collision_margin{0.02};
     double cell_radius_multiplier{1.65};
+    double cell_direction_anisotropy{0.4};
     std::uint32_t cell_shape_divisions{2};
     std::uint32_t cell_interactive_resolution{6};
     std::uint32_t cell_settled_resolution{10};
@@ -276,6 +277,7 @@ struct GenerationProfile {
     bool orientation_cache_hit{false};
     bool cell_cache_hit{false};
     bool cell_cache_reused_after_orientation_change{false};
+    std::string cell_cache_basis{"distribution"};
     std::string stage_cache_scope{"process-shared-bounded"};
     std::uint32_t stage_cache_capacity{0};
     std::uint32_t stage_cache_evictions{0};

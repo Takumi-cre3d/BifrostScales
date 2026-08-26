@@ -134,6 +134,7 @@ def test_cell_settings_clamp_and_round_trip():
             "cell_gap": 2.0,
             "cell_collision_margin": -1.0,
             "cell_radius_multiplier": 99.0,
+            "cell_direction_anisotropy": 9.0,
             "cell_direction_pair_strength": 9.0,
             "cell_direction_pair_length": 99.0,
             "cell_shape_divisions": 99,
@@ -148,6 +149,7 @@ def test_cell_settings_clamp_and_round_trip():
     assert settings.cell_gap == 0.49
     assert settings.cell_collision_margin == 0.0
     assert settings.cell_radius_multiplier == 6.0
+    assert settings.cell_direction_anisotropy == 1.0
     assert not hasattr(settings, "cell_direction_pair_strength")
     assert not hasattr(settings, "cell_direction_pair_length")
     assert "cell_direction_pair_strength" not in settings.to_mapping()

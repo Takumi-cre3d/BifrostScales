@@ -215,6 +215,13 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             0.35, 6.0, 1.65, decimals=3, single_step=0.05
         )
         cells.addRow("Open Cell Radius Limit", self.cell_radius_multiplier)
+        self.cell_direction_anisotropy = FloatParameterControl(
+            0.0, 1.0, 0.4, decimals=3, single_step=0.05
+        )
+        self.cell_direction_anisotropy.setToolTip(
+            "0は従来の等方Cell、1はGuide効果内で最大1.45倍の方向性を与えます。"
+        )
+        cells.addRow("Cell Direction Anisotropy", self.cell_direction_anisotropy)
         self.cell_interactive_resolution = QtWidgets.QSpinBox()
         self.cell_interactive_resolution.setRange(4, 16)
         self.cell_interactive_resolution.setValue(6)
@@ -394,6 +401,13 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             0.35, 6.0, 1.65, decimals=3, single_step=0.05
         )
         form.addRow("Open Cell Radius Limit", self.cell_radius_multiplier)
+        self.cell_direction_anisotropy = FloatParameterControl(
+            0.0, 1.0, 0.4, decimals=3, single_step=0.05
+        )
+        self.cell_direction_anisotropy.setToolTip(
+            "0は従来の等方Cell、1はGuide効果内で最大1.45倍の方向性を与えます。"
+        )
+        form.addRow("Cell Direction Anisotropy", self.cell_direction_anisotropy)
 
         self.cell_interactive_resolution = QtWidgets.QSpinBox()
         self.cell_interactive_resolution.setRange(4, 16)
@@ -416,8 +430,8 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         form.addRow(self.cell_project_to_surface)
 
         note = QtWidgets.QLabel(
-            "Direction Point / Curveは鱗のOrientationだけを変更し、Cell分割用の追加種点は作成しません。\n"
-            "Direction CurveはStrengthが0より大きい場合だけ、DensityとPoisson間隔に従うCell中心候補列を作成します。\n"
+            "Direction Point / CurveはOrientationとCell Direction Anisotropyを制御します。\n"
+            "Direction CurveはStrengthが0より大きい場合だけ、DensityとPoisson間隔に従うCell中心候補列を維持し、補助のペア種点は作成しません。\n"
             "Cell固有の外周点列は共通形状へ置き換えず、Interior Divisionsで対応する内側リングと中心を生成します。\n"
             "ShapeパラメータはこのCell由来トポロジの内部を変形し、各Cellの不規則な境界形状を保持します。"
         )
@@ -885,6 +899,7 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             self.cell_gap,
             self.cell_collision_margin,
             self.cell_radius_multiplier,
+            self.cell_direction_anisotropy,
             self.cell_interactive_resolution,
             self.cell_settled_resolution,
             self.cell_projection_rings,
@@ -1172,6 +1187,7 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             "cell_gap": self.cell_gap.value(),
             "cell_collision_margin": self.cell_collision_margin.value(),
             "cell_radius_multiplier": self.cell_radius_multiplier.value(),
+            "cell_direction_anisotropy": self.cell_direction_anisotropy.value(),
             "cell_shape_divisions": self.cell_shape_divisions.value(),
             "cell_interactive_resolution": self.cell_interactive_resolution.value(),
             "cell_settled_resolution": self.cell_settled_resolution.value(),
@@ -1220,6 +1236,9 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             self.cell_gap.setValue(settings.cell_gap)
             self.cell_collision_margin.setValue(settings.cell_collision_margin)
             self.cell_radius_multiplier.setValue(settings.cell_radius_multiplier)
+            self.cell_direction_anisotropy.setValue(
+                settings.cell_direction_anisotropy
+            )
             self.cell_shape_divisions.setValue(settings.cell_shape_divisions)
             self.cell_interactive_resolution.setValue(
                 settings.cell_interactive_resolution

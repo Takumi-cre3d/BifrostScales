@@ -350,7 +350,9 @@ std::string make_profile_json(
         << (generation.orientation_cache_hit ? "true" : "false")
         << ",\"cell_cache_hit\":"
         << (generation.cell_cache_hit ? "true" : "false")
-        << ",\"cell_cache_basis\":\"distribution\""
+        << ",\"cell_cache_basis\":";
+    append_json_string(stream, generation.cell_cache_basis);
+    stream
         << ",\"cell_cache_reused_after_orientation_change\":"
         << (generation.cell_cache_reused_after_orientation_change
                 ? "true"

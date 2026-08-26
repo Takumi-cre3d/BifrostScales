@@ -118,8 +118,8 @@ def audit(root: Path = ROOT) -> dict[str, Any]:
         "python_native_profile_schema": values["python_native_profile_schema"] == EXPECTED_NATIVE_PROFILE_SCHEMA,
         "operator_compute_backend": values["operator_compute_backend"] == "hybrid-opencl-gpu-interactive-cpu-exact-settled-final",
         "operator_gpu_generation_compute": values["operator_gpu_generation_compute"] is True,
-        "operator_cell_cache_key_basis": values["operator_cell_cache_key_basis"] == "distribution-not-orientation",
-        "manifest_cell_cache_key_basis": values["manifest_cell_cache_key_basis"] == "distribution-not-orientation",
+        "operator_cell_cache_key_basis": values["operator_cell_cache_key_basis"] == "distribution-or-orientation-anisotropic",
+        "manifest_cell_cache_key_basis": values["manifest_cell_cache_key_basis"] == "distribution-or-orientation-anisotropic",
         "operator_process_shared_stage_cache": values["operator_stage_cache"] == "process-shared-bounded-lru-exact-dual-hash",
         "manifest_process_shared_stage_cache": values["manifest_stage_cache"] == "process-shared-bounded-lru-exact-dual-hash",
         "core_process_shared_stage_cache": all(

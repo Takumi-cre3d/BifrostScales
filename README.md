@@ -15,13 +15,14 @@ Bifrost Scales is a procedural scale-generation tool for Autodesk Maya 2026 and 
 ## Features
 
 - Density, size, direction, flow, and mask guides with surface-connected distance, Range as the outer limit, and normalized 0-1 Falloff width
+- Bounded direction-anisotropic Cell partitioning driven by Guide Strength/Falloff while preserving Direction Curve center alignment (`Cell Direction Anisotropy`; zero restores legacy shapes)
 - Masks preserve completed Cell placement and shape, then control mesh emission deterministically from Stable Cell IDs
 - Guide groups and symmetry authoring
 - Multiple scale types with guide-linked selection
 - Stable 64-bit cell identity and mesh-free picker metadata
 - Deterministic multicore CPU distribution, cells, and shape generation
 - Exact BVH-indexed Cell neighbor search for large radii and uneven density
-- Closed-mesh Cell fast path that skips open-boundary candidate traversal
+- Exact BVH lookup for open-boundary candidates, with a closed-mesh fast path that skips traversal
 - Process-shared bounded stage cache
 - Reusable target-mesh topology, boundary, and surface-guide acceleration data across edits
 - Cell setup, neighbor, boundary candidate-query, boundary-ray, and surface-projection timing diagnostics in the Performance log
@@ -32,13 +33,13 @@ Bifrost Scales is a procedural scale-generation tool for Autodesk Maya 2026 and 
 
 1. Open Bifrost Scales from the Maya Python API with `import bifrost_scales; bifrost_scales.show()`.
 2. Select a polygon mesh and create a Bifrost Scales system.
-3. Add and edit guides to control density, size, direction, flow, and masking.
+3. Add and edit guides to control density, size, direction, flow, and masking. Adjust the Cell-shape response with `Cell Direction Anisotropy` from 0 to 1.
 4. Use Interactive preview while authoring and Settled preview for deterministic CPU-exact output.
 5. Save the Maya scene; systems, guides, guide groups, scale types, and native graph connections are stored in the scene.
 
 ## Execution model
 
-Settled output keeps the deterministic CPU-exact path. Interactive Distribution evaluates compact, deterministic, prefix-stable surface candidates in parallel and arbitrates spatial conflicts with OpenCL. It falls back automatically to the same-priority CPU reference when GPU execution is unavailable. CPU-authored open-boundary and Guide-curve anchors, surface-connected Guide fields, Stable Cell IDs, and post-Cell Mask filtering remain intact.
+Settled output keeps the deterministic CPU-exact path. Interactive Distribution evaluates compact, deterministic, prefix-stable surface candidates in parallel and arbitrates spatial conflicts with OpenCL. It falls back automatically to the same-priority CPU reference when GPU execution is unavailable. CPU-authored open-boundary and Guide-curve anchors, surface-connected Guide fields, Stable Cell IDs, and post-Cell Mask filtering remain intact. Direction anisotropy changes only the pair-symmetric metric between neighboring Cells, without adding or removing centers, so the existing Guide-curve center alignment remains stable.
 
 - `bifrost-scales/interactive-candidate-batch/1`: production Interactive surface candidates
 - `bifrost-scales/interactive-conflict-reference/1`: deterministic CPU fallback
