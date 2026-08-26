@@ -65,6 +65,8 @@ class BackendApplyReport:
     native_cell_setup_ms: float = 0.0
     native_cell_neighbors_ms: float = 0.0
     native_cell_boundaries_ms: float = 0.0
+    native_cell_boundary_query_ms: float = 0.0
+    native_cell_boundary_rays_ms: float = 0.0
     native_cell_projection_ms: float = 0.0
     native_shape_ms: float = 0.0
     native_core_total_ms: float = 0.0
@@ -702,6 +704,8 @@ class NativeMayaBackend:
                 else 0
             ),
             cell_resolution=settings.effective_cell_resolution(request.mode.value),
+            cell_clipped_rays=int(profile.get("cell_clipped_rays", 0) or 0),
+            cell_mean_neighbors=profile_ms("cell_mean_neighbors"),
             cell_shape_divisions=settings.cell_shape_divisions,
             density_guide_count=density_count,
             direction_guide_count=direction_count,
@@ -722,6 +726,12 @@ class NativeMayaBackend:
             native_cell_setup_ms=profile_ms("cell_setup_ms"),
             native_cell_neighbors_ms=profile_ms("cell_neighbors_ms"),
             native_cell_boundaries_ms=profile_ms("cell_boundaries_ms"),
+            native_cell_boundary_query_ms=profile_ms(
+                "cell_boundary_query_ms"
+            ),
+            native_cell_boundary_rays_ms=profile_ms(
+                "cell_boundary_rays_ms"
+            ),
             native_cell_projection_ms=profile_ms("cell_projection_ms"),
             native_shape_ms=profile_ms("shape_ms"),
             native_core_total_ms=profile_ms("core_total_ms"),

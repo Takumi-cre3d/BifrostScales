@@ -122,6 +122,10 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "bifrost-scales/cell-id/1" in source
     assert "bifrost-scales/cell-metadata/1" in operator
     assert "bifrost-scales/native-profile/9" in operator
+    assert "cell_boundary_query_ms" in operator
+    assert "cell_boundary_rays_ms" in operator
+    assert "cell_mean_neighbors" in operator
+    assert "if (segments_.empty())" in source
     assert "cell_cache_basis" in operator
     assert "update_orientation_dirty_region" not in source
     assert "BIFROST_SCALES_GPU" in gpu

@@ -3077,6 +3077,11 @@ public:
         const Vec3& position,
         double radius,
         std::uint32_t component_id) const {
+        // Closed meshes have no open-boundary segments. Avoid scanning the
+        // surrounding hash-grid cube once per Cell in that common case.
+        if (segments_.empty()) {
+            return {};
+        }
         std::unordered_set<std::uint32_t> found;
         const GridCell origin = cell_for(position, cell_size_);
         const std::int64_t cells = std::max<std::int64_t>(
@@ -3353,6 +3358,8 @@ struct CellStageTimings {
     double setup_ms{0.0};
     double neighbors_ms{0.0};
     double boundaries_ms{0.0};
+    double boundary_query_ms{0.0};
+    double boundary_rays_ms{0.0};
     double projection_ms{0.0};
 };
 
@@ -3492,6 +3499,8 @@ CellResult build_cells_impl(
         std::uint64_t symmetry_competitor_count{0U};
         double neighbors_ms{0.0};
         double boundaries_ms{0.0};
+        double boundary_query_ms{0.0};
+        double boundary_rays_ms{0.0};
         double projection_ms{0.0};
     };
     const std::uint32_t requested_workers = parallel_worker_count(
@@ -3592,6 +3601,10 @@ CellResult build_cells_impl(
                         sample.position,
                         base_open_radius + fallback_spacing,
                         component);
+                const auto boundary_query_finished = Clock::now();
+                local_stats.boundary_query_ms +=
+                    std::chrono::duration<double, std::milli>(
+                        boundary_query_finished - boundaries_started).count();
 
                 CellData cell;
                 cell.sample_index = static_cast<std::uint32_t>(sample_index);
@@ -3651,9 +3664,13 @@ CellResult build_cells_impl(
                     cell.boundary.push_back(
                         add(sample.position, mul(ray, radius)));
                 }
+                const auto boundaries_finished = Clock::now();
                 local_stats.boundaries_ms +=
                     std::chrono::duration<double, std::milli>(
-                        Clock::now() - boundaries_started).count();
+                        boundaries_finished - boundaries_started).count();
+                local_stats.boundary_rays_ms +=
+                    std::chrono::duration<double, std::milli>(
+                        boundaries_finished - boundary_query_finished).count();
                 if (settings.cell_project_to_surface) {
                     const auto projection_started = Clock::now();
                     for (Vec3& endpoint : cell.boundary) {
@@ -3693,6 +3710,12 @@ CellResult build_cells_impl(
             stage_timings->boundaries_ms = std::max(
                 stage_timings->boundaries_ms,
                 stats.boundaries_ms);
+            stage_timings->boundary_query_ms = std::max(
+                stage_timings->boundary_query_ms,
+                stats.boundary_query_ms);
+            stage_timings->boundary_rays_ms = std::max(
+                stage_timings->boundary_rays_ms,
+                stats.boundary_rays_ms);
             stage_timings->projection_ms = std::max(
                 stage_timings->projection_ms,
                 stats.projection_ms);
@@ -6402,6 +6425,8 @@ GenerationResult generate(
         profile.cell_setup_ms = cell_stage_timings.setup_ms;
         profile.cell_neighbors_ms = cell_stage_timings.neighbors_ms;
         profile.cell_boundaries_ms = cell_stage_timings.boundaries_ms;
+        profile.cell_boundary_query_ms = cell_stage_timings.boundary_query_ms;
+        profile.cell_boundary_rays_ms = cell_stage_timings.boundary_rays_ms;
         profile.cell_projection_ms = cell_stage_timings.projection_ms;
 
         const auto shape_started = Clock::now();
