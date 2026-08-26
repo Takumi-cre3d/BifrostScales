@@ -1124,26 +1124,6 @@ DirectionSolution guided_direction_solution(
     };
 }
 
-double point_direction_influence(
-    const Vec3& position,
-    std::uint32_t triangle_index,
-    const PreparedGuides& guides) {
-    double remaining = 1.0;
-    for (const PreparedGuide& guide : guides) {
-        const Guide& source = *guide.source;
-        if (!source.enabled || guide.curve || !guide.uses_direction) {
-            continue;
-        }
-        const double weight = clamp(
-            clamp(source.strength, 0.0, 1.0) *
-                guide_influence(guide, position, 0.0, triangle_index),
-            0.0,
-            1.0);
-        remaining *= 1.0 - weight;
-    }
-    return clamp(1.0 - remaining, 0.0, 1.0);
-}
-
 struct CurveCenterAnchor {
     Vec3 position{};
     std::uint64_t guide_key{0U};
@@ -3048,68 +3028,54 @@ public:
     BoundaryIndex(
         const std::vector<BoundarySegment>& segments,
         double cell_size)
-        : segments_(segments), cell_size_(std::max(1.0e-8, cell_size)) {
-        for (std::uint32_t index = 0U; index < segments_.size(); ++index) {
-            const BoundarySegment& segment = segments_[index];
-            const Vec3 minimum{
-                std::min(segment.start.x, segment.end.x),
-                std::min(segment.start.y, segment.end.y),
-                std::min(segment.start.z, segment.end.z),
-            };
-            const Vec3 maximum{
-                std::max(segment.start.x, segment.end.x),
-                std::max(segment.start.y, segment.end.y),
-                std::max(segment.start.z, segment.end.z),
-            };
-            const GridCell lower = cell_for(minimum, cell_size_);
-            const GridCell upper = cell_for(maximum, cell_size_);
-            for (std::int64_t x = lower.x; x <= upper.x; ++x) {
-                for (std::int64_t y = lower.y; y <= upper.y; ++y) {
-                    for (std::int64_t z = lower.z; z <= upper.z; ++z) {
-                        grid_[{x, y, z}].push_back(index);
-                    }
-                }
-            }
+        : segments_(segments) {
+        (void)cell_size;
+        indices_.resize(segments_.size());
+        std::iota(indices_.begin(), indices_.end(), 0U);
+        nodes_.reserve(segments_.size() * 2U);
+        if (!segments_.empty()) {
+            build(0U, static_cast<std::uint32_t>(segments_.size()));
         }
     }
 
-    std::vector<std::uint32_t> query(
+    void query(
         const Vec3& position,
         double radius,
-        std::uint32_t component_id) const {
-        // Closed meshes have no open-boundary segments. Avoid scanning the
-        // surrounding hash-grid cube once per Cell in that common case.
-        if (segments_.empty()) {
-            return {};
+        std::uint32_t component_id,
+        std::vector<std::uint32_t>& result,
+        std::vector<std::uint32_t>& traversal_stack) const {
+        result.clear();
+        traversal_stack.clear();
+        if (nodes_.empty()) {
+            return;
         }
-        std::unordered_set<std::uint32_t> found;
-        const GridCell origin = cell_for(position, cell_size_);
-        const std::int64_t cells = std::max<std::int64_t>(
-            1,
-            static_cast<std::int64_t>(std::ceil(
-                std::max(0.0, radius) / cell_size_)));
-        for (std::int64_t x = -cells; x <= cells; ++x) {
-            for (std::int64_t y = -cells; y <= cells; ++y) {
-                for (std::int64_t z = -cells; z <= cells; ++z) {
-                    const auto iterator = grid_.find({
-                        origin.x + x,
-                        origin.y + y,
-                        origin.z + z,
-                    });
-                    if (iterator == grid_.end()) {
-                        continue;
-                    }
-                    for (const std::uint32_t index : iterator->second) {
-                        if (segments_[index].component_id == component_id) {
-                            found.insert(index);
-                        }
-                    }
+        const double bounded_radius = std::max(0.0, radius);
+        const double radius_squared = std::nextafter(
+            bounded_radius * bounded_radius,
+            std::numeric_limits<double>::infinity());
+        traversal_stack.push_back(0U);
+        while (!traversal_stack.empty()) {
+            const std::uint32_t node_index = traversal_stack.back();
+            traversal_stack.pop_back();
+            const Node& node = nodes_[node_index];
+            if (bounds_distance_squared(node.bounds, position) > radius_squared) {
+                continue;
+            }
+            if (!node.leaf()) {
+                traversal_stack.push_back(node.right);
+                traversal_stack.push_back(node.left);
+                continue;
+            }
+            for (std::uint32_t offset = node.begin; offset < node.end; ++offset) {
+                const std::uint32_t index = indices_[offset];
+                if (segments_[index].component_id == component_id &&
+                    bounds_distance_squared(segment_bounds(index), position) <=
+                        radius_squared) {
+                    result.push_back(index);
                 }
             }
         }
-        std::vector<std::uint32_t> result(found.begin(), found.end());
         std::sort(result.begin(), result.end());
-        return result;
     }
 
     double ray_limit(
@@ -3146,9 +3112,87 @@ public:
     }
 
 private:
+    struct Node {
+        Bounds3 bounds{};
+        std::uint32_t begin{0U};
+        std::uint32_t end{0U};
+        std::uint32_t left{std::numeric_limits<std::uint32_t>::max()};
+        std::uint32_t right{std::numeric_limits<std::uint32_t>::max()};
+
+        [[nodiscard]] bool leaf() const noexcept {
+            return left == std::numeric_limits<std::uint32_t>::max();
+        }
+    };
+
     const std::vector<BoundarySegment>& segments_;
-    double cell_size_{1.0};
-    std::unordered_map<GridCell, std::vector<std::uint32_t>, GridCellHash> grid_;
+    std::vector<std::uint32_t> indices_;
+    std::vector<Node> nodes_;
+
+    [[nodiscard]] Bounds3 segment_bounds(std::uint32_t index) const {
+        Bounds3 bounds;
+        expand_bounds(bounds, segments_[index].start);
+        expand_bounds(bounds, segments_[index].end);
+        return bounds;
+    }
+
+    [[nodiscard]] double centroid_coordinate(
+        std::uint32_t index,
+        std::uint32_t axis) const {
+        const BoundarySegment& segment = segments_[index];
+        if (axis == 0U) {
+            return (segment.start.x + segment.end.x) * 0.5;
+        }
+        if (axis == 1U) {
+            return (segment.start.y + segment.end.y) * 0.5;
+        }
+        return (segment.start.z + segment.end.z) * 0.5;
+    }
+
+    std::uint32_t build(std::uint32_t begin, std::uint32_t end) {
+        const std::uint32_t node_index =
+            static_cast<std::uint32_t>(nodes_.size());
+        nodes_.push_back({});
+        Bounds3 bounds;
+        Bounds3 centroid_bounds;
+        for (std::uint32_t offset = begin; offset < end; ++offset) {
+            const std::uint32_t index = indices_[offset];
+            expand_bounds(bounds, segment_bounds(index));
+            const BoundarySegment& segment = segments_[index];
+            expand_bounds(
+                centroid_bounds,
+                mul(add(segment.start, segment.end), 0.5));
+        }
+        nodes_[node_index].bounds = bounds;
+        nodes_[node_index].begin = begin;
+        nodes_[node_index].end = end;
+        constexpr std::uint32_t leaf_size = 12U;
+        if (end - begin <= leaf_size) {
+            return node_index;
+        }
+        const Vec3 extent = sub(centroid_bounds.maximum, centroid_bounds.minimum);
+        std::uint32_t axis = 0U;
+        if (extent.y > extent.x && extent.y >= extent.z) {
+            axis = 1U;
+        } else if (extent.z > extent.x && extent.z > extent.y) {
+            axis = 2U;
+        }
+        const std::uint32_t middle = begin + (end - begin) / 2U;
+        std::nth_element(
+            indices_.begin() + begin,
+            indices_.begin() + middle,
+            indices_.begin() + end,
+            [&](std::uint32_t left, std::uint32_t right) {
+                const double left_value = centroid_coordinate(left, axis);
+                const double right_value = centroid_coordinate(right, axis);
+                if (left_value != right_value) {
+                    return left_value < right_value;
+                }
+                return left < right;
+            });
+        nodes_[node_index].left = build(begin, middle);
+        nodes_[node_index].right = build(middle, end);
+        return node_index;
+    }
 };
 
 struct NeighborIndex {
@@ -3295,29 +3339,80 @@ private:
 };
 
 struct PartitionConstraint {
+    // A pair-symmetric anisotropic metric transforms the competitor delta
+    // before the existing linear half-plane/Ray solver consumes it.
     double delta_x{0.0};
     double delta_y{0.0};
     double right{0.0};
 };
 
+struct PartitionCompetitor {
+    Vec2 point{};
+    Vec2 perpendicular{1.0, 0.0};
+    double metric_weight{0.0};
+};
+
+Vec2 normalize_direction_2d(const Vec2& value, const Vec2& fallback) {
+    const double magnitude = std::hypot(value.x, value.y);
+    if (magnitude <= 1.0e-12) {
+        return fallback;
+    }
+    return {value.x / magnitude, value.y / magnitude};
+}
+
+double direction_metric_weight(double setting, double influence) {
+    // A maximum axis ratio of 1.45 keeps cells directional without creating
+    // the thin, laterally crushed rows produced by unbounded anisotropy.
+    const double amount = clamp(setting, 0.0, 1.0) *
+        clamp(influence, 0.0, 1.0);
+    const double ratio = 1.0 + 0.45 * amount;
+    return ratio * ratio - 1.0;
+}
+
 void append_partition_constraints(
     std::vector<PartitionConstraint>& constraints,
-    const Vec2& owner,
-    const std::vector<Vec2>& competitors,
+    const Vec2& owner_perpendicular,
+    double owner_metric_weight,
+    const std::vector<PartitionCompetitor>& competitors,
     double shared_gap) {
-    const double owner_squared = owner.x * owner.x + owner.y * owner.y;
     const double separation = std::max(0.0, shared_gap);
-    for (const Vec2& competitor : competitors) {
-        const double delta_x = competitor.x - owner.x;
-        const double delta_y = competitor.y - owner.y;
-        const double competitor_squared =
-            competitor.x * competitor.x + competitor.y * competitor.y;
-        // Shift each Voronoi bisector by half of the desired total shared
-        // separation. The costly distance is independent of the Ray and is
-        // therefore prepared once per owner/competitor pair.
-        const double right = competitor_squared - owner_squared -
-            separation * std::sqrt(delta_x * delta_x + delta_y * delta_y);
-        constraints.push_back({delta_x, delta_y, right});
+    for (const PartitionCompetitor& competitor : competitors) {
+        const double delta_x = competitor.point.x;
+        const double delta_y = competitor.point.y;
+        const double distance_squared = delta_x * delta_x + delta_y * delta_y;
+        if (owner_metric_weight <= 0.0 && competitor.metric_weight <= 0.0) {
+            // Preserve the previous arithmetic exactly when anisotropy has no
+            // influence, including old scenes that explicitly set it to zero.
+            const double right = distance_squared -
+                separation * std::sqrt(distance_squared);
+            constraints.push_back({delta_x, delta_y, right});
+            continue;
+        }
+
+        const double owner_projection =
+            owner_perpendicular.x * delta_x +
+            owner_perpendicular.y * delta_y;
+        const double competitor_projection =
+            competitor.perpendicular.x * delta_x +
+            competitor.perpendicular.y * delta_y;
+        const double metric_delta_x = delta_x + 0.5 * (
+            owner_metric_weight * owner_perpendicular.x * owner_projection +
+            competitor.metric_weight * competitor.perpendicular.x *
+                competitor_projection);
+        const double metric_delta_y = delta_y + 0.5 * (
+            owner_metric_weight * owner_perpendicular.y * owner_projection +
+            competitor.metric_weight * competitor.perpendicular.y *
+                competitor_projection);
+        const double metric_squared =
+            delta_x * metric_delta_x + delta_y * metric_delta_y;
+        double right = metric_squared;
+        if (separation > 0.0 && distance_squared > 1.0e-20) {
+            // Keep the authored Gap in world units along the site-to-site line
+            // even though the partition distance itself is anisotropic.
+            right -= separation * metric_squared /
+                std::sqrt(distance_squared);
+        }
+        constraints.push_back({metric_delta_x, metric_delta_y, right});
     }
 }
 
@@ -3376,8 +3471,9 @@ CellResult build_cells_impl(
     if (used_workers != nullptr) {
         *used_workers = 1U;
     }
-    // Guides no longer alter Cell topology. Mask is evaluated only while
-    // emitting the final mesh, after the complete Cell partition is cached.
+    // Guide center candidates remain part of Distribution. Cell construction
+    // changes only the shared partition metric; Mask remains a post-Cell mesh
+    // visibility filter and never deforms or removes cached Cell boundaries.
     (void)guides;
     using Clock = std::chrono::steady_clock;
     const auto setup_started = Clock::now();
@@ -3470,24 +3566,34 @@ CellResult build_cells_impl(
     std::vector<std::uint32_t> components;
     std::vector<Vec3> stable_tangents;
     std::vector<Vec3> stable_bitangents;
+    std::vector<Vec3> partition_tangents;
+    std::vector<double> direction_metric_weights;
     normals.reserve(samples.size());
     components.reserve(samples.size());
     stable_tangents.reserve(samples.size());
     stable_bitangents.reserve(samples.size());
+    partition_tangents.reserve(samples.size());
+    direction_metric_weights.reserve(samples.size());
 
     for (std::size_t sample_index = 0; sample_index < samples.size(); ++sample_index) {
         const Sample& sample = samples[sample_index];
+        const OrientedSample& oriented = oriented_samples[sample_index];
         const Vec3 normal = normalize(sample.normal);
         const Vec3 stable_tangent = orthonormal_tangent(normal);
         const Vec3 stable_bitangent = normalize(cross(normal, stable_tangent));
-        // Direction Pair authored a second partition site along the tangent,
-        // but its controls were not visually reliable and are retired in
-        // 0.8.9. One deterministic site now owns each scale; Direction affects
-        // orientation only. Keep the report fields as zero-valued ABI data.
+        const Vec3 partition_tangent = normalize(
+            project_on_plane(oriented.partition_tangent, normal),
+            stable_tangent);
+        // One deterministic center site still owns each scale. Direction only
+        // changes the bounded pair metric around those unchanged centers.
         normals.push_back(normal);
         components.push_back(projector.component(sample.triangle_index));
         stable_tangents.push_back(stable_tangent);
         stable_bitangents.push_back(stable_bitangent);
+        partition_tangents.push_back(partition_tangent);
+        direction_metric_weights.push_back(direction_metric_weight(
+            settings.cell_direction_anisotropy,
+            oriented.direction_influence));
     }
 
     std::vector<CellData> cells(samples.size());
@@ -3522,7 +3628,10 @@ CellResult build_cells_impl(
             neighbors.reserve(neighbor_limit * 2U);
             std::vector<std::uint32_t> traversal_stack;
             traversal_stack.reserve(64U);
-            std::vector<Vec2> competitors;
+            std::vector<std::uint32_t> nearby_boundaries;
+            std::vector<std::uint32_t> boundary_traversal_stack;
+            boundary_traversal_stack.reserve(64U);
+            std::vector<PartitionCompetitor> competitors;
             competitors.reserve(neighbor_limit * 2U);
             std::vector<PartitionConstraint> prepared_constraints;
             prepared_constraints.reserve(neighbor_limit * 4U);
@@ -3534,6 +3643,19 @@ CellResult build_cells_impl(
                 const Vec3 normal = normals[sample_index];
                 const Vec3 stable_tangent = stable_tangents[sample_index];
                 const Vec3 stable_bitangent = stable_bitangents[sample_index];
+                const Vec3 partition_tangent = partition_tangents[sample_index];
+                const double owner_metric_weight =
+                    direction_metric_weights[sample_index];
+                const Vec2 owner_direction = normalize_direction_2d(
+                    {
+                        dot(partition_tangent, stable_bitangent),
+                        dot(partition_tangent, stable_tangent),
+                    },
+                    {0.0, 1.0});
+                const Vec2 owner_perpendicular{
+                    -owner_direction.y,
+                    owner_direction.x,
+                };
                 const double local_spacing = spacings[sample_index];
                 const double base_open_radius = local_spacing * radius_scale;
                 const double search_radius =
@@ -3582,13 +3704,31 @@ CellResult build_cells_impl(
 
                 competitors.clear();
                 for (const NeighborIndex& neighbor : neighbors) {
-                    competitors.push_back(local_point(samples[neighbor.index].position));
+                    const Vec2 neighbor_direction = normalize_direction_2d(
+                        {
+                            dot(
+                                partition_tangents[neighbor.index],
+                                stable_bitangent),
+                            dot(
+                                partition_tangents[neighbor.index],
+                                stable_tangent),
+                        },
+                        owner_direction);
+                    competitors.push_back({
+                        local_point(samples[neighbor.index].position),
+                        {
+                            -neighbor_direction.y,
+                            neighbor_direction.x,
+                        },
+                        direction_metric_weights[neighbor.index],
+                    });
                 }
 
                 prepared_constraints.clear();
                 append_partition_constraints(
                     prepared_constraints,
-                    Vec2{0.0, 0.0},
+                    owner_perpendicular,
+                    owner_metric_weight,
                     competitors,
                     shared_gap_world);
                 local_stats.neighbors_ms +=
@@ -3596,11 +3736,12 @@ CellResult build_cells_impl(
                         Clock::now() - neighbors_started).count();
 
                 const auto boundaries_started = Clock::now();
-                const std::vector<std::uint32_t> nearby_boundaries =
-                    boundary_index.query(
-                        sample.position,
-                        base_open_radius + fallback_spacing,
-                        component);
+                boundary_index.query(
+                    sample.position,
+                    base_open_radius + fallback_spacing,
+                    component,
+                    nearby_boundaries,
+                    boundary_traversal_stack);
                 const auto boundary_query_finished = Clock::now();
                 local_stats.boundary_query_ms +=
                     std::chrono::duration<double, std::milli>(
@@ -4782,10 +4923,7 @@ std::vector<OrientedSample> orientation_field(
                     sample,
                     final_tangent,
                     partition_tangent,
-                    point_direction_influence(
-                        sample.position,
-                        sample.triangle_index,
-                        guides),
+                    solution.influence,
                 };
             }
         });
@@ -6114,17 +6252,18 @@ CacheKey orientation_cache_key(
 
 CacheKey cell_cache_key(
     const CacheKey& distribution,
+    const CacheKey& orientation,
+    bool direction_metric_active,
     const Settings& settings,
     PreviewMode mode,
     const std::vector<SymmetryPlane>& symmetry_planes) {
     CacheHasher hasher;
-    // Cell partitioning depends on distributed sample positions, normals,
-    // spacing and Cell settings. Mask is a post-Cell mesh visibility filter.
-    // Direction Pair was retired in
-    // 0.8.9, so neither the oriented tangent nor Direction Guide influence can
-    // change a Cell boundary. Key Cells from Distribution directly to preserve
-    // the exact partition while reusing it for direction-only edits.
-    hasher.key(distribution);
+    // Guide centers remain owned by Distribution. Only an enabled Direction
+    // anisotropy metric makes Cell boundaries depend on Orientation.
+    hasher.key(direction_metric_active ? orientation : distribution);
+    if (direction_metric_active) {
+        hasher.scalar(clamp(settings.cell_direction_anisotropy, 0.0, 1.0));
+    }
     hasher.scalar(static_cast<std::uint32_t>(settings.cell_mode));
     hasher.scalar(effective_cell_resolution(settings, mode));
     hasher.scalar(settings.cell_gap);
@@ -6384,8 +6523,21 @@ GenerationResult generate(
     GenerationReport report = orientation->report;
     report.active_scale_type_count = active_scale_type_count(settings);
     if (uses_cells(settings, mode)) {
+        const bool direction_metric_active =
+            settings.cell_direction_anisotropy > 1.0e-12 &&
+            std::any_of(
+                orientation->samples.begin(),
+                orientation->samples.end(),
+                [](const OrientedSample& sample) {
+                    return sample.direction_influence > 1.0e-12;
+                });
+        profile.cell_cache_basis = direction_metric_active
+            ? "orientation-anisotropic"
+            : "distribution";
         const CacheKey cells_key = cell_cache_key(
             distribution_key,
+            orientation_key,
+            direction_metric_active,
             settings,
             mode,
             symmetry_planes);

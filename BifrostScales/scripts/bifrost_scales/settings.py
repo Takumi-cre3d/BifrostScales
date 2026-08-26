@@ -194,6 +194,7 @@ class ScaleSettings:
     cell_gap: float = 0.06
     cell_collision_margin: float = 0.02
     cell_radius_multiplier: float = 1.65
+    cell_direction_anisotropy: float = 0.4
     # Number of corresponding interior rings between the unique cell outline
     # and its averaged center.  Shape parameters deform these rings instead
     # of replacing the cell with a shared silhouette.
@@ -283,6 +284,12 @@ class ScaleSettings:
                 0.35,
                 6.0,
                 defaults.cell_radius_multiplier,
+            ),
+            cell_direction_anisotropy=_clamp(
+                values.get("cell_direction_anisotropy"),
+                0.0,
+                1.0,
+                defaults.cell_direction_anisotropy,
             ),
             cell_shape_divisions=_clamp_int(
                 values.get("cell_shape_divisions"),

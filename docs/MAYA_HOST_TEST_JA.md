@@ -19,23 +19,25 @@ cache=process-shared-bounded/2
 
 Shape生成時間は毎回発生します。Guideを追加・編集して入力が変わった直後のMISSは正常です。
 
-## 4. Cell Hot Path比較
+## 4. Open Boundary BVH
 
-1. 0.10.5と同じSceneを複製し、同じTarget Count、Cell Rays、Guide、Densityを使います。
+1. 開放エッジを持つ同じSceneを複製し、同じTarget Count、Cell Sides、Guide、Densityを使います。
 2. Cell GapまたはCell Collision Marginを小さく往復させ、Distribution／OrientationをHIT、CellsだけをMISSにします。
 3. 各版でnative-profileのcells=を5回記録し、中央値を比較します。
-4. Cell数、境界、Mesh、Stable Cell IDが一致し、0.10.6中央値が悪化していなければ合格です。
+4. `boundaryParts=query/rays`のqueryが旧版より短縮し、Cell数、境界、Mesh、Stable Cell IDが異方性0で一致すれば合格です。
 
 ローカル30,000セル基準は111.633 msから89.971 ms（19.4%短縮）でした。ユーザー提供Sceneでは0.10.5のCellsが約2.7～4.1秒だったため、同じSceneの中央値を重視してください。
 
-## 5. Direction編集／GPU Orientation
+## 5. Direction異方性／GPU Orientation
 
 Target CountとInteractive Budgetを4,096以上、Direction Relaxを0にし、Direction Guideをドラッグします。
 
 ~~~text
-distribution=hit orientation=miss cell=hit
+distribution=hit orientation=miss cell=miss cellBasis=orientation-anisotropic
 backend=opencl-gpu+cpu-exact-settle gpu=True
 ~~~
+
+`Cell Direction Anisotropy=0`では従来どおり`cell=hit`、Cell Cache basisは`distribution`になります。0.4、1.0ではGuide Curveの中心列を維持したままCell境界の方向性が強くなり、極端に薄い横潰れが発生しないことを確認します。
 
 停止後のSettledはgpu=FalseのCPU exactが正解です。GPUが使えない場合は理由付きCPU fallbackで生成が完了すれば安全性は合格です。
 
@@ -45,10 +47,10 @@ backend=opencl-gpu+cpu-exact-settle gpu=True
 
 ## 7. 保存・再読込
 
-Sceneを保存して再読込し、System、Guide、Group、Scale Types、Unique Scale登録、Native Graph接続が保持されることを確認します。
+Sceneを保存して再読込し、System、Guide、Group、Scale Types、Native Graph接続と`Cell Direction Anisotropy`が保持されることを確認します。
 
 ## 8. Interactive Distribution基盤の回帰
 
-`bifrost-scales/interactive-candidate-batch/1`、`bifrost-scales/interactive-conflict-reference/1`、`bifrost-scales/interactive-conflict-gpu/1` はMaya Runtimeへ未接続です。現在のSourceをbuildしてもUIや生成結果に新しい表示差は発生しません。
+`bifrost-scales/interactive-candidate-batch/1`、`bifrost-scales/interactive-conflict-reference/1`、`bifrost-scales/interactive-conflict-gpu/1`はMaya RuntimeのInteractive Distributionで使用されます。GPUが利用できない場合は同じ優先規則のCPU referenceへfallbackします。
 
 同じMesh／Seed／SettingsでSettledを2回評価し、vertices、faces、Stable Cell IDと見た目が一致することを確認します。Interactive編集からSettledへ戻した結果も従来のCPU exact結果と一致すれば合格です。

@@ -15,13 +15,14 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 ## 機能
 
 - Rangeを外端、0〜1のFalloffを減衰幅としてメッシュ表面接続距離で評価するDensity／Size／Direction／Flow／Mask Guide
+- Direction Curveの中心整列を維持しながら、Strength／Falloffに連動する上限付き異方性Cell分割（`Cell Direction Anisotropy`、0で従来形状）
 - Maskは完成Cellの配置・形状を保持し、Stable Cell IDによる決定的な確率でメッシュ出力のみを制御
 - Guide GroupとSymmetry authoring
 - Guide連動の複数Scale Type
 - 64-bit Stable Cell IDとメッシュ不要のPicker metadata
 - 決定的マルチコアCPU Distribution／Cells／Shape
 - 大きなCell半径やDensity差に対応するexact BVH Cell近傍探索
-- Open Boundary候補走査を省略する閉メッシュ用Cell高速経路
+- Open Boundary候補をexact BVHで検索し、境界のない閉メッシュでは走査を省略するCell高速経路
 - プロセス共有の上限付きStage Cache
 - 編集間で再利用するTarget Mesh topology／境界／Surface Guide高速化データ
 - PerformanceログにCell setup／neighbor／boundary候補検索／boundary ray／surface projectionの処理時間内訳を表示
@@ -32,13 +33,13 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 
 1. Maya Python APIから `import bifrost_scales; bifrost_scales.show()` を実行してUIを開きます。
 2. Polygon Meshを選択し、Bifrost Scales Systemを作成します。
-3. Guideを追加・編集してDensity、Size、Direction、Flow、Maskを調整します。
+3. Guideを追加・編集してDensity、Size、Direction、Flow、Maskを調整します。Cell形状へのDirection効果は`Cell Direction Anisotropy`で0〜1に調整します。
 4. 編集中はInteractive Preview、確定確認には決定的CPU exactのSettled Previewを使用します。
 5. Maya Sceneを保存すると、System、Guide、Guide Group、Scale Type、Native Graph接続がSceneへ保存されます。
 
 ## 実行モデル
 
-Settled出力は従来の決定的CPU exact経路を使用します。Interactive Distributionはcompact・決定的・prefix-stableなSurface Candidateを並列評価し、空間競合をOpenCLで裁定します。GPUを利用できない場合は同じ優先規則のCPU referenceへ自動fallbackします。CPUで生成するOpen Boundary／Guide Curve Anchor、表面接続Guide Field、Stable Cell ID、Maskのpost-Cell出力制御は維持されます。
+Settled出力は従来の決定的CPU exact経路を使用します。Interactive Distributionはcompact・決定的・prefix-stableなSurface Candidateを並列評価し、空間競合をOpenCLで裁定します。GPUを利用できない場合は同じ優先規則のCPU referenceへ自動fallbackします。CPUで生成するOpen Boundary／Guide Curve Anchor、表面接続Guide Field、Stable Cell ID、Maskのpost-Cell出力制御は維持されます。Direction異方性は中心点を追加・削除せず、隣接Cell間で対称な距離計量だけを変えるため、既存のGuide Curve中心整列を保持します。
 
 - `bifrost-scales/interactive-candidate-batch/1`: production Interactive Surface Candidate
 - `bifrost-scales/interactive-conflict-reference/1`: 決定的CPU fallback

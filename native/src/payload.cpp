@@ -524,6 +524,10 @@ void parse_settings(const JsonValue::Object& object, Settings& result) {
         object, "cell_collision_margin", result.cell_collision_margin);
     result.cell_radius_multiplier = number_value(
         object, "cell_radius_multiplier", result.cell_radius_multiplier);
+    result.cell_direction_anisotropy = number_value(
+        object,
+        "cell_direction_anisotropy",
+        result.cell_direction_anisotropy);
     result.cell_shape_divisions = uint32_value(
         object, "cell_shape_divisions", result.cell_shape_divisions);
     result.cell_interactive_resolution = uint32_value(

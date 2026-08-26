@@ -145,6 +145,7 @@ Row run_case(
     std::uint32_t repeats,
     double density_multiplier,
     double cell_radius_multiplier,
+    double cell_direction_anisotropy,
     std::uint32_t cell_resolution) {
     bifrost_scales::Settings settings;
     settings.target_count = count;
@@ -160,6 +161,7 @@ Row run_case(
     settings.cell_shape_divisions = 2U;
     settings.cell_project_to_surface = true;
     settings.cell_radius_multiplier = cell_radius_multiplier;
+    settings.cell_direction_anisotropy = cell_direction_anisotropy;
 
     bifrost_scales::Guide curve;
     curve.id = "benchmark-curve";
@@ -277,10 +279,14 @@ Row run_case(
             direction_settings,
             guides,
             options);
+        const bool expected_direction_cell_hit =
+            cell_direction_anisotropy <= 1.0e-12;
         if (!direction_edit.result.profile.distribution_cache_hit ||
             direction_edit.result.profile.orientation_cache_hit ||
-            !direction_edit.result.profile.cell_cache_hit ||
-            !direction_edit.result.profile.cell_cache_reused_after_orientation_change) {
+            direction_edit.result.profile.cell_cache_hit !=
+                expected_direction_cell_hit ||
+            direction_edit.result.profile.cell_cache_reused_after_orientation_change !=
+                expected_direction_cell_hit) {
             throw std::runtime_error("direction edit cache boundary is invalid");
         }
         direction_warm_orientation.push_back(
@@ -354,6 +360,7 @@ int main(int argc, char** argv) {
         std::uint32_t mesh_divisions = 100U;
         double density_multiplier = 0.0;
         double cell_radius_multiplier = 1.65;
+        double cell_direction_anisotropy = 0.0;
         std::uint32_t cell_resolution = 10U;
         bool closed_mesh = false;
         std::vector<std::uint32_t> counts{
@@ -389,6 +396,14 @@ int main(int argc, char** argv) {
                     cell_radius_multiplier > 6.0) {
                     throw std::runtime_error(
                         "--cell-radius-multiplier must be in [0.35, 6.0]");
+                }
+            } else if (argument == "--cell-direction-anisotropy" &&
+                       index + 1 < argc) {
+                cell_direction_anisotropy = std::stod(argv[++index]);
+                if (cell_direction_anisotropy < 0.0 ||
+                    cell_direction_anisotropy > 1.0) {
+                    throw std::runtime_error(
+                        "--cell-direction-anisotropy must be in [0, 1]");
                 }
             } else if (argument == "--cell-resolution" && index + 1 < argc) {
                 cell_resolution = static_cast<std::uint32_t>(
@@ -444,6 +459,7 @@ int main(int argc, char** argv) {
                 repeats,
                 density_multiplier,
                 cell_radius_multiplier,
+                cell_direction_anisotropy,
                 cell_resolution));
         }
 

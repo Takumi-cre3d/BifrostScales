@@ -941,6 +941,7 @@ int main() {
     direction_only_cell_settings.cell_mode = GeometryMode::Cells;
     direction_only_cell_settings.cell_radius_multiplier = 1.0;
     direction_only_cell_settings.cell_settled_resolution = 8U;
+    direction_only_cell_settings.cell_direction_anisotropy = 0.0;
     Sample direction_only_sample;
     direction_only_sample.position = {0.0, 0.0, 0.0};
     direction_only_sample.normal = {0.0, 1.0, 0.0};
@@ -962,6 +963,51 @@ int main() {
     CHECK(cell_x.report.paired_sample_count == 0U);
     CHECK(cell_x.report.partition_seed_count == 1U);
     CHECK(cell_x.cells.front().boundary == cell_z.cells.front().boundary);
+
+    Settings anisotropic_cell_settings = direction_only_cell_settings;
+    anisotropic_cell_settings.cell_direction_anisotropy = 1.0;
+    anisotropic_cell_settings.cell_radius_multiplier = 2.0;
+    anisotropic_cell_settings.cell_settled_resolution = 24U;
+    anisotropic_cell_settings.cell_project_to_surface = false;
+    std::vector<Sample> irregular_samples(5U, direction_only_sample);
+    irregular_samples[1].position = {1.0, 0.0, 0.35};
+    irregular_samples[2].position = {-0.8, 0.0, -0.55};
+    irregular_samples[3].position = {0.25, 0.0, 1.1};
+    irregular_samples[4].position = {-0.3, 0.0, -1.0};
+    auto directed_cells = [&](const Vec3& tangent, double anisotropy) {
+        Settings local_settings = anisotropic_cell_settings;
+        local_settings.cell_direction_anisotropy = anisotropy;
+        std::vector<OrientedSample> oriented;
+        oriented.reserve(irregular_samples.size());
+        for (const Sample& sample : irregular_samples) {
+            oriented.push_back({sample, tangent, tangent, 1.0});
+        }
+        return bifrost_scales::build_cells(
+            mesh,
+            oriented,
+            local_settings,
+            PreviewMode::Settled);
+    };
+    const auto isotropic_irregular_x = directed_cells({1.0, 0.0, 0.0}, 0.0);
+    const auto isotropic_irregular_z = directed_cells({0.0, 0.0, 1.0}, 0.0);
+    const auto anisotropic_irregular_x = directed_cells({1.0, 0.0, 0.0}, 1.0);
+    const auto anisotropic_irregular_z = directed_cells({0.0, 0.0, 1.0}, 1.0);
+    CHECK(isotropic_irregular_x.cells.front().boundary ==
+          isotropic_irregular_z.cells.front().boundary);
+    CHECK(anisotropic_irregular_x.cells.front().boundary !=
+          isotropic_irregular_x.cells.front().boundary);
+    CHECK(anisotropic_irregular_x.cells.front().boundary !=
+          anisotropic_irregular_z.cells.front().boundary);
+    CHECK(anisotropic_irregular_x.cells.front().boundary.size() == 24U);
+    for (const Vec3& point : anisotropic_irregular_x.cells.front().boundary) {
+        const Vec3 delta{
+            point.x - irregular_samples.front().position.x,
+            point.y - irregular_samples.front().position.y,
+            point.z - irregular_samples.front().position.z,
+        };
+        CHECK(std::sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z) <=
+              2.0 + 1.0e-10);
+    }
 
     Sample directed_sample;
     directed_sample.position = {0.0, 0.0, 0.0};
@@ -1081,10 +1127,17 @@ int main() {
         combined_distribution.samples.begin(),
         combined_distribution.samples.end(),
         [](const auto& sample) { return std::abs(sample.position.z) < 1.0e-12; }));
+    CHECK(std::any_of(
+        combined_orientation.samples.begin(),
+        combined_orientation.samples.end(),
+        [](const auto& sample) { return sample.direction_influence > 0.0; }));
     CHECK(std::all_of(
         combined_orientation.samples.begin(),
         combined_orientation.samples.end(),
-        [](const auto& sample) { return sample.direction_influence == 0.0; }));
+        [](const auto& sample) {
+            return sample.direction_influence >= 0.0 &&
+                sample.direction_influence <= 1.0;
+        }));
 
     Settings localized_type_settings;
     localized_type_settings.cell_mode = GeometryMode::Cards;
@@ -1790,8 +1843,9 @@ int main() {
         {cache_curve});
     CHECK(radius_edit.profile.distribution_cache_hit);
     CHECK(!radius_edit.profile.orientation_cache_hit);
-    CHECK(radius_edit.profile.cell_cache_hit);
-    CHECK(radius_edit.profile.cell_cache_reused_after_orientation_change);
+    CHECK(!radius_edit.profile.cell_cache_hit);
+    CHECK(!radius_edit.profile.cell_cache_reused_after_orientation_change);
+    CHECK(radius_edit.profile.cell_cache_basis == "orientation-anisotropic");
     bifrost_scales::clear_native_stage_cache();
     const GenerationResult radius_edit_cold = bifrost_scales::generate(
         mesh,
@@ -1809,8 +1863,32 @@ int main() {
         {cache_curve});
     CHECK(centerline_edit.profile.distribution_cache_hit);
     CHECK(!centerline_edit.profile.orientation_cache_hit);
-    CHECK(centerline_edit.profile.cell_cache_hit);
-    CHECK(centerline_edit.profile.cell_cache_reused_after_orientation_change);
+    CHECK(!centerline_edit.profile.cell_cache_hit);
+    CHECK(!centerline_edit.profile.cell_cache_reused_after_orientation_change);
+    CHECK(centerline_edit.profile.cell_cache_basis == "orientation-anisotropic");
+
+    bifrost_scales::clear_native_stage_cache();
+    Settings isotropic_guide_settings = guide_cache_settings;
+    isotropic_guide_settings.cell_direction_anisotropy = 0.0;
+    cache_curve.strength = 0.8;
+    cache_curve.radius = 0.4;
+    (void)bifrost_scales::generate(
+        mesh,
+        isotropic_guide_settings,
+        PreviewMode::Settled,
+        {cache_curve});
+    cache_curve.radius = 1.4;
+    const GenerationResult isotropic_radius_edit = bifrost_scales::generate(
+        mesh,
+        isotropic_guide_settings,
+        PreviewMode::Settled,
+        {cache_curve});
+    CHECK(isotropic_radius_edit.profile.distribution_cache_hit);
+    CHECK(!isotropic_radius_edit.profile.orientation_cache_hit);
+    CHECK(isotropic_radius_edit.profile.cell_cache_hit);
+    CHECK(isotropic_radius_edit.profile.cell_cache_reused_after_orientation_change);
+    CHECK(isotropic_radius_edit.profile.cell_cache_basis == "distribution");
+
     cache_curve.strength = 0.0;
     const GenerationResult centerline_disabled = bifrost_scales::generate(
         mesh,
@@ -1818,6 +1896,7 @@ int main() {
         PreviewMode::Settled,
         {cache_curve});
     CHECK(!centerline_disabled.profile.distribution_cache_hit);
+    CHECK(centerline_disabled.profile.cell_cache_basis == "distribution");
 
     Mesh disconnected_boundary;
     disconnected_boundary.vertices = {

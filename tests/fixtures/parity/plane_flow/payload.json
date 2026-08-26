@@ -26,6 +26,7 @@
     "cell_gap": 0.05,
     "cell_collision_margin": 0.015,
     "cell_radius_multiplier": 1.7,
+    "cell_direction_anisotropy": 0.0,
     "cell_shape_divisions": 2,
     "cell_interactive_resolution": 6,
     "cell_settled_resolution": 8,

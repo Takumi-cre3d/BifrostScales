@@ -89,12 +89,20 @@ def test_python_final_bake_and_public_python_smoke_are_removed():
 def test_native_operator_and_host_boundary_contracts_remain_immutable():
     contract = json.loads((ROOT / "native/bifrost/operator_contract.json").read_text(encoding="utf-8"))
     policy = contract["graph_policy"]
+    performance = contract["performance_contract"]
     assert contract["schema"] == "bifrost-scales/operator-contract/18"
     assert contract["published_graph"] == "Graphs::BifrostScales::native_scales_v4"
     assert policy["runtime_topology_mutation"] is False
     assert policy["python_vnn_commands"] is False
     assert policy["normal_updates"] == ["payload_json", "parent_visibility"]
     assert policy["target_binding"] == "maya-dg-worldMesh-once"
+    assert performance["direction_anisotropic_partition_runtime"] is True
+    assert performance["direction_anisotropy_max_axis_ratio"] == 1.45
+    assert performance["direction_only_edits_reuse_exact_cell_partition"] is False
+    assert (
+        performance["direction_only_edits_reuse_cell_partition_when_anisotropy_zero"]
+        is True
+    )
 
     native_backend = (PACKAGE / "native_backend.py").read_text(encoding="utf-8")
     assert "bifrost-scales/native-graph/4-dgmesh-1" in native_backend
@@ -125,7 +133,11 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "cell_boundary_query_ms" in operator
     assert "cell_boundary_rays_ms" in operator
     assert "cell_mean_neighbors" in operator
-    assert "if (segments_.empty())" in source
+    assert "class BoundaryIndex" in source
+    assert "bounds_distance_squared(node.bounds, position)" in source
+    assert "direction_metric_weight" in source
+    assert "orientation-anisotropic" in source
+    assert "cell_direction_anisotropy" in header
     assert "cell_cache_basis" in operator
     assert "update_orientation_dirty_region" not in source
     assert "BIFROST_SCALES_GPU" in gpu
@@ -173,8 +185,9 @@ def test_build_info_records_the_native_only_boundary():
         "selected-mesh-to-system-native-graph-and-first-settled-preview"
     )
     assert info["minimum_native_pack"] == "0.10.6"
-    assert info["cell_cache_key_basis"] == "distribution-not-orientation"
-    assert info["direction_edits_reuse_exact_cell_partition"] is True
+    assert info["cell_cache_key_basis"] == "distribution-or-orientation-anisotropic"
+    assert info["direction_edits_reuse_exact_cell_partition"] is False
+    assert info["direction_edits_reuse_cell_partition_when_anisotropy_zero"] is True
     assert info["direction_edit_orientation_policy"] == (
         "0.10.2-full-rebuild-no-dirty-region"
     )
@@ -198,6 +211,8 @@ def test_build_info_records_the_native_only_boundary():
         "single-site-precomputed-ray-table-normal-component"
     )
     assert info["direction_pair_partition_runtime"] is False
+    assert info["direction_anisotropic_partition_runtime"] is True
+    assert info["direction_anisotropy_max_axis_ratio"] == 1.45
     assert info["guide_mask_density_falloff"] is False
     assert info["guide_mask_post_cell_visibility"] is True
     assert info["guide_mask_preserves_distribution_and_cells"] is True
