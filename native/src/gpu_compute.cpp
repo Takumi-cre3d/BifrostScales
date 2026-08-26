@@ -156,7 +156,7 @@ typedef struct {
     uint segment_offset;
     uint segment_count;
     uint curve;
-    uint point_guide;
+    float cell_anisotropy;
 } DirectionGuide;
 
 typedef struct {
@@ -172,8 +172,8 @@ typedef struct {
 typedef struct {
     float4 tangent;
     float4 partition_tangent;
-    float point_influence;
-    float padding0;
+    float direction_influence;
+    float cell_anisotropy_influence;
     float padding1;
     float padding2;
 } DirectionOutput;
@@ -251,14 +251,25 @@ float3 blend_oriented(
 float3 guided_direction(
     float3 position,
     float3 normal,
-    float3 fallback,
+    float3 direction_fallback,
+    float3 cell_fallback,
+    uint evaluate_cell,
     __global const DirectionGuide* guides,
     uint guide_count,
     __global const DirectionSegment* segments,
-    float* combined_influence) {
-    const float3 base = normalize_safe(project_plane(fallback, normal), fallback);
-    float3 accumulated = base;
-    float remaining = 1.0f;
+    float3* cell_tangent,
+    float* combined_direction_influence,
+    float* combined_cell_influence) {
+    const float3 direction_base = normalize_safe(
+        project_plane(direction_fallback, normal),
+        direction_fallback);
+    const float3 cell_base = normalize_safe(
+        project_plane(cell_fallback, normal),
+        cell_fallback);
+    float3 direction_accumulated = direction_base;
+    float3 cell_accumulated = cell_base;
+    float direction_remaining = 1.0f;
+    float cell_remaining = 1.0f;
     for (uint guide_index = 0U; guide_index < guide_count; ++guide_index) {
         const DirectionGuide guide = guides[guide_index];
         if (position.x < guide.bounds_min.x - guide.radius ||
@@ -290,30 +301,53 @@ float3 guided_direction(
                 }
             }
         }
-        const float weight = clamp(
-            guide.strength * guide_influence(
-                sqrt(fmax(0.0f, best_distance_squared)),
-                guide.radius,
-                guide.falloff),
-            0.0f,
-            1.0f);
-        if (weight <= 0.0f) {
+        const float field = guide_influence(
+            sqrt(fmax(0.0f, best_distance_squared)),
+            guide.radius,
+            guide.falloff);
+        const float direction_weight = clamp(guide.strength * field, 0.0f, 1.0f);
+        const float cell_weight = evaluate_cell != 0U
+            ? clamp(guide.cell_anisotropy * field, 0.0f, 1.0f)
+            : 0.0f;
+        if (direction_weight <= 0.0f && cell_weight <= 0.0f) {
             continue;
         }
         float3 desired = guide.curve != 0U
             ? nearest_tangent
             : nearest_point - position;
-        desired = normalize_safe(project_plane(desired, normal), accumulated);
+        const float3 desired_fallback = direction_weight > 0.0f
+            ? direction_accumulated
+            : cell_accumulated;
+        desired = normalize_safe(project_plane(desired, normal), desired_fallback);
         if (fabs(guide.angle_radians) > 1.0e-12f) {
             desired = normalize_safe(
                 rotate_axis(desired, normal, guide.angle_radians),
-                accumulated);
+                desired_fallback);
         }
-        accumulated = blend_oriented(accumulated, desired, normal, weight);
-        remaining *= 1.0f - weight;
+        if (direction_weight > 0.0f) {
+            direction_accumulated = blend_oriented(
+                direction_accumulated,
+                desired,
+                normal,
+                direction_weight);
+            direction_remaining *= 1.0f - direction_weight;
+        }
+        if (cell_weight > 0.0f) {
+            cell_accumulated = blend_oriented(
+                cell_accumulated,
+                desired,
+                normal,
+                cell_weight);
+            cell_remaining *= 1.0f - cell_weight;
+        }
     }
-    *combined_influence = clamp(1.0f - remaining, 0.0f, 1.0f);
-    return normalize_safe(accumulated, base);
+    *cell_tangent = normalize_safe(cell_accumulated, cell_base);
+    *combined_direction_influence = clamp(
+        1.0f - direction_remaining,
+        0.0f,
+        1.0f);
+    *combined_cell_influence = clamp(1.0f - cell_remaining, 0.0f, 1.0f);
+    return normalize_safe(direction_accumulated, direction_base);
 }
 
 __kernel void orientation_preview(
@@ -331,57 +365,58 @@ __kernel void orientation_preview(
     }
     const DirectionInput input = inputs[index];
     const float3 normal = normalize_safe(input.normal.xyz, (float3)(0.0f, 1.0f, 0.0f));
-    float3 tangent = orthonormal_tangent(normal);
-    tangent = normalize_safe(
-        rotate_axis(tangent, normal, global_direction_radians),
-        tangent);
-    float first_influence = 0.0f;
-    tangent = guided_direction(
+    float3 base = orthonormal_tangent(normal);
+    base = normalize_safe(
+        rotate_axis(base, normal, global_direction_radians),
+        base);
+    float3 ignored_cell_tangent = base;
+    float first_direction_influence = 0.0f;
+    float ignored_cell_influence = 0.0f;
+    const float3 first_tangent = guided_direction(
         input.position.xyz,
         normal,
-        tangent,
+        base,
+        base,
+        0U,
         guides,
         guide_count,
         segments,
-        &first_influence);
-    float final_influence = 0.0f;
-    const float3 partition = guided_direction(
+        &ignored_cell_tangent,
+        &first_direction_influence,
+        &ignored_cell_influence);
+    float3 partition = base;
+    float final_direction_influence = 0.0f;
+    float cell_anisotropy_influence = 0.0f;
+    const float3 direction_tangent = guided_direction(
         input.position.xyz,
         normal,
-        tangent,
+        first_tangent,
+        base,
+        1U,
         guides,
         guide_count,
         segments,
-        &final_influence);
+        &partition,
+        &final_direction_influence,
+        &cell_anisotropy_influence);
     const float random_angle =
         (input.random_rotation * 2.0f - 1.0f) *
         random_rotation_degrees * 0.01745329251994329577f;
     const float3 final_tangent = normalize_safe(
-        rotate_axis(partition, normal, random_angle),
-        partition);
-    float point_remaining = 1.0f;
-    for (uint guide_index = 0U; guide_index < guide_count; ++guide_index) {
-        const DirectionGuide guide = guides[guide_index];
-        if (guide.point_guide == 0U) {
-            continue;
-        }
-        const float distance = length(input.position.xyz - guide.point.xyz);
-        const float weight = clamp(
-            guide.strength * guide_influence(distance, guide.radius, guide.falloff),
-            0.0f,
-            1.0f);
-        point_remaining *= 1.0f - weight;
-    }
+        rotate_axis(direction_tangent, normal, random_angle),
+        direction_tangent);
     DirectionOutput output;
     output.tangent = (float4)(final_tangent, 0.0f);
     output.partition_tangent = (float4)(partition, 0.0f);
-    output.point_influence = clamp(1.0f - point_remaining, 0.0f, 1.0f);
-    output.padding0 = 0.0f;
+    output.direction_influence = final_direction_influence;
+    output.cell_anisotropy_influence = cell_anisotropy_influence;
     output.padding1 = 0.0f;
     output.padding2 = 0.0f;
     outputs[index] = output;
 }
 
+)CLC"
+R"CLC(
 typedef struct {
     float4 position;
     float4 gates;

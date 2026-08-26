@@ -162,7 +162,11 @@
     "guide_falloff_full_effect_radius": "range-times-one-minus-falloff",
     "mask_symmetry_supported": true,
     "mask_ray_clip": "disabled-no-cell-deformation",
-    "curve_direction_strength_contract": "positive-enables-centerline-magnitude-controls-orientation-only",
+    "curve_direction_strength_contract": "orientation-only-independent-from-center-and-cell-metric",
+    "curve_center_alignment_default": 0.35,
+    "curve_center_alignment_contract": "distribution-center-candidate-fraction",
+    "guide_cell_anisotropy_default": 1.0,
+    "guide_cell_anisotropy_contract": "per-guide-cell-metric-strength",
     "curve_center_candidates_obey_density": true,
     "curve_center_candidates_force_inserted": false,
     "mask_full_suppression_influence": 0.98,
@@ -238,7 +242,7 @@
     "mask_cell_ray_gate": "disabled-post-cell-visibility",
     "direction_pair_partition_runtime": false,
     "direction_anisotropic_partition_runtime": true,
-    "direction_anisotropy_max_axis_ratio": 1.45,
+    "direction_anisotropy_max_axis_ratio": 2.25,
     "stage_cache_boundaries": {
       "shape_edit": [
         "distribution",
@@ -257,8 +261,9 @@
         "cells"
       ]
     },
-    "cell_cache_key_basis": "distribution-or-orientation-anisotropic",
+    "cell_cache_key_basis": "distribution-or-guide-anisotropic",
     "direction_only_edits_reuse_exact_cell_partition": false,
+    "direction_strength_edits_reuse_exact_cell_partition": true,
     "direction_only_edits_reuse_cell_partition_when_anisotropy_zero": true,
     "cell_neighbor_selection": "deterministic-partial-selection-when-over-limit",
     "guide_stage_specific_cache_hashing": true,
@@ -267,7 +272,7 @@
     "compute_backend": "hybrid-opencl-gpu-interactive-cpu-exact-settled-final",
     "gpu_generation_compute": true,
     "gpu_stage": "interactive-orientation-with-zero-direction-relax",
-    "gpu_buffer_schema": "bifrost-scales/compact-orientation-buffer/1",
+    "gpu_buffer_schema": "bifrost-scales/compact-orientation-buffer/2",
     "gpu_environment_policy": "BIFROST_SCALES_GPU=auto|off|force",
     "gpu_minimum_sample_environment_override": "BIFROST_SCALES_GPU_MIN_SAMPLES",
     "gpu_default_crossover_samples": 4096,

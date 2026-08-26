@@ -1067,18 +1067,29 @@ std::uint32_t guide_count(const PreparedGuides& guides, bool density) {
 
 struct DirectionSolution {
     Vec3 tangent{1.0, 0.0, 0.0};
-    double influence{0.0};
+    Vec3 cell_tangent{1.0, 0.0, 0.0};
+    double direction_influence{0.0};
+    double cell_anisotropy_influence{0.0};
 };
 
 DirectionSolution guided_direction_solution(
     const Vec3& position,
     const Vec3& normal,
-    const Vec3& fallback,
+    const Vec3& direction_fallback,
+    const Vec3& cell_fallback,
+    bool evaluate_cell,
     std::uint32_t triangle_index,
     const PreparedGuides& guides) {
-    const Vec3 base = normalize(project_on_plane(fallback, normal), fallback);
-    Vec3 accumulated = base;
-    double remaining = 1.0;
+    const Vec3 direction_base = normalize(
+        project_on_plane(direction_fallback, normal),
+        direction_fallback);
+    const Vec3 cell_base = normalize(
+        project_on_plane(cell_fallback, normal),
+        cell_fallback);
+    Vec3 direction_accumulated = direction_base;
+    Vec3 cell_accumulated = cell_base;
+    double direction_remaining = 1.0;
+    double cell_remaining = 1.0;
     for (const PreparedGuide& guide : guides) {
         const Guide& source = *guide.source;
         if (!source.enabled || !guide.uses_direction) {
@@ -1087,40 +1098,60 @@ DirectionSolution guided_direction_solution(
         if (outside_guide_bounds(guide, position, guide.radius)) {
             continue;
         }
-        const GuideNearest nearest = nearest_on_guide(guide, position);
-        const double weight = clamp(
-            clamp(source.strength, 0.0, 1.0) *
-                guide_influence_from_distance(
-                    guide,
-                    guide_distance(guide, position, triangle_index),
-                    guide.radius),
+        const double field = guide_influence_from_distance(
+            guide,
+            guide_distance(guide, position, triangle_index),
+            guide.radius);
+        const double direction_weight = clamp(
+            clamp(source.strength, 0.0, 1.0) * field,
             0.0,
             1.0);
-        if (weight <= 0.0) {
+        const double cell_weight = clamp(
+            (evaluate_cell ? clamp(source.cell_anisotropy, 0.0, 1.0) : 0.0) *
+                field,
+            0.0,
+            1.0);
+        if (direction_weight <= 0.0 && cell_weight <= 0.0) {
             continue;
         }
+        const GuideNearest nearest = nearest_on_guide(guide, position);
         Vec3 desired = guide.curve
             ? nearest.tangent
             : sub(nearest.point, position);
-        desired = normalize(project_on_plane(desired, normal), accumulated);
+        const Vec3 desired_fallback = direction_weight > 0.0
+            ? direction_accumulated
+            : cell_accumulated;
+        desired = normalize(project_on_plane(desired, normal), desired_fallback);
         if (std::abs(source.angle_degrees) > kEpsilon) {
             desired = normalize(
                 rotate_around_axis(
                     desired,
                     normal,
                     source.angle_degrees * kPi / 180.0),
-                accumulated);
+                desired_fallback);
         }
-        accumulated = blend_oriented_direction(
-            accumulated,
-            desired,
-            normal,
-            weight);
-        remaining *= 1.0 - weight;
+        if (direction_weight > 0.0) {
+            direction_accumulated = blend_oriented_direction(
+                direction_accumulated,
+                desired,
+                normal,
+                direction_weight);
+            direction_remaining *= 1.0 - direction_weight;
+        }
+        if (cell_weight > 0.0) {
+            cell_accumulated = blend_oriented_direction(
+                cell_accumulated,
+                desired,
+                normal,
+                cell_weight);
+            cell_remaining *= 1.0 - cell_weight;
+        }
     }
     return {
-        normalize(accumulated, base),
-        clamp(1.0 - remaining, 0.0, 1.0),
+        normalize(direction_accumulated, direction_base),
+        normalize(cell_accumulated, cell_base),
+        clamp(1.0 - direction_remaining, 0.0, 1.0),
+        clamp(1.0 - cell_remaining, 0.0, 1.0),
     };
 }
 
@@ -1148,7 +1179,7 @@ std::vector<CurveCenterAnchor> curve_center_anchors(
         if (!source.enabled ||
             !guide.curve ||
             !guide.uses_direction ||
-            source.strength <= 0.0 ||
+            source.center_alignment <= 0.0 ||
             guide.anchor_segment_count == 0U) {
             continue;
         }
@@ -1156,7 +1187,9 @@ std::vector<CurveCenterAnchor> curve_center_anchors(
         if (total_length <= kEpsilon) {
             continue;
         }
-        const double requested_value = std::floor(total_length / base_spacing);
+        const double requested_value = std::floor(
+            total_length / base_spacing *
+            clamp(source.center_alignment, 0.0, 1.0));
         const std::uint32_t requested = std::max<std::uint32_t>(
             1U,
             requested_value <= 0.0
@@ -3361,11 +3394,11 @@ Vec2 normalize_direction_2d(const Vec2& value, const Vec2& fallback) {
 }
 
 double direction_metric_weight(double setting, double influence) {
-    // A maximum axis ratio of 1.45 keeps cells directional without creating
-    // the thin, laterally crushed rows produced by unbounded anisotropy.
+    // A maximum axis ratio of 2.25 makes the full setting clearly visible while
+    // keeping the metric bounded to avoid laterally crushed rows.
     const double amount = clamp(setting, 0.0, 1.0) *
         clamp(influence, 0.0, 1.0);
-    const double ratio = 1.0 + 0.45 * amount;
+    const double ratio = 1.0 + 1.25 * amount;
     return ratio * ratio - 1.0;
 }
 
@@ -3593,7 +3626,7 @@ CellResult build_cells_impl(
         partition_tangents.push_back(partition_tangent);
         direction_metric_weights.push_back(direction_metric_weight(
             settings.cell_direction_anisotropy,
-            oriented.direction_influence));
+            oriented.cell_anisotropy_influence));
     }
 
     std::vector<CellData> cells(samples.size());
@@ -4663,7 +4696,8 @@ std::optional<std::vector<OrientedSample>> try_gpu_orientation_field(
             segment_offset,
             static_cast<std::uint32_t>(guide.segments.size()),
             guide.curve ? 1U : 0U,
-            guide.curve ? 0U : 1U,
+            static_cast<float>(clamp(
+                guide.source->cell_anisotropy, 0.0, 1.0)),
         });
     }
     std::vector<gpu::DirectionOutput> gpu_outputs;
@@ -4694,7 +4728,8 @@ std::optional<std::vector<OrientedSample>> try_gpu_orientation_field(
             std::isfinite(value.partition_tangent.x) &&
             std::isfinite(value.partition_tangent.y) &&
             std::isfinite(value.partition_tangent.z) &&
-            std::isfinite(value.point_influence);
+            std::isfinite(value.direction_influence) &&
+            std::isfinite(value.cell_anisotropy_influence);
         result[index] = {
             samples[index],
             {
@@ -4707,7 +4742,8 @@ std::optional<std::vector<OrientedSample>> try_gpu_orientation_field(
                 static_cast<double>(value.partition_tangent.y),
                 static_cast<double>(value.partition_tangent.z),
             },
-            static_cast<double>(value.point_influence),
+            static_cast<double>(value.direction_influence),
+            static_cast<double>(value.cell_anisotropy_influence),
         };
     }
     if (!finite) {
@@ -4796,6 +4832,8 @@ std::vector<OrientedSample> orientation_field(
                     sample.position,
                     normal,
                     tangent,
+                    tangent,
+                    false,
                     sample.triangle_index,
                     guides).tangent;
             }
@@ -4903,27 +4941,37 @@ std::vector<OrientedSample> orientation_field(
             for (std::size_t index = begin; index < end; ++index) {
                 const Sample& sample = samples[index];
                 const Vec3 normal = normalize(sample.normal);
+                Vec3 cell_base = orthonormal_tangent(normal);
+                cell_base = normalize(
+                    rotate_around_axis(
+                        cell_base,
+                        normal,
+                        settings.direction_degrees * kPi / 180.0),
+                    cell_base);
                 const DirectionSolution solution = guided_direction_solution(
                     sample.position,
                     normal,
                     tangents[index],
+                    cell_base,
+                    true,
                     sample.triangle_index,
                     guides);
-                const Vec3 partition_tangent = solution.tangent;
+                const Vec3 partition_tangent = solution.cell_tangent;
                 const double random_angle =
                     (sample.random_rotation * 2.0 - 1.0) *
                     settings.random_rotation_degrees;
                 const Vec3 final_tangent = normalize(
                     rotate_around_axis(
-                        partition_tangent,
+                        solution.tangent,
                         normal,
                         random_angle * kPi / 180.0),
-                    partition_tangent);
+                    solution.tangent);
                 result[index] = {
                     sample,
                     final_tangent,
                     partition_tangent,
-                    solution.influence,
+                    solution.direction_influence,
+                    solution.cell_anisotropy_influence,
                 };
             }
         });
@@ -6170,7 +6218,7 @@ void hash_distribution_guide(CacheHasher& hasher, const Guide& guide) {
     const bool curve_centerline =
         guide.points.size() > 1U &&
         guide_uses_direction(guide) &&
-        guide.strength > kEpsilon;
+        guide.center_alignment > kEpsilon;
     hasher.boolean(density);
     hasher.boolean(size);
     hasher.boolean(curve_centerline);
@@ -6181,9 +6229,7 @@ void hash_distribution_guide(CacheHasher& hasher, const Guide& guide) {
         hasher.scalar(guide.size_multiplier);
     }
     if (curve_centerline) {
-        // Positive Direction Strength enables center candidates, but its
-        // magnitude affects Orientation only.
-        hasher.boolean(true);
+        hasher.scalar(guide.center_alignment);
     }
 }
 
@@ -6193,6 +6239,7 @@ void hash_orientation_guide(CacheHasher& hasher, const Guide& guide) {
     hasher.scalar(guide.radius);
     hasher.scalar(guide.falloff);
     hasher.scalar(guide.strength);
+    hasher.scalar(guide.cell_anisotropy);
     hasher.scalar(guide.angle_degrees);
     hasher.boolean(guide_uses_direction(guide));
 }
@@ -6217,7 +6264,7 @@ CacheKey distribution_cache_key(
         if (!guide.enabled ||
             !(guide_uses_density(guide) || guide_uses_size(guide) ||
               (curve && guide_uses_direction(guide) &&
-               guide.strength > kEpsilon))) {
+               guide.center_alignment > kEpsilon))) {
             continue;
         }
         ++relevant_count;
@@ -6250,17 +6297,42 @@ CacheKey orientation_cache_key(
     return hasher.finish();
 }
 
+CacheKey cell_partition_cache_key(
+    const CacheKey& distribution,
+    const Settings& settings,
+    const std::vector<Guide>& guides) {
+    CacheHasher hasher;
+    hasher.key(distribution);
+    hasher.scalar(settings.direction_degrees);
+    std::uint64_t relevant_count = 0U;
+    for (const Guide& guide : guides) {
+        if (!guide.enabled ||
+            !guide_uses_direction(guide) ||
+            guide.cell_anisotropy <= kEpsilon) {
+            continue;
+        }
+        ++relevant_count;
+        hash_guide_geometry(hasher, guide);
+        hasher.scalar(guide.radius);
+        hasher.scalar(guide.falloff);
+        hasher.scalar(guide.cell_anisotropy);
+        hasher.scalar(guide.angle_degrees);
+    }
+    hasher.scalar(relevant_count);
+    return hasher.finish();
+}
+
 CacheKey cell_cache_key(
     const CacheKey& distribution,
-    const CacheKey& orientation,
+    const CacheKey& partition,
     bool direction_metric_active,
     const Settings& settings,
     PreviewMode mode,
     const std::vector<SymmetryPlane>& symmetry_planes) {
     CacheHasher hasher;
-    // Guide centers remain owned by Distribution. Only an enabled Direction
-    // anisotropy metric makes Cell boundaries depend on Orientation.
-    hasher.key(direction_metric_active ? orientation : distribution);
+    // Guide centers remain owned by Distribution. The anisotropic Cell metric
+    // has a dedicated key that excludes visual-only Direction controls.
+    hasher.key(direction_metric_active ? partition : distribution);
     if (direction_metric_active) {
         hasher.scalar(clamp(settings.cell_direction_anisotropy, 0.0, 1.0));
     }
@@ -6513,8 +6585,7 @@ GenerationResult generate(
         profile.stage_cache_evictions += cache.insert_orientation(
             orientation_key,
             orientation) ? 1U : 0U;
-        // Cells are keyed from Distribution, not Orientation. An orientation
-        // miss no longer invalidates a still-exact Cell partition.
+        // Visual orientation misses do not invalidate a still-exact Cell partition.
     }
     profile.orientation_ms = std::chrono::duration<double, std::milli>(
         Clock::now() - orientation_started).count();
@@ -6529,14 +6600,18 @@ GenerationResult generate(
                 orientation->samples.begin(),
                 orientation->samples.end(),
                 [](const OrientedSample& sample) {
-                    return sample.direction_influence > 1.0e-12;
+                    return sample.cell_anisotropy_influence > 1.0e-12;
                 });
         profile.cell_cache_basis = direction_metric_active
-            ? "orientation-anisotropic"
+            ? "guide-anisotropic"
             : "distribution";
+        const CacheKey partition_key = cell_partition_cache_key(
+            distribution_key,
+            settings,
+            guides);
         const CacheKey cells_key = cell_cache_key(
             distribution_key,
-            orientation_key,
+            partition_key,
             direction_metric_active,
             settings,
             mode,

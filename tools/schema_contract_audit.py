@@ -83,6 +83,10 @@ def audit(root: Path = ROOT) -> dict[str, Any]:
         "operator_profile_schema": str(operator_data.get("performance_contract", {}).get("profile_schema", "")),
         "operator_compute_backend": str(operator_data.get("performance_contract", {}).get("compute_backend", "")),
         "operator_gpu_generation_compute": bool(operator_data.get("performance_contract", {}).get("gpu_generation_compute", True)),
+        "operator_gpu_buffer_schema": str(
+            operator_data.get("performance_contract", {}).get("gpu_buffer_schema", "")
+        ),
+        "manifest_gpu_buffer_schema": str(manifest_data.get("gpu_buffer_schema", "")),
         "operator_cell_cache_key_basis": str(
             operator_data.get("performance_contract", {}).get(
                 "cell_cache_key_basis", ""
@@ -118,8 +122,10 @@ def audit(root: Path = ROOT) -> dict[str, Any]:
         "python_native_profile_schema": values["python_native_profile_schema"] == EXPECTED_NATIVE_PROFILE_SCHEMA,
         "operator_compute_backend": values["operator_compute_backend"] == "hybrid-opencl-gpu-interactive-cpu-exact-settled-final",
         "operator_gpu_generation_compute": values["operator_gpu_generation_compute"] is True,
-        "operator_cell_cache_key_basis": values["operator_cell_cache_key_basis"] == "distribution-or-orientation-anisotropic",
-        "manifest_cell_cache_key_basis": values["manifest_cell_cache_key_basis"] == "distribution-or-orientation-anisotropic",
+        "operator_gpu_buffer_schema": values["operator_gpu_buffer_schema"] == "bifrost-scales/compact-orientation-buffer/2",
+        "manifest_gpu_buffer_schema": values["manifest_gpu_buffer_schema"] == "bifrost-scales/compact-orientation-buffer/2",
+        "operator_cell_cache_key_basis": values["operator_cell_cache_key_basis"] == "distribution-or-guide-anisotropic",
+        "manifest_cell_cache_key_basis": values["manifest_cell_cache_key_basis"] == "distribution-or-guide-anisotropic",
         "operator_process_shared_stage_cache": values["operator_stage_cache"] == "process-shared-bounded-lru-exact-dual-hash",
         "manifest_process_shared_stage_cache": values["manifest_stage_cache"] == "process-shared-bounded-lru-exact-dual-hash",
         "core_process_shared_stage_cache": all(
@@ -146,11 +152,12 @@ def audit(root: Path = ROOT) -> dict[str, Any]:
                 "stage_cache_evictions",
             )
         ),
-        "core_cell_cache_uses_distribution_key": all(
+        "core_cell_cache_uses_partition_key": all(
             token in core_source_text
             for token in (
-                "const CacheKey& distribution",
-                "hasher.key(distribution)",
+                "cell_partition_cache_key",
+                "const CacheKey& partition",
+                "direction_metric_active ? partition : distribution",
                 "cell_cache_reused_after_orientation_change",
             )
         ),

@@ -70,6 +70,16 @@ def test_scene_manager_owns_point_and_curve_guides():
     direction = manager.read_guide(curve_guide)
     assert direction.kind == GuideKind.DIRECTION_CURVE
     assert len(direction.points) == 3
+    assert direction.center_alignment == 0.35
+    assert direction.cell_anisotropy == 1.0
+    manager.update_guide(
+        curve_guide,
+        center_alignment=0.2,
+        cell_anisotropy=0.75,
+    )
+    updated_direction = manager.read_guide(curve_guide)
+    assert updated_direction.center_alignment == 0.2
+    assert updated_direction.cell_anisotropy == 0.75
 
     manager.delete_system(binding.settings_node)
     assert not cmds.objExists(point)
@@ -434,6 +444,8 @@ def test_scene_group_symmetry_overrides_members_non_destructively_and_migrates_o
             "bsGuideSymmetryEnabled",
             "bsGuideSymmetryAxis",
             "bsGuideSymmetrySpace",
+            "bsGuideCenterAlignment",
+            "bsGuideCellAnisotropy",
         )),
         (group, (
             "bsGuideGroupSymmetryEnabled",
@@ -451,6 +463,8 @@ def test_scene_group_symmetry_overrides_members_non_destructively_and_migrates_o
     assert migrated_guide.symmetry_enabled is False
     assert migrated_guide.symmetry_axis == "x"
     assert migrated_guide.symmetry_space == "world"
+    assert migrated_guide.center_alignment == 0.35
+    assert migrated_guide.cell_anisotropy == 1.0
     assert migrated_group.symmetry_enabled is False
     assert migrated_group.symmetry_axis == "x"
     assert migrated_group.symmetry_space == "world"

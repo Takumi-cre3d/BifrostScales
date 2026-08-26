@@ -32,14 +32,18 @@ Shape生成時間は毎回発生します。Guideを追加・編集して入力�
 
 Target CountとInteractive Budgetを4,096以上、Direction Relaxを0にし、Direction Guideをドラッグします。
 
+変更項目ごとの期待cache境界は次のとおりです。
+
 ~~~text
-distribution=hit orientation=miss cell=miss cellBasis=orientation-anisotropic
-backend=opencl-gpu+cpu-exact-settle gpu=True
+Direction Strength: distribution=hit orientation=miss cell=hit cellBasis=guide-anisotropic
+Center Alignment:    distribution=miss orientation=miss cell=miss
+Guide Cell Anisotropy: distribution=hit orientation=miss cell=miss cellBasis=guide-anisotropic
+Global Cell Direction Anisotropy: distribution=hit orientation=hit cell=miss
 ~~~
 
-`Cell Direction Anisotropy=0`では従来どおり`cell=hit`、Cell Cache basisは`distribution`になります。0.4、1.0ではGuide Curveの中心列を維持したままCell境界の方向性が強くなり、極端に薄い横潰れが発生しないことを確認します。
+`Direction Strength`を固定し、Direction Curveの`Center Alignment`を0、0.35、1へ変えて、中心へ寄る候補数だけが増えることを確認します。次に`Center Alignment`を固定して`Direction Strength`を変え、鱗の向きだけが変わることを確認します。`Cell Direction Anisotropy=0`ではCell Cache basisが`distribution`になります。全体値を0.4、1.0へ上げ、Guide別`Cell Anisotropy`を0、0.5、1へ変えて、中心配置を保ったままCell境界の方向性だけが最大2.25軸比まで明確に変化することを確認します。
 
-停止後のSettledはgpu=FalseのCPU exactが正解です。GPUが使えない場合は理由付きCPU fallbackで生成が完了すれば安全性は合格です。
+メッシュ表面接続距離を使うDirection Guideでは、Interactive Orientationも現在は理由付きCPU exact fallbackが正解です。停止後のSettledは常にgpu=FalseのCPU exactになります。Interactive Distribution側のGPU利用可否はnative-profileで別に確認します。
 
 ## 6. 開放エッジDensity
 
@@ -47,7 +51,7 @@ backend=opencl-gpu+cpu-exact-settle gpu=True
 
 ## 7. 保存・再読込
 
-Sceneを保存して再読込し、System、Guide、Group、Scale Types、Native Graph接続と`Cell Direction Anisotropy`が保持されることを確認します。
+Sceneを保存して再読込し、System、Guide、Group、Scale Types、Native Graph接続、全体の`Cell Direction Anisotropy`、Guide別`Center Alignment`／`Cell Anisotropy`が保持されることを確認します。
 
 ## 8. Interactive Distribution基盤の回帰
 

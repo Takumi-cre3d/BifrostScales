@@ -15,7 +15,7 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 ## 機能
 
 - Rangeを外端、0〜1のFalloffを減衰幅としてメッシュ表面接続距離で評価するDensity／Size／Direction／Flow／Mask Guide
-- Direction Curveの中心整列を維持しながら、Strength／Falloffに連動する上限付き異方性Cell分割（`Cell Direction Anisotropy`、0で従来形状）
+- Directionの向き、Direction Curveの中心整列、異方性Cell分割を独立調整（`Direction Strength`、Guide別`Center Alignment`／`Cell Anisotropy`、全体の`Cell Direction Anisotropy`）
 - Maskは完成Cellの配置・形状を保持し、Stable Cell IDによる決定的な確率でメッシュ出力のみを制御
 - Guide GroupとSymmetry authoring
 - Guide連動の複数Scale Type
@@ -33,13 +33,13 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 
 1. Maya Python APIから `import bifrost_scales; bifrost_scales.show()` を実行してUIを開きます。
 2. Polygon Meshを選択し、Bifrost Scales Systemを作成します。
-3. Guideを追加・編集してDensity、Size、Direction、Flow、Maskを調整します。Cell形状へのDirection効果は`Cell Direction Anisotropy`で0〜1に調整します。
+3. Guideを追加・編集してDensity、Size、Direction、Flow、Maskを調整します。`Direction Strength`は鱗の向き、`Center Alignment`はCurve中心候補の割合、Guide別`Cell Anisotropy`は全体の`Cell Direction Anisotropy`に対する寄与を調整します。
 4. 編集中はInteractive Preview、確定確認には決定的CPU exactのSettled Previewを使用します。
 5. Maya Sceneを保存すると、System、Guide、Guide Group、Scale Type、Native Graph接続がSceneへ保存されます。
 
 ## 実行モデル
 
-Settled出力は従来の決定的CPU exact経路を使用します。Interactive Distributionはcompact・決定的・prefix-stableなSurface Candidateを並列評価し、空間競合をOpenCLで裁定します。GPUを利用できない場合は同じ優先規則のCPU referenceへ自動fallbackします。CPUで生成するOpen Boundary／Guide Curve Anchor、表面接続Guide Field、Stable Cell ID、Maskのpost-Cell出力制御は維持されます。Direction異方性は中心点を追加・削除せず、隣接Cell間で対称な距離計量だけを変えるため、既存のGuide Curve中心整列を保持します。
+Settled出力は従来の決定的CPU exact経路を使用します。Interactive Distributionはcompact・決定的・prefix-stableなSurface Candidateを並列評価し、空間競合をOpenCLで裁定します。GPUを利用できない場合は同じ優先規則のCPU referenceへ自動fallbackします。CPUで生成するOpen Boundary／Guide Curve Anchor、表面接続Guide Field、Stable Cell ID、Maskのpost-Cell出力制御は維持されます。Direction異方性は中心点を追加・削除せず、隣接Cell間で対称な距離計量だけを変えます。全体効果の最大は上限付き2.25軸比で、Guideごとに効果を弱めるか無効化できます。
 
 - `bifrost-scales/interactive-candidate-batch/1`: production Interactive Surface Candidate
 - `bifrost-scales/interactive-conflict-reference/1`: 決定的CPU fallback

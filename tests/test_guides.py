@@ -30,6 +30,26 @@ def _direction(
     )
 
 
+def test_direction_guide_independent_controls_round_trip_and_clamp():
+    guide = GuideData.from_mapping(
+        {
+            "guide_id": "controls",
+            "name": "Controls",
+            "kind": "direction_curve",
+            "points": ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)),
+            "strength": 0.6,
+            "center_alignment": -0.5,
+            "cell_anisotropy": 1.5,
+        }
+    )
+    assert guide.strength == 0.6
+    assert guide.center_alignment == 0.0
+    assert guide.cell_anisotropy == 1.0
+    mapping = GuideSet.from_iterable((guide,)).to_mappings()[0]
+    assert mapping["center_alignment"] == 0.0
+    assert mapping["cell_anisotropy"] == 1.0
+
+
 def test_stage_fingerprints_are_independent():
     base = GuideSet.from_iterable((_density(), _direction()))
     rotated_point = GuideSet.from_iterable(
@@ -168,20 +188,29 @@ def test_combined_flow_curve_controls_density_and_direction_with_independent_fin
     assert base.fingerprint("density") != density_changed.fingerprint("density")
     assert base.fingerprint("direction") == density_changed.fingerprint("direction")
     assert base.fingerprint("density") == direction_changed.fingerprint("density")
-    # Positive-to-positive Direction Strength edits affect Orientation only.
-    # Distribution changes only when the centerline is toggled through zero.
+    # Direction Strength affects Orientation only; Center Alignment owns the
+    # Distribution center candidates independently.
     assert base.fingerprint("distribution") == direction_changed.fingerprint(
         "distribution"
     )
-    direction_disabled = GuideSet.from_iterable(
-        (
-            replace(base_guide, strength=0.0),
-        )
+    direction_disabled = GuideSet.from_iterable((replace(base_guide, strength=0.0),))
+    center_changed = GuideSet.from_iterable(
+        (replace(base_guide, center_alignment=0.0),)
     )
-    assert base.fingerprint("distribution") != direction_disabled.fingerprint(
+    anisotropy_changed = GuideSet.from_iterable(
+        (replace(base_guide, cell_anisotropy=0.25),)
+    )
+    assert base.fingerprint("distribution") == direction_disabled.fingerprint(
+        "distribution"
+    )
+    assert base.fingerprint("distribution") != center_changed.fingerprint(
+        "distribution"
+    )
+    assert base.fingerprint("distribution") == anisotropy_changed.fingerprint(
         "distribution"
     )
     assert base.fingerprint("direction") != direction_changed.fingerprint("direction")
+    assert base.fingerprint("direction") != anisotropy_changed.fingerprint("direction")
 
     density, size = base.density_factors((0.0, 0.0, 0.0))
     direction, influence = base.direction_solution(
@@ -318,6 +347,7 @@ def test_direction_curve_creates_centerline_anchors_but_not_cell_pair_influence(
         points=((-2.0, 0.0, 0.0), (2.0, 0.0, 0.0)),
         radius=2.0,
         strength=1.0,
+        center_alignment=1.0,
     ).normalized()
     point = GuideData(
         guide_id="attractor",
@@ -338,7 +368,7 @@ def test_direction_curve_creates_centerline_anchors_but_not_cell_pair_influence(
     ) > 0.0
 
 
-def test_direction_curve_centerline_candidates_are_independent_of_positive_strength():
+def test_direction_curve_centerline_candidates_use_center_alignment_only():
     base = GuideData(
         guide_id="centerline",
         name="Centerline",
@@ -346,16 +376,21 @@ def test_direction_curve_centerline_candidates_are_independent_of_positive_stren
         points=((-2.0, 0.0, 0.0), (2.0, 0.0, 0.0)),
         radius=2.0,
         strength=1.0,
+        center_alignment=1.0,
     ).normalized()
     full = GuideSet.from_iterable((base,)).curve_center_anchor_positions(1.0, 20)
-    half = GuideSet.from_iterable((replace(base, strength=0.5),)).curve_center_anchor_positions(
-        1.0, 20
-    )
-    off = GuideSet.from_iterable((replace(base, strength=0.0),)).curve_center_anchor_positions(
-        1.0, 20
-    )
+    low_strength = GuideSet.from_iterable(
+        (replace(base, strength=0.0),)
+    ).curve_center_anchor_positions(1.0, 20)
+    half = GuideSet.from_iterable(
+        (replace(base, center_alignment=0.5),)
+    ).curve_center_anchor_positions(1.0, 20)
+    off = GuideSet.from_iterable(
+        (replace(base, center_alignment=0.0),)
+    ).curve_center_anchor_positions(1.0, 20)
     assert len(full) == 4
-    assert half == full
+    assert low_strength == full
+    assert len(half) == 2
     assert off == ()
 
 

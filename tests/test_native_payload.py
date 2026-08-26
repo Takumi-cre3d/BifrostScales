@@ -21,6 +21,8 @@ def test_native_payload_is_deterministic_compact_and_complete():
                 kind=GuideKind.FLOW_CURVE,
                 points=((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)),
                 group_id="group_primary",
+                center_alignment=0.2,
+                cell_anisotropy=0.75,
                 use_density=True,
                 use_direction=True,
             ),
@@ -39,6 +41,8 @@ def test_native_payload_is_deterministic_compact_and_complete():
     assert payload["settings"]["tip_offset"] == 0.25
     assert payload["guides"][0]["guide_id"] == "flow_a"
     assert payload["guides"][0]["group_id"] == "group_primary"
+    assert payload["guides"][0]["center_alignment"] == 0.2
+    assert payload["guides"][0]["cell_anisotropy"] == 0.75
     assert payload["guides"][0]["use_density"] is True
     assert payload["guides"][0]["use_direction"] is True
     assert json.loads(first) == payload

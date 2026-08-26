@@ -568,6 +568,10 @@ Guide parse_guide(const JsonValue::Object& object) {
     result.size_multiplier = number_value(
         object, "size_multiplier", result.size_multiplier);
     result.strength = number_value(object, "strength", result.strength);
+    result.center_alignment = number_value(
+        object, "center_alignment", result.center_alignment);
+    result.cell_anisotropy = number_value(
+        object, "cell_anisotropy", result.cell_anisotropy);
     result.angle_degrees = number_value(
         object, "angle_degrees", result.angle_degrees);
     result.closed = bool_value(object, "closed", result.closed);

@@ -8,7 +8,7 @@ Interactive DistributionのGPU競合解決に先立ち、`interactive-candidate-
 
 Native CoreはDistribution、Orientation、Cell、ShapeをC++17で評価します。
 
-0.10.6は全Cell共通のRay角度表、Sample Normal／Surface Componentの事前計算、Mask Guideなし高速経路、1 Sample = 1 Partition Siteの直接制約を追加します。計算順序と倍精度境界は維持し、0.10.5出力とbyte-exactです。
+0.10.6は全Cell共通のRay角度表、Sample Normal／Surface Componentの事前計算、Mask Guideなし高速経路、1 Sample = 1 Partition Siteの直接制約を追加します。Cell Direction Anisotropy=0では等方Cell境界計算を維持します。非0ではGuide別Cell Anisotropyと最大2.25軸比の上限付き異方性を使用し、Center Alignmentは中心候補数を独立制御します。
 
 Interactive／Direction Relax 0のOrientationだけをOpenCL GPUへオフロードできます。OpenCLは動的ロードされ、失敗時はマルチコアCPUへ戻ります。Settled／Finalは常に倍精度CPU exactです。GPU Distributionは候補競合経路と一括で実装するまで無効です。
 
@@ -20,7 +20,7 @@ Payload             bifrost-scales/native-payload/10
 Operator            bifrost-scales/operator-contract/18
 Behavior            bifrost-scales/native-core/0.10.6-cell-hot-path-1
 Profile             bifrost-scales/native-profile/9
-GPU Buffer          bifrost-scales/compact-orientation-buffer/1
+GPU Buffer          bifrost-scales/compact-orientation-buffer/2
 ```
 
 ビルドにはC++17、Threads、Bifrost SDKが必要です。OpenCL SDKは不要です。
