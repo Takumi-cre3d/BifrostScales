@@ -1183,6 +1183,36 @@ int main() {
     CHECK(bounded_neighbors.cells[0].neighbor_count == 0U);
     CHECK(bounded_neighbors.cells[1].neighbor_count == 0U);
 
+    std::vector<Sample> crowded_samples;
+    crowded_samples.reserve(81U);
+    for (std::uint32_t z = 0U; z < 9U; ++z) {
+        for (std::uint32_t x = 0U; x < 9U; ++x) {
+            Sample crowded = bounded_neighbor_a;
+            crowded.position = {
+                -0.16 + static_cast<double>(x) * 0.04,
+                0.0,
+                -0.16 + static_cast<double>(z) * 0.04,
+            };
+            crowded_samples.push_back(crowded);
+        }
+    }
+    GenerationReport crowded_report;
+    crowded_report.initial_spacing = 0.1;
+    crowded_report.final_spacing = 0.1;
+    Settings crowded_settings = bounded_neighbor_settings;
+    crowded_settings.cell_project_to_surface = false;
+    const auto crowded_cells = bifrost_scales::build_cells(
+        mesh,
+        crowded_samples,
+        crowded_settings,
+        PreviewMode::Settled,
+        crowded_report);
+    CHECK(crowded_cells.cells.size() == crowded_samples.size());
+    for (const CellData& cell : crowded_cells.cells) {
+        CHECK(cell.neighbor_count == 64U);
+    }
+    CHECK(crowded_cells.report.cell_mean_neighbors == 64.0);
+
     Mesh disconnected_mesh{
         {
             Vec3{0.0, 0.0, 0.0},

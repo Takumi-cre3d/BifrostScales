@@ -3151,6 +3151,144 @@ struct NeighborIndex {
     std::uint32_t index{0};
 };
 
+// Exact radius queries replace cubic hash-grid bucket scans. Candidate order
+// is intentionally irrelevant here because the Cell stage still applies its
+// distance/index ordering and 64-neighbor limit after each query.
+class SamplePointIndex {
+public:
+    explicit SamplePointIndex(const std::vector<Sample>& samples)
+        : samples_(samples) {
+        indices_.resize(samples.size());
+        std::iota(indices_.begin(), indices_.end(), 0U);
+        nodes_.reserve(samples.size() * 2U);
+        if (!samples.empty()) {
+            build(0U, static_cast<std::uint32_t>(samples.size()));
+        }
+    }
+
+    void query_neighbors(
+        std::uint32_t sample_index,
+        double radius_squared,
+        std::uint32_t component,
+        const Vec3& normal,
+        const std::vector<std::uint32_t>& components,
+        const std::vector<Vec3>& normals,
+        std::vector<NeighborIndex>& neighbors,
+        std::vector<std::uint32_t>& traversal_stack) const {
+        neighbors.clear();
+        traversal_stack.clear();
+        if (nodes_.empty()) {
+            return;
+        }
+        traversal_stack.push_back(0U);
+        const Vec3& position = samples_[sample_index].position;
+        const double conservative_radius_squared = std::nextafter(
+            radius_squared,
+            std::numeric_limits<double>::infinity());
+        while (!traversal_stack.empty()) {
+            const std::uint32_t node_index = traversal_stack.back();
+            traversal_stack.pop_back();
+            const Node& node = nodes_[node_index];
+            if (bounds_distance_squared(node.bounds, position) >
+                conservative_radius_squared) {
+                continue;
+            }
+            if (!node.leaf()) {
+                traversal_stack.push_back(node.right);
+                traversal_stack.push_back(node.left);
+                continue;
+            }
+            for (std::uint32_t offset = node.begin; offset < node.end; ++offset) {
+                const std::uint32_t other_index = indices_[offset];
+                if (other_index == sample_index ||
+                    components[other_index] != component ||
+                    dot(normal, normals[other_index]) < 0.0) {
+                    continue;
+                }
+                const double distance_squared = length_squared(sub(
+                    samples_[other_index].position,
+                    position));
+                if (distance_squared <= 1.0e-20 ||
+                    distance_squared > radius_squared) {
+                    continue;
+                }
+                neighbors.push_back({distance_squared, other_index});
+            }
+        }
+    }
+
+private:
+    struct Node {
+        Bounds3 bounds{};
+        std::uint32_t begin{0U};
+        std::uint32_t end{0U};
+        std::uint32_t left{std::numeric_limits<std::uint32_t>::max()};
+        std::uint32_t right{std::numeric_limits<std::uint32_t>::max()};
+
+        [[nodiscard]] bool leaf() const noexcept {
+            return left == std::numeric_limits<std::uint32_t>::max();
+        }
+    };
+
+    const std::vector<Sample>& samples_;
+    std::vector<std::uint32_t> indices_;
+    std::vector<Node> nodes_;
+
+    [[nodiscard]] double coordinate(
+        std::uint32_t index,
+        std::uint32_t axis) const {
+        const Vec3& point = samples_[index].position;
+        if (axis == 0U) {
+            return point.x;
+        }
+        if (axis == 1U) {
+            return point.y;
+        }
+        return point.z;
+    }
+
+    std::uint32_t build(std::uint32_t begin, std::uint32_t end) {
+        const std::uint32_t node_index =
+            static_cast<std::uint32_t>(nodes_.size());
+        nodes_.push_back({});
+        Bounds3 bounds;
+        for (std::uint32_t offset = begin; offset < end; ++offset) {
+            expand_bounds(bounds, samples_[indices_[offset]].position);
+        }
+        nodes_[node_index].bounds = bounds;
+        nodes_[node_index].begin = begin;
+        nodes_[node_index].end = end;
+        constexpr std::uint32_t leaf_size = 24U;
+        if (end - begin <= leaf_size) {
+            return node_index;
+        }
+
+        const Vec3 extent = sub(bounds.maximum, bounds.minimum);
+        std::uint32_t axis = 0U;
+        if (extent.y > extent.x && extent.y >= extent.z) {
+            axis = 1U;
+        } else if (extent.z > extent.x && extent.z > extent.y) {
+            axis = 2U;
+        }
+        const std::uint32_t middle = begin + (end - begin) / 2U;
+        std::nth_element(
+            indices_.begin() + begin,
+            indices_.begin() + middle,
+            indices_.begin() + end,
+            [&](std::uint32_t left, std::uint32_t right) {
+                const double left_value = coordinate(left, axis);
+                const double right_value = coordinate(right, axis);
+                if (left_value != right_value) {
+                    return left_value < right_value;
+                }
+                return left < right;
+            });
+        nodes_[node_index].left = build(begin, middle);
+        nodes_[node_index].right = build(middle, end);
+        return node_index;
+    }
+};
+
 struct PartitionConstraint {
     double delta_x{0.0};
     double delta_y{0.0};
@@ -3279,7 +3417,6 @@ CellResult build_cells_impl(
     const double shared_gap_world = gap_world + collision_world;
     const double radius_scale = clamp(settings.cell_radius_multiplier, 0.35, 6.0);
     const std::uint32_t projection_rings = effective_cell_projection_rings(settings, mode);
-    constexpr double normal_threshold = 0.0;
     constexpr std::size_t neighbor_limit = 64U;
 
     // Cell rays share the same angular table. Computing sin/cos once removes
@@ -3320,12 +3457,7 @@ CellResult build_cells_impl(
         maximum_spacing = std::max(maximum_spacing, spacing);
     }
 
-    const double grid_size = std::max(1.0e-8, fallback_spacing * 2.0);
-    std::unordered_map<GridCell, std::vector<std::uint32_t>, GridCellHash> grid;
-    grid.reserve(samples.size() * 2U);
-    for (std::uint32_t index = 0; index < samples.size(); ++index) {
-        grid[cell_for(samples[index].position, grid_size)].push_back(index);
-    }
+    const SamplePointIndex sample_point_index(samples);
 
     std::vector<Vec3> normals;
     std::vector<std::uint32_t> components;
@@ -3379,6 +3511,8 @@ CellResult build_cells_impl(
             CellWorkerStats local_stats;
             std::vector<NeighborIndex> neighbors;
             neighbors.reserve(neighbor_limit * 2U);
+            std::vector<std::uint32_t> traversal_stack;
+            traversal_stack.reserve(64U);
             std::vector<Vec2> competitors;
             competitors.reserve(neighbor_limit * 2U);
             std::vector<PartitionConstraint> prepared_constraints;
@@ -3397,48 +3531,18 @@ CellResult build_cells_impl(
                     base_open_radius * 2.5 +
                     maximum_spacing +
                     maximum_spacing * collision_amount;
-                const GridCell origin_cell = cell_for(sample.position, grid_size);
-                const std::int64_t search_cells = std::max<std::int64_t>(
-                    1,
-                    static_cast<std::int64_t>(std::ceil(
-                        search_radius / grid_size)));
                 const std::uint32_t component = components[sample_index];
 
                 const auto neighbors_started = Clock::now();
-                neighbors.clear();
-                for (std::int64_t x = -search_cells; x <= search_cells; ++x) {
-                    for (std::int64_t y = -search_cells; y <= search_cells; ++y) {
-                        for (std::int64_t z = -search_cells; z <= search_cells; ++z) {
-                            const auto found = grid.find({
-                                origin_cell.x + x,
-                                origin_cell.y + y,
-                                origin_cell.z + z,
-                            });
-                            if (found == grid.end()) {
-                                continue;
-                            }
-                            for (const std::uint32_t other_index : found->second) {
-                                if (other_index == sample_index) {
-                                    continue;
-                                }
-                                const Sample& other = samples[other_index];
-                                if (components[other_index] != component) {
-                                    continue;
-                                }
-                                if (dot(normal, normals[other_index]) < normal_threshold) {
-                                    continue;
-                                }
-                                const double distance_squared = length_squared(
-                                    sub(other.position, sample.position));
-                                if (distance_squared <= 1.0e-20 ||
-                                    distance_squared > search_radius * search_radius) {
-                                    continue;
-                                }
-                                neighbors.push_back({distance_squared, other_index});
-                            }
-                        }
-                    }
-                }
+                sample_point_index.query_neighbors(
+                    static_cast<std::uint32_t>(sample_index),
+                    search_radius * search_radius,
+                    component,
+                    normal,
+                    components,
+                    normals,
+                    neighbors,
+                    traversal_stack);
                 const auto neighbor_less = [](
                     const NeighborIndex& left,
                     const NeighborIndex& right) {

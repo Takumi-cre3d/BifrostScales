@@ -20,6 +20,7 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 - Guide連動の複数Scale Type
 - 64-bit Stable Cell IDとメッシュ不要のPicker metadata
 - 決定的マルチコアCPU Distribution／Cells／Shape
+- 大きなCell半径やDensity差に対応するexact BVH Cell近傍探索
 - プロセス共有の上限付きStage Cache
 - 編集間で再利用するTarget Mesh topology／境界／Surface Guide高速化データ
 - PerformanceログにCell setup／neighbor／boundary／surface projectionの処理時間内訳を表示

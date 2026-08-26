@@ -119,7 +119,8 @@ Row run_case(
     const bifrost_scales::Mesh& mesh,
     std::uint32_t count,
     std::uint32_t repeats,
-    double density_multiplier) {
+    double density_multiplier,
+    double cell_radius_multiplier) {
     bifrost_scales::Settings settings;
     settings.target_count = count;
     settings.settled_budget = count;
@@ -133,6 +134,7 @@ Row run_case(
     settings.cell_settled_resolution = 10U;
     settings.cell_shape_divisions = 2U;
     settings.cell_project_to_surface = true;
+    settings.cell_radius_multiplier = cell_radius_multiplier;
 
     bifrost_scales::Guide curve;
     curve.id = "benchmark-curve";
@@ -310,6 +312,7 @@ int main(int argc, char** argv) {
         std::uint32_t repeats = 3U;
         std::uint32_t mesh_divisions = 100U;
         double density_multiplier = 0.0;
+        double cell_radius_multiplier = 1.65;
         std::vector<std::uint32_t> counts{
             512U,
             2000U,
@@ -336,6 +339,13 @@ int main(int argc, char** argv) {
                 if (density_multiplier <= 0.0) {
                     throw std::runtime_error(
                         "--density-multiplier must be greater than zero");
+                }
+            } else if (argument == "--cell-radius-multiplier" && index + 1 < argc) {
+                cell_radius_multiplier = std::stod(argv[++index]);
+                if (cell_radius_multiplier < 0.35 ||
+                    cell_radius_multiplier > 6.0) {
+                    throw std::runtime_error(
+                        "--cell-radius-multiplier must be in [0.35, 6.0]");
                 }
             } else if (argument == "--counts" && index + 1 < argc) {
                 counts.clear();
@@ -378,7 +388,8 @@ int main(int argc, char** argv) {
                 mesh,
                 count,
                 repeats,
-                density_multiplier));
+                density_multiplier,
+                cell_radius_multiplier));
         }
 
         std::ofstream file;

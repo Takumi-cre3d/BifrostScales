@@ -20,6 +20,7 @@ Bifrost Scales is a procedural scale-generation tool for Autodesk Maya 2026 and 
 - Multiple scale types with guide-linked selection
 - Stable 64-bit cell identity and mesh-free picker metadata
 - Deterministic multicore CPU distribution, cells, and shape generation
+- Exact BVH-indexed Cell neighbor search for large radii and uneven density
 - Process-shared bounded stage cache
 - Reusable target-mesh topology, boundary, and surface-guide acceleration data across edits
 - Cell setup, neighbor, boundary, and surface-projection timing diagnostics in the Performance log
