@@ -2511,7 +2511,8 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             self._append(
                 "r{} native-profile: backend={} gpu={} workers={}/{}/{}/{} cache={}/{} evict={} "
                 "payload={:.2f} source={:.2f} distribution={:.2f} "
-                "orientation={:.2f} cells={:.2f} "
+                "orientation={:.2f} orientParts={:.2f}/{:.2f}/{:.2f}/{:.2f} "
+                "cells={:.2f} "
                 "cellParts={:.2f}/{:.2f}/{:.2f}/{:.2f} "
                 "boundaryParts={:.2f}/{:.2f} "
                 "shape={:.2f} core={:.2f} "
@@ -2530,6 +2531,10 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                     report.native_source_decode_ms,
                     report.native_distribution_ms,
                     report.native_orientation_ms,
+                    report.native_orientation_prepare_ms,
+                    report.native_direction_neighbors_ms,
+                    report.native_direction_relax_ms,
+                    report.native_orientation_finalize_ms,
                     report.native_cells_ms,
                     report.native_cell_setup_ms,
                     report.native_cell_neighbors_ms,

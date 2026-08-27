@@ -2,7 +2,7 @@
 
 ## Post-0.10.6 Development
 
-Interactive Distributionは`interactive-candidate-batch/1`のcompactなSoA候補列とOpenCL競合裁定を使用します。Settled Distributionは表面接続Guide Fieldを訪問済み三角形の3頂点でキャッシュし、候補位置へ決定的に補間します。Orientationは各SampleのDirection Guide寄与を1回だけ準備して初期／最終Directionで共有し、複数反復するSettled Direction Relaxは近傍候補列も共有します。Finalの候補ごとのCPU exact評価とStable Cell ID契約は維持します。
+Interactive Distributionは`interactive-candidate-batch/1`のcompactなSoA候補列とOpenCL競合裁定を使用します。Settled Distributionは表面接続Guide Fieldを訪問済み三角形の3頂点でキャッシュし、候補位置へ決定的に補間します。Orientationは各SampleのDirection Guide寄与を1回だけ準備して初期／最終Directionで共有し、複数反復するSettled Direction Relaxは距離判定済み近傍を上限付きcompact CSR配列で共有します。Profileはprepare／neighbors／relax／finalizeの内訳を出力します。Finalの候補ごとのCPU exact評価とStable Cell ID契約は維持します。
 
 `bifrost_scales_candidate_batch_benchmark` で候補数、転送bytes、生成時間を計測できます。
 
