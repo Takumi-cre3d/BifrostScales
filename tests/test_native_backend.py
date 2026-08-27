@@ -60,6 +60,10 @@ class FakeNativeCmds:
                         "schema": "bifrost-scales/native-profile/9",
                         "distribution_ms": 3.0,
                         "orientation_ms": 2.0,
+                        "orientation_prepare_ms": 0.4,
+                        "direction_neighbors_ms": 0.3,
+                        "direction_relax_ms": 0.8,
+                        "orientation_finalize_ms": 0.5,
                         "cells_ms": 4.0,
                         "shape_ms": 1.0,
                         "core_total_ms": 10.0,
@@ -822,6 +826,10 @@ def test_native_graph_is_imported_and_world_mesh_connected_once_then_updates_pay
     assert first.scale_count == 32
     assert first.profile["schema"] == "bifrost-scales/native-profile/9"
     assert first.profile["orientation_ms"] == 2.0
+    assert first.profile["orientation_prepare_ms"] == 0.4
+    assert first.profile["direction_neighbors_ms"] == 0.3
+    assert first.profile["direction_relax_ms"] == 0.8
+    assert first.profile["orientation_finalize_ms"] == 0.5
     assert second.payload_changed is False
     import_calls = [
         kwargs

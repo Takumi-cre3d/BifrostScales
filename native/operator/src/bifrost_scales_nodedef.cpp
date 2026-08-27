@@ -333,6 +333,13 @@ std::string make_profile_json(
         << ",\"source_decode_ms\":" << source_decode_ms
         << ",\"distribution_ms\":" << generation.distribution_ms
         << ",\"orientation_ms\":" << generation.orientation_ms
+        << ",\"orientation_prepare_ms\":"
+        << generation.orientation_prepare_ms
+        << ",\"direction_neighbors_ms\":"
+        << generation.direction_neighbors_ms
+        << ",\"direction_relax_ms\":" << generation.direction_relax_ms
+        << ",\"orientation_finalize_ms\":"
+        << generation.orientation_finalize_ms
         << ",\"cells_ms\":" << generation.cells_ms
         << ",\"cell_setup_ms\":" << generation.cell_setup_ms
         << ",\"cell_neighbors_ms\":" << generation.cell_neighbors_ms

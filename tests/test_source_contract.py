@@ -124,6 +124,8 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     source = (ROOT / "native/src/core.cpp").read_text(encoding="utf-8")
     operator = (ROOT / "native/operator/src/bifrost_scales_nodedef.cpp").read_text(encoding="utf-8")
     gpu = (ROOT / "native/src/gpu_compute.cpp").read_text(encoding="utf-8")
+    backend = (PACKAGE / "backend.py").read_text(encoding="utf-8")
+    ui = (PACKAGE / "ui.py").read_text(encoding="utf-8")
     assert "struct GenerationProfile" in header
     assert "std::vector<std::uint64_t> cell_ids" in header
     assert "struct CellMetadata" in header
@@ -136,6 +138,12 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "class SettledDistributionFieldCache" in source
     assert "struct DirectionGuideContribution" in source
     assert "reuse_direction_neighbors" in source
+    assert "direction_neighbor_offsets" in source
+    assert "maximum_average_cached_neighbors" in source
+    assert "orientation_prepare_ms" in header
+    assert "direction_neighbors_ms" in operator
+    assert "native_direction_neighbors_ms" in backend
+    assert "orientParts=" in ui
     assert "mode == PreviewMode::Settled" in source
     assert "maximum_neighbor_threshold" in source
     assert "hasher.key(distribution)" in source
@@ -229,7 +237,10 @@ def test_build_info_records_the_native_only_boundary():
         "once-per-sample-reused-initial-final"
     )
     assert info["direction_relax_neighbor_query"] == (
-        "cached-across-settled-multi-iteration"
+        "distance-qualified-compact-csr-settled-multi-iteration"
+    )
+    assert info["orientation_profile_breakdown"] == (
+        "prepare-neighbors-relax-finalize"
     )
     assert info["settled_distribution_deterministic"] is True
     assert info["final_distribution_field"] == (
