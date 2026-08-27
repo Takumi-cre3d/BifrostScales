@@ -134,6 +134,8 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "BIFROST_SCALES_STAGE_CACHE_ENTRIES" in source
     assert "class DistributionGuideIndex" in source
     assert "class SettledDistributionFieldCache" in source
+    assert "struct DirectionGuideContribution" in source
+    assert "reuse_direction_neighbors" in source
     assert "mode == PreviewMode::Settled" in source
     assert "maximum_neighbor_threshold" in source
     assert "hasher.key(distribution)" in source
@@ -222,6 +224,12 @@ def test_build_info_records_the_native_only_boundary():
     assert info["settled_distribution_unchanged"] is False
     assert info["settled_distribution_field"] == (
         "triangle-corner-cached-barycentric"
+    )
+    assert info["orientation_guide_field"] == (
+        "once-per-sample-reused-initial-final"
+    )
+    assert info["direction_relax_neighbor_query"] == (
+        "cached-across-settled-multi-iteration"
     )
     assert info["settled_distribution_deterministic"] is True
     assert info["final_distribution_field"] == (
