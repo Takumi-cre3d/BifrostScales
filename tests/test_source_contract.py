@@ -144,6 +144,9 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "direction_neighbors_ms" in operator
     assert "native_direction_neighbors_ms" in backend
     assert "orientParts=" in ui
+    assert "gpuParts=" in ui
+    assert "try_compute_direction_relax" in source
+    assert "__kernel void direction_relax" in gpu
     assert "mode == PreviewMode::Settled" in source
     assert "maximum_neighbor_threshold" in source
     assert "hasher.key(distribution)" in source
@@ -242,6 +245,10 @@ def test_build_info_records_the_native_only_boundary():
     assert info["orientation_profile_breakdown"] == (
         "prepare-neighbors-relax-finalize"
     )
+    assert info["direction_relax_compute_backend"] == (
+        "opencl-gpu-with-cpu-exact-guide-evaluation-and-fallback"
+    )
+    assert info["direction_relax_gpu_runtime_enabled"] is True
     assert info["settled_distribution_deterministic"] is True
     assert info["final_distribution_field"] == (
         "exact-per-candidate-surface-connected"

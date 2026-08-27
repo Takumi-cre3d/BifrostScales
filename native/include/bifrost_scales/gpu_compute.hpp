@@ -114,6 +114,21 @@ bool try_compute_orientation(
     std::vector<DirectionOutput>& outputs,
     ExecutionInfo& info);
 
+// Runs only the iterative tangent smoothing stage on the GPU. Guide
+// evaluation remains on the CPU so surface-connected falloff stays exact.
+bool should_attempt_direction_relax(
+    std::size_t sample_count,
+    ExecutionInfo& info);
+
+bool try_compute_direction_relax(
+    const std::vector<Float4>& normals,
+    const std::vector<std::uint32_t>& neighbor_offsets,
+    const std::vector<std::uint32_t>& neighbor_indices,
+    std::uint32_t iterations,
+    float amount,
+    std::vector<Float4>& tangents,
+    ExecutionInfo& info);
+
 // Conflict arbitration uses the same OpenCL device and environment policy as
 // orientation, with a candidate-specific automatic crossover threshold.
 bool should_attempt_conflict(

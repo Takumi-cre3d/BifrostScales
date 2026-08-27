@@ -11,6 +11,8 @@ Native CoreはDistribution、Orientation、Cell、ShapeをC++17で評価しま�
 0.10.6は全Cell共通のRay角度表、Sample Normal／Surface Componentの事前計算、Mask Guideなし高速経路、1 Sample = 1 Partition Siteの直接制約を追加します。Cell Direction Anisotropy=0では等方Cell境界計算を維持します。非0ではGuide別Cell Anisotropyと最大2.25軸比の上限付き異方性を使用し、Center Alignmentは中心候補数を独立制御します。
 
 Interactive／Direction Relax 0のOrientationだけをOpenCL GPUへオフロードできます。OpenCLは動的ロードされ、失敗時はマルチコアCPUへ戻ります。Settledは倍精度CPUの決定的な三角形Field補間、Finalは候補ごとの倍精度CPU exactです。Interactive Distributionの候補競合はOpenCLへ接続済みで、利用不可時は同じ優先規則のCPU referenceへ戻ります。
+複数反復するSettled Direction Relaxは、CPUで表面接続Guideを正確に評価した後、距離判定済みcompact CSR近傍と接線反復だけをOpenCLへ渡します。結果が不正またはGPUを利用できない場合はマルチコアCPUへ戻ります。
+
 
 開放エッジ境界アンカーは局所Densityの平方根で重み付けしたArc Lengthへ配置します。neutral Densityは0.10.2互換です。
 

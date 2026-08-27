@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -415,6 +416,50 @@ __kernel void orientation_preview(
     outputs[index] = output;
 }
 
+__kernel void direction_relax(
+    __global const float4* normals,
+    __global const uint* neighbor_offsets,
+    __global const uint* neighbor_indices,
+    __global const float4* input_tangents,
+    __global float4* output_tangents,
+    float amount,
+    uint sample_count) {
+    const uint index = get_global_id(0);
+    if (index >= sample_count) {
+        return;
+    }
+    const float3 normal = normalize_safe(
+        normals[index].xyz,
+        (float3)(0.0f, 1.0f, 0.0f));
+    const float3 reference = normalize_safe(
+        input_tangents[index].xyz,
+        orthonormal_tangent(normal));
+    float3 accumulated = reference;
+    uint count = 1U;
+    const uint begin = neighbor_offsets[index];
+    const uint end = neighbor_offsets[index + 1U];
+    for (uint offset = begin; offset < end; ++offset) {
+        float3 candidate = input_tangents[neighbor_indices[offset]].xyz;
+        if (dot(candidate, reference) < 0.0f) {
+            candidate = -candidate;
+        }
+        candidate = normalize_safe(
+            project_plane(candidate, normal),
+            reference);
+        accumulated += candidate;
+        ++count;
+    }
+    const float3 average = normalize_safe(
+        accumulated / (float)count,
+        reference);
+    const float3 blended = normalize_safe(
+        project_plane(
+            reference * (1.0f - amount) + average * amount,
+            normal),
+        reference);
+    output_tangents[index] = (float4)(blended, 0.0f);
+}
+
 )CLC"
 R"CLC(
 typedef struct {
@@ -700,6 +745,10 @@ public:
             release_kernel_ != nullptr) {
             release_kernel_(conflict_initialize_kernel_);
         }
+        if (direction_relax_kernel_ != nullptr &&
+            release_kernel_ != nullptr) {
+            release_kernel_(direction_relax_kernel_);
+        }
         if (kernel_ != nullptr && release_kernel_ != nullptr) {
             release_kernel_(kernel_);
         }
@@ -736,6 +785,14 @@ public:
 
     const std::string& device_name() const noexcept {
         return device_name_;
+    }
+
+    bool direction_relax_available() const noexcept {
+        return direction_relax_available_;
+    }
+
+    const std::string& direction_relax_reason() const noexcept {
+        return direction_relax_reason_;
     }
 
     bool conflict_available() const noexcept {
@@ -861,6 +918,167 @@ public:
         if (error != kClSuccess) {
             outputs.clear();
             info.fallback_reason = "OpenCL orientation readback failed";
+            return false;
+        }
+        return true;
+    }
+
+    bool execute_direction_relax(
+        const std::vector<Float4>& normals,
+        const std::vector<std::uint32_t>& neighbor_offsets,
+        const std::vector<std::uint32_t>& neighbor_indices,
+        std::uint32_t iterations,
+        float amount,
+        std::vector<Float4>& tangents,
+        ExecutionInfo& info) {
+        std::lock_guard<std::mutex> guard(mutex_);
+        if (!direction_relax_available_) {
+            info.fallback_reason = direction_relax_reason_;
+            return false;
+        }
+        if (normals.empty() || tangents.size() != normals.size() ||
+            neighbor_offsets.size() != normals.size() + 1U ||
+            iterations == 0U) {
+            info.fallback_reason = "direction relax input is invalid";
+            return false;
+        }
+
+        const std::uint32_t empty_neighbor = 0U;
+        const std::size_t normal_bytes = normals.size() * sizeof(Float4);
+        const std::size_t offset_bytes =
+            neighbor_offsets.size() * sizeof(std::uint32_t);
+        const std::size_t neighbor_bytes = std::max<std::size_t>(
+            sizeof(std::uint32_t),
+            neighbor_indices.size() * sizeof(std::uint32_t));
+        const std::size_t tangent_bytes = tangents.size() * sizeof(Float4);
+
+        ClInt error = kClSuccess;
+        ClMem normal_buffer = create_buffer_(
+            context_, kClMemReadOnly, normal_bytes, nullptr, &error);
+        ClMem offset_buffer = create_buffer_(
+            context_, kClMemReadOnly, offset_bytes, nullptr, &error);
+        ClMem neighbor_buffer = create_buffer_(
+            context_, kClMemReadOnly, neighbor_bytes, nullptr, &error);
+        ClMem tangent_a_buffer = create_buffer_(
+            context_, kClMemReadWrite, tangent_bytes, nullptr, &error);
+        ClMem tangent_b_buffer = create_buffer_(
+            context_, kClMemReadWrite, tangent_bytes, nullptr, &error);
+        auto release_buffers = [&]() {
+            for (ClMem value : {
+                     normal_buffer,
+                     offset_buffer,
+                     neighbor_buffer,
+                     tangent_a_buffer,
+                     tangent_b_buffer}) {
+                if (value != nullptr) {
+                    release_mem_object_(value);
+                }
+            }
+        };
+        if (normal_buffer == nullptr || offset_buffer == nullptr ||
+            neighbor_buffer == nullptr || tangent_a_buffer == nullptr ||
+            tangent_b_buffer == nullptr || error != kClSuccess) {
+            info.fallback_reason =
+                "OpenCL direction relax buffer creation failed";
+            release_buffers();
+            return false;
+        }
+
+        using Clock = std::chrono::steady_clock;
+        const auto upload_started = Clock::now();
+        error = enqueue_write_buffer_(
+            queue_, normal_buffer, kClTrue, 0U, normal_bytes,
+            normals.data(), 0U, nullptr, nullptr);
+        error |= enqueue_write_buffer_(
+            queue_, offset_buffer, kClTrue, 0U, offset_bytes,
+            neighbor_offsets.data(), 0U, nullptr, nullptr);
+        error |= enqueue_write_buffer_(
+            queue_, neighbor_buffer, kClTrue, 0U, neighbor_bytes,
+            neighbor_indices.empty()
+                ? static_cast<const void*>(&empty_neighbor)
+                : static_cast<const void*>(neighbor_indices.data()),
+            0U, nullptr, nullptr);
+        error |= enqueue_write_buffer_(
+            queue_, tangent_a_buffer, kClTrue, 0U, tangent_bytes,
+            tangents.data(), 0U, nullptr, nullptr);
+        info.upload_ms = std::chrono::duration<double, std::milli>(
+            Clock::now() - upload_started).count();
+        if (error != kClSuccess) {
+            info.fallback_reason =
+                "OpenCL direction relax upload failed";
+            release_buffers();
+            return false;
+        }
+
+        const ClUInt sample_count = static_cast<ClUInt>(normals.size());
+        error = set_kernel_arg_(
+            direction_relax_kernel_, 0U,
+            sizeof(normal_buffer), &normal_buffer);
+        error |= set_kernel_arg_(
+            direction_relax_kernel_, 1U,
+            sizeof(offset_buffer), &offset_buffer);
+        error |= set_kernel_arg_(
+            direction_relax_kernel_, 2U,
+            sizeof(neighbor_buffer), &neighbor_buffer);
+        error |= set_kernel_arg_(
+            direction_relax_kernel_, 5U,
+            sizeof(amount), &amount);
+        error |= set_kernel_arg_(
+            direction_relax_kernel_, 6U,
+            sizeof(sample_count), &sample_count);
+        if (error != kClSuccess) {
+            info.fallback_reason =
+                "OpenCL direction relax argument upload failed";
+            release_buffers();
+            return false;
+        }
+
+        const auto kernel_started = Clock::now();
+        const std::size_t global_size =
+            (normals.size() + 63U) / 64U * 64U;
+        const std::size_t local_size = 64U;
+        ClMem input_buffer = tangent_a_buffer;
+        ClMem output_buffer = tangent_b_buffer;
+        for (std::uint32_t iteration = 0U;
+             iteration < iterations && error == kClSuccess;
+             ++iteration) {
+            error = set_kernel_arg_(
+                direction_relax_kernel_, 3U,
+                sizeof(input_buffer), &input_buffer);
+            error |= set_kernel_arg_(
+                direction_relax_kernel_, 4U,
+                sizeof(output_buffer), &output_buffer);
+            if (error == kClSuccess) {
+                error = enqueue_nd_range_kernel_(
+                    queue_, direction_relax_kernel_, 1U,
+                    nullptr, &global_size, &local_size,
+                    0U, nullptr, nullptr);
+            }
+            std::swap(input_buffer, output_buffer);
+        }
+        if (error == kClSuccess) {
+            error = finish_(queue_);
+        }
+        info.kernel_ms = std::chrono::duration<double, std::milli>(
+            Clock::now() - kernel_started).count();
+        info.iteration_count = iterations;
+        if (error != kClSuccess) {
+            info.fallback_reason =
+                "OpenCL direction relax kernel execution failed";
+            release_buffers();
+            return false;
+        }
+
+        const auto readback_started = Clock::now();
+        error = enqueue_read_buffer_(
+            queue_, input_buffer, kClTrue, 0U, tangent_bytes,
+            tangents.data(), 0U, nullptr, nullptr);
+        info.readback_ms = std::chrono::duration<double, std::milli>(
+            Clock::now() - readback_started).count();
+        release_buffers();
+        if (error != kClSuccess) {
+            info.fallback_reason =
+                "OpenCL direction relax readback failed";
             return false;
         }
         return true;
@@ -1387,6 +1605,16 @@ private:
         }
         available_ = true;
         reason_.clear();
+        direction_relax_kernel_ = create_kernel_(
+            program_, "direction_relax", &error);
+        if (direction_relax_kernel_ == nullptr ||
+            error != kClSuccess) {
+            direction_relax_reason_ =
+                "OpenCL direction relax kernel creation failed";
+        } else {
+            direction_relax_available_ = true;
+            direction_relax_reason_.clear();
+        }
         conflict_initialize_kernel_ = create_kernel_(
             program_, "conflict_initialize", &error);
         conflict_select_kernel_ = create_kernel_(
@@ -1414,13 +1642,16 @@ private:
     ClCommandQueue queue_{nullptr};
     ClProgram program_{nullptr};
     ClKernel kernel_{nullptr};
+    ClKernel direction_relax_kernel_{nullptr};
     ClKernel conflict_initialize_kernel_{nullptr};
     ClKernel conflict_select_kernel_{nullptr};
     ClKernel conflict_resolve_kernel_{nullptr};
     ClKernel conflict_summarize_kernel_{nullptr};
     bool available_{false};
+    bool direction_relax_available_{false};
     bool conflict_available_{false};
     std::string reason_{"OpenCL runtime is unavailable"};
+    std::string direction_relax_reason_{"OpenCL direction relax runtime is unavailable"};
     std::string conflict_reason_{"OpenCL conflict runtime is unavailable"};
     std::string device_name_;
     std::mutex mutex_;
@@ -1561,6 +1792,68 @@ bool try_compute_orientation(
     }
     info.used = true;
     info.backend = "opencl-gpu+cpu-exact-settle";
+    return true;
+}
+
+bool should_attempt_direction_relax(
+    std::size_t sample_count,
+    ExecutionInfo& info) {
+    if (!should_attempt_orientation(sample_count, info)) {
+        return false;
+    }
+    Runtime& compute = runtime();
+    info.available = compute.direction_relax_available();
+    if (!compute.direction_relax_available()) {
+        info.fallback_reason = compute.direction_relax_reason();
+        return false;
+    }
+    return true;
+}
+
+bool try_compute_direction_relax(
+    const std::vector<Float4>& normals,
+    const std::vector<std::uint32_t>& neighbor_offsets,
+    const std::vector<std::uint32_t>& neighbor_indices,
+    std::uint32_t iterations,
+    float amount,
+    std::vector<Float4>& tangents,
+    ExecutionInfo& info) {
+    if (!should_attempt_direction_relax(normals.size(), info)) {
+        return false;
+    }
+    if (tangents.size() != normals.size() ||
+        neighbor_offsets.size() != normals.size() + 1U ||
+        neighbor_offsets.empty() || neighbor_offsets.front() != 0U ||
+        neighbor_offsets.back() != neighbor_indices.size() ||
+        iterations == 0U) {
+        info.fallback_reason = "direction relax input is invalid";
+        return false;
+    }
+    Runtime& compute = runtime();
+    if (!compute.execute_direction_relax(
+            normals,
+            neighbor_offsets,
+            neighbor_indices,
+            iterations,
+            std::clamp(amount, 0.0F, 1.0F),
+            tangents,
+            info)) {
+        return false;
+    }
+    const bool finite = std::all_of(
+        tangents.begin(), tangents.end(),
+        [](const Float4& value) {
+            return std::isfinite(value.x) &&
+                   std::isfinite(value.y) &&
+                   std::isfinite(value.z);
+        });
+    if (!finite) {
+        info.fallback_reason =
+            "OpenCL direction relax produced non-finite output";
+        return false;
+    }
+    info.used = true;
+    info.backend = "opencl-gpu-direction-relax+cpu-exact-guides";
     return true;
 }
 

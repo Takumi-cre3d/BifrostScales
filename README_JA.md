@@ -40,6 +40,8 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 ## 実行モデル
 
 Settled出力は表面接続Guide Fieldを訪問済み三角形の頂点でキャッシュし、三角形内を決定的に補間してルック開発時の再分布を高速化します。Orientationは各SampleのDirection Guide Fieldを1回だけ評価して初期方向と最終方向で再利用し、複数反復するSettled Direction Relaxは距離判定済み近傍だけを上限付きcompact CSR配列へ保持します。Native PerformanceログはOrientationをprepare／neighbors／relax／finalizeの4区間で表示します。Finalは従来の候補ごとの倍精度CPU exact評価を維持します。Interactive Distributionはcompact・決定的・prefix-stableなSurface Candidateを並列評価し、空間競合をOpenCLで裁定します。GPUを利用できない場合は同じ優先規則のCPU referenceへ自動fallbackします。CPUで生成するOpen Boundary／Guide Curve Anchor、Stable Cell ID、Maskのpost-Cell出力制御は維持されます。Direction異方性は中心点を追加・削除せず、隣接Cell間で対称な距離計量だけを変えます。全体効果の最大は上限付き2.25軸比で、Guideごとに効果を弱めるか無効化できます。
+GPU Crossover以上の複数反復Settled Previewでは、表面接続Guide評価をCPU exactのまま維持し、compact CSRを使うDirection RelaxだけをOpenCLで実行します。GPUが利用できない場合、近傍が高密度な場合、または実行に失敗した場合は既存CPU経路へ自動fallbackします。
+
 
 - `bifrost-scales/interactive-candidate-batch/1`: production Interactive Surface Candidate
 - `bifrost-scales/interactive-conflict-reference/1`: 決定的CPU fallback
