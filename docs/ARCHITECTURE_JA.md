@@ -10,7 +10,7 @@ Immutable Published Bifrost Graph v4
             |
             v
 BifrostScales Native C++ Operator
-  Distribution        CPU exact
+  Distribution        Interactive OpenCL / Settled CPU Field Cache / Final CPU exact
   Interactive Orient  OpenCL GPU または CPU fallback
   Settled/Final Orient CPU exact
   Cells / Shape / IDs CPU exact
@@ -32,7 +32,7 @@ OpenCL 1.2を実行時に動的ロードします。OpenCL DLLやGPU Deviceを�
 
 GPU入力はSample位置、法線、Random Rotation、Direction Guide、Curve Segmentをまとめた`bifrost-scales/compact-orientation-buffer/2`です。GPU出力はOrientation Tangent、Cell Partition Tangent、Direction Influence、Cell Anisotropy Influenceです。
 
-GPU float計算は操作中表示だけに限定します。Settled／Final、Direction Relax、Cell境界、Stable Cell IDは倍精度CPU exactなので、GPU固有の丸めが制作データの正本にはなりません。
+GPU float計算は操作中表示だけに限定します。Settled、Final、Direction Relax、Cell境界、Stable Cell IDはCPUで決定的に評価されます。Settled Distributionのみ三角形Guide Field補間を使い、Finalは候補ごとの倍精度exact評価を維持するため、GPU固有の丸めが制作データの正本にはなりません。
 
 ## 開放エッジ
 

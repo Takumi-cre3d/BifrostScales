@@ -1,6 +1,6 @@
 # Bifrost Scales
 
-Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル鱗生成ツールです。Maya上の編集UI、ガイドによるアートディレクション、Native C++ Bifrost Operator、決定的CPU exact Settled出力、Interactive Orientation用OpenCLアクセラレーションを組み合わせています。
+Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル鱗生成ツールです。Maya上の編集UI、ガイドによるアートディレクション、Native C++ Bifrost Operator、三角形Field Cacheを用いた決定的CPU Settled出力、Interactive Orientation用OpenCLアクセラレーションを組み合わせています。
 
 [English](README.md)
 
@@ -34,12 +34,12 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 1. Maya Python APIから `import bifrost_scales; bifrost_scales.show()` を実行してUIを開きます。
 2. Polygon Meshを選択し、Bifrost Scales Systemを作成します。
 3. Guideを追加・編集してDensity、Size、Direction、Flow、Maskを調整します。`Direction Strength`は鱗の向き、`Center Alignment`はCurve中心候補の割合、Guide別`Cell Anisotropy`は全体の`Cell Direction Anisotropy`に対する寄与を調整します。
-4. 編集中はInteractive Preview、確定確認には決定的CPU exactのSettled Previewを使用します。
+4. 編集中はInteractive Preview、確定確認には決定的CPUのSettled Previewを使用します。
 5. Maya Sceneを保存すると、System、Guide、Guide Group、Scale Type、Native Graph接続がSceneへ保存されます。
 
 ## 実行モデル
 
-Settled出力は従来の決定的CPU exact経路を使用します。Interactive Distributionはcompact・決定的・prefix-stableなSurface Candidateを並列評価し、空間競合をOpenCLで裁定します。GPUを利用できない場合は同じ優先規則のCPU referenceへ自動fallbackします。CPUで生成するOpen Boundary／Guide Curve Anchor、表面接続Guide Field、Stable Cell ID、Maskのpost-Cell出力制御は維持されます。Direction異方性は中心点を追加・削除せず、隣接Cell間で対称な距離計量だけを変えます。全体効果の最大は上限付き2.25軸比で、Guideごとに効果を弱めるか無効化できます。
+Settled出力は表面接続Guide Fieldを訪問済み三角形の頂点でキャッシュし、三角形内を決定的に補間してルック開発時の再分布を高速化します。Finalは従来の候補ごとの倍精度CPU exact評価を維持します。Interactive Distributionはcompact・決定的・prefix-stableなSurface Candidateを並列評価し、空間競合をOpenCLで裁定します。GPUを利用できない場合は同じ優先規則のCPU referenceへ自動fallbackします。CPUで生成するOpen Boundary／Guide Curve Anchor、Stable Cell ID、Maskのpost-Cell出力制御は維持されます。Direction異方性は中心点を追加・削除せず、隣接Cell間で対称な距離計量だけを変えます。全体効果の最大は上限付き2.25軸比で、Guideごとに効果を弱めるか無効化できます。
 
 - `bifrost-scales/interactive-candidate-batch/1`: production Interactive Surface Candidate
 - `bifrost-scales/interactive-conflict-reference/1`: 決定的CPU fallback

@@ -4,7 +4,7 @@
 Product / Native Pack    0.10.6
 Payload                  bifrost-scales/native-payload/10
 Operator                 bifrost-scales/operator-contract/18
-Behavior                 bifrost-scales/native-core/0.10.6-cell-hot-path-1
+Behavior                 bifrost-scales/native-core/0.10.6-settled-field-cache-1
 Profile                  bifrost-scales/native-profile/9
 Install Root             BifrostScalesCore-0.10.6
 ~~~
@@ -29,4 +29,4 @@ $tools = "$HOME\Documents\maya\modules\BifrostScales\bifrost\native\out\BifrostS
 & "$tools\bifrost_scales_gpu_preview_benchmark.exe" 10000
 ~~~
 
-Stage Cacheはcache_scope=process-shared-bounded、3 Stageのhitとexactがtrueなら合格です。GPU環境ではgpu_used:true、GPUなしでは理由付きCPU fallbackとsettled_cpu_exact:trueが合格です。Performanceは同じPCで0.10.5と5回比較してください。
+Stage Cacheはcache_scope=process-shared-bounded、3 Stageのhitとexactがtrueなら合格です。GPU環境ではgpu_used:true、GPUなしでは理由付きCPU fallbackとsettled_cpu_deterministic:trueが合格です。Performanceは同じPCで0.10.5と5回比較してください。

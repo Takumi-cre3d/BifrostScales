@@ -5,7 +5,8 @@
 - exact Cell PartitionのRay角度、Normal、Surface Componentを共有／事前計算
 - Mask GuideがないときのCell Ray Mask判定を完全スキップ
 - 廃止済みDirection Pair用Partition構造を1 Sample = 1 Siteへ整理
-- Mesh、Cell境界、Stable Cell ID、乱数、倍精度Settled結果は0.10.5とbyte-exact
+- Finalの候補評価、Cell境界、乱数契約は維持
+- Settled Distributionは三角形Guide Field Cacheへ移行するため、Density／Size Guide使用時のCell配置とStable Cell IDは旧版とbyte-exactではありません
 - 0.10.5のStage Cache／Distribution Index、GPU Orientation、開放エッジDensity適応を維持
 - Operator Contract 18、Behavior Contractを0.10.6-cell-hot-path-1へ更新
 
@@ -28,7 +29,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 product / pack / minimum  0.10.6
 payload schema            bifrost-scales/native-payload/10
 operator contract         bifrost-scales/operator-contract/18
-behavior contract         bifrost-scales/native-core/0.10.6-cell-hot-path-1
+behavior contract         bifrost-scales/native-core/0.10.6-settled-field-cache-1
 profile schema            bifrost-scales/native-profile/9
 ready                     True
 ~~~

@@ -400,7 +400,7 @@ def _write_nested_native_pack(module_root: Path, version: str = "0.10.6") -> Pat
         json.dumps(
             {
                 "native_payload_schema": "bifrost-scales/native-payload/10",
-                "native_behavior_contract": "bifrost-scales/native-core/0.10.6-cell-hot-path-1",
+                "native_behavior_contract": "bifrost-scales/native-core/0.10.6-settled-field-cache-1",
                 "native_profile_schema": "bifrost-scales/native-profile/9",
             }
         ),
@@ -467,7 +467,7 @@ def _write_nested_native_pack(module_root: Path, version: str = "0.10.6") -> Pat
         json.dumps(
             {
                 "native_payload_schema": "bifrost-scales/native-payload/10",
-                "native_behavior_contract": "bifrost-scales/native-core/0.10.6-cell-hot-path-1",
+                "native_behavior_contract": "bifrost-scales/native-core/0.10.6-settled-field-cache-1",
                 "native_profile_schema": "bifrost-scales/native-profile/9",
             }
         ),
@@ -505,7 +505,7 @@ def test_probe_resolves_versioned_bifrost_215_install_prefix(tmp_path, monkeypat
     assert status.pack_version == "0.10.6"
     assert status.minimum_pack_version == "0.10.6"
     assert status.native_behavior_contract_valid is True
-    assert status.native_behavior_contract_expected == "bifrost-scales/native-core/0.10.6-cell-hot-path-1"
+    assert status.native_behavior_contract_expected == "bifrost-scales/native-core/0.10.6-settled-field-cache-1"
     assert status.module_native_behavior_contract == status.native_behavior_contract_expected
     assert status.pack_native_behavior_contract == status.native_behavior_contract_expected
     assert status.payload_schema_contract_valid is True
@@ -1169,7 +1169,7 @@ def test_probe_rejects_payload_schema_mismatch_even_when_pack_version_is_new_eno
     graph.write_text(json.dumps(graph_data), encoding="utf-8")
     manifest = pack_root / "metadata" / "manifest.bifrost-scales.json"
     manifest.write_text(
-        json.dumps({"native_payload_schema": "bifrost-scales/native-payload/6", "native_behavior_contract": "bifrost-scales/native-core/0.10.6-cell-hot-path-1"}),
+        json.dumps({"native_payload_schema": "bifrost-scales/native-payload/6", "native_behavior_contract": "bifrost-scales/native-core/0.10.6-settled-field-cache-1"}),
         encoding="utf-8",
     )
     (modules / "BifrostScales.mod").write_text(

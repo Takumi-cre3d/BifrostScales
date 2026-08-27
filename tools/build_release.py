@@ -544,7 +544,7 @@ def _operator_compatible_native_pack(pack_config):
         and _manifest_payload_schema(manifest)
         == "bifrost-scales/native-payload/10"
         and _manifest_behavior_contract(manifest)
-        == "bifrost-scales/native-core/0.10.6-cell-hot-path-1"
+        == "bifrost-scales/native-core/0.10.6-settled-field-cache-1"
         and _manifest_profile_schema(manifest)
         == "bifrost-scales/native-profile/9"
     )
@@ -701,7 +701,7 @@ def _is_valid_native_pack_config(pack_config):
         return False
     if _manifest_payload_schema(manifest) != "bifrost-scales/native-payload/10":
         return False
-    if _manifest_behavior_contract(manifest) != "bifrost-scales/native-core/0.10.6-cell-hot-path-1":
+    if _manifest_behavior_contract(manifest) != "bifrost-scales/native-core/0.10.6-settled-field-cache-1":
         return False
     if _manifest_profile_schema(manifest) != "bifrost-scales/native-profile/9":
         return False
@@ -1144,15 +1144,16 @@ def build() -> dict[str, str]:
         "product": "Bifrost Scales",
         "version": VERSION,
         "schema": "bifrost-scales/5",
-        "milestone": "exact-single-site-cell-hot-path",
+        "milestone": "deterministic-settled-distribution-field-cache",
         "build_date": "2026-08-24",
         "runtime_payload_sha256": hashlib.sha256(payload).hexdigest(),
         "standalone": True,
         "runtime_engine": "native-bifrost-only",
-        "generation_compute_backend": "hybrid-opencl-interactive-distribution-and-orientation-cpu-exact-settled",
+        "generation_compute_backend": "hybrid-opencl-interactive-cpu-deterministic-settled-cpu-exact-final",
         "gpu_generation_compute": True,
         "gpu_stage": "interactive-distribution-conflict-and-eligible-orientation",
         "gpu_buffer_schema": "interactive-conflict-gpu/1-plus-compact-orientation-buffer/2",
+        "gpu_preview_benchmark_schema": "bifrost-scales/gpu-preview-benchmark/3",
         "gpu_environment_policy": "BIFROST_SCALES_GPU=auto|off|force",
         "gpu_default_crossover_samples": 4096,
         "gpu_failure_policy": "automatic-cpu-multicore-fallback",
@@ -1166,7 +1167,10 @@ def build() -> dict[str, str]:
         "interactive_distribution_candidate_multiplier": 4,
         "interactive_distribution_preserves_cpu_anchors": True,
         "interactive_distribution_mask_stage": "post-cell-shape-only",
-        "settled_distribution_unchanged": True,
+        "settled_distribution_unchanged": False,
+        "settled_distribution_field": "triangle-corner-cached-barycentric",
+        "settled_distribution_deterministic": True,
+        "final_distribution_field": "exact-per-candidate-surface-connected",
         "settled_and_final_backend": "deterministic-cpu-multicore",
         "viewport_rendering": "maya-viewport-2-gpu-managed",
         "cpu_thread_environment_override": "BIFROST_SCALES_CPU_THREADS",
@@ -1193,11 +1197,11 @@ def build() -> dict[str, str]:
         "create_transaction_rollback": True,
         "existing_system_missing_graph_policy": "explicit-rebuild-only",
         "final_and_bake_status": "not-exposed-until-native-final-contract",
-        "native_core_api": "0.10.6-cell-hot-path-contract",
+        "native_core_api": "0.10.6-settled-field-cache-contract",
         "minimum_native_pack": "0.10.6",
         "native_payload_schema": "bifrost-scales/native-payload/10",
         "operator_contract": "bifrost-scales/operator-contract/18",
-        "native_behavior_contract": "bifrost-scales/native-core/0.10.6-cell-hot-path-1",
+        "native_behavior_contract": "bifrost-scales/native-core/0.10.6-settled-field-cache-1",
         "native_profile_schema": "bifrost-scales/native-profile/9",
         "cell_cache_key_basis": "distribution-or-guide-anisotropic",
         "native_stage_cache": "process-shared-bounded-lru-exact-dual-hash",

@@ -26,7 +26,7 @@ OpenCL Runtime／GPUがない場合、Buffer作成、Kernel build／execution、
 
 ## Runtime境界
 
-このContractはMaya Runtime、Published Graph、Stage Cache、Settled／Final／Bakeへ未接続です。Settled Geometry、Cell境界、Stable Cell IDの正本はCPU exactのままです。
+このContractはMaya RuntimeのInteractive Distributionへ接続済みです。Settledは決定的CPU三角形Guide Field Cache、Final／Bakeは候補ごとのCPU exactを使用し、Cell境界はCPUで評価します。
 
 ## 検証
 
@@ -50,4 +50,4 @@ RTX 4070 Ti SUPERでの5回中央値は次のとおりです。
 
 ## 次段階
 
-CPU exact SettleとのStable ID／画面差分を測定し、Maya Runtimeへ接続する条件とPreviewからSettledへの切替契約を定義します。
+Interactiveから決定的SettledへのStable ID／画面差分を継続測定し、Final exactへの切替契約を定義します。

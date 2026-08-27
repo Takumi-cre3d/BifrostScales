@@ -101,6 +101,13 @@ def test_native_operator_and_host_boundary_contracts_remain_immutable():
     assert performance["direction_only_edits_reuse_exact_cell_partition"] is False
     assert performance["direction_strength_edits_reuse_exact_cell_partition"] is True
     assert performance["gpu_buffer_schema"] == "bifrost-scales/compact-orientation-buffer/2"
+    assert performance["settled_distribution_field"] == (
+        "triangle-corner-cached-barycentric"
+    )
+    assert performance["settled_distribution_deterministic"] is True
+    assert performance["final_distribution_field"] == (
+        "exact-per-candidate-surface-connected"
+    )
     assert (
         performance["direction_only_edits_reuse_cell_partition_when_anisotropy_zero"]
         is True
@@ -126,6 +133,8 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "process-shared-bounded" in header
     assert "BIFROST_SCALES_STAGE_CACHE_ENTRIES" in source
     assert "class DistributionGuideIndex" in source
+    assert "class SettledDistributionFieldCache" in source
+    assert "mode == PreviewMode::Settled" in source
     assert "maximum_neighbor_threshold" in source
     assert "hasher.key(distribution)" in source
     assert "cell_cache_reused_after_orientation_change" in source
@@ -200,6 +209,9 @@ def test_build_info_records_the_native_only_boundary():
         "0.10.2-full-rebuild-no-dirty-region"
     )
     assert info["gpu_generation_compute"] is True
+    assert info["gpu_preview_benchmark_schema"] == (
+        "bifrost-scales/gpu-preview-benchmark/3"
+    )
     assert info["gpu_failure_policy"] == "automatic-cpu-multicore-fallback"
     assert info["interactive_candidate_batch_runtime_enabled"] is True
     assert info["interactive_conflict_reference_runtime_enabled"] is True
@@ -207,7 +219,14 @@ def test_build_info_records_the_native_only_boundary():
     assert info["interactive_distribution_candidate_multiplier"] == 4
     assert info["interactive_distribution_preserves_cpu_anchors"] is True
     assert info["interactive_distribution_mask_stage"] == "post-cell-shape-only"
-    assert info["settled_distribution_unchanged"] is True
+    assert info["settled_distribution_unchanged"] is False
+    assert info["settled_distribution_field"] == (
+        "triangle-corner-cached-barycentric"
+    )
+    assert info["settled_distribution_deterministic"] is True
+    assert info["final_distribution_field"] == (
+        "exact-per-candidate-surface-connected"
+    )
     assert info["open_boundary_density_adaptive"] is True
     assert info["native_stage_cache"] == (
         "process-shared-bounded-lru-exact-dual-hash"
