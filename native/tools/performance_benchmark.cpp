@@ -143,6 +143,7 @@ Row run_case(
     const bifrost_scales::Mesh& mesh,
     std::uint32_t count,
     std::uint32_t repeats,
+    std::uint32_t direction_relax_iterations,
     double density_multiplier,
     double cell_radius_multiplier,
     double cell_direction_anisotropy,
@@ -154,7 +155,7 @@ Row run_case(
     settings.size = 0.055;
     settings.spacing_factor = 0.82;
     settings.relax_iterations = 1U;
-    settings.direction_relax_iterations = 2U;
+    settings.direction_relax_iterations = direction_relax_iterations;
     settings.direction_relax_strength = 0.35;
     settings.cell_mode = bifrost_scales::GeometryMode::Cells;
     settings.cell_settled_resolution = cell_resolution;
@@ -358,6 +359,7 @@ int main(int argc, char** argv) {
         std::string output_path;
         std::uint32_t repeats = 3U;
         std::uint32_t mesh_divisions = 100U;
+        std::uint32_t direction_relax_iterations = 2U;
         double density_multiplier = 0.0;
         double cell_radius_multiplier = 1.65;
         double cell_direction_anisotropy = 0.0;
@@ -383,6 +385,14 @@ int main(int argc, char** argv) {
                 if (mesh_divisions == 0U) {
                     throw std::runtime_error(
                         "--mesh-divisions must be greater than zero");
+                }
+            } else if (argument == "--direction-relax-iterations" &&
+                       index + 1 < argc) {
+                direction_relax_iterations = static_cast<std::uint32_t>(
+                    std::stoul(argv[++index]));
+                if (direction_relax_iterations > 64U) {
+                    throw std::runtime_error(
+                        "--direction-relax-iterations must be in [0, 64]");
                 }
             } else if (argument == "--density-multiplier" && index + 1 < argc) {
                 density_multiplier = std::stod(argv[++index]);
@@ -457,6 +467,7 @@ int main(int argc, char** argv) {
                 mesh,
                 count,
                 repeats,
+                direction_relax_iterations,
                 density_multiplier,
                 cell_radius_multiplier,
                 cell_direction_anisotropy,

@@ -1072,30 +1072,23 @@ struct DirectionSolution {
     double cell_anisotropy_influence{0.0};
 };
 
-DirectionSolution guided_direction_solution(
+struct DirectionGuideContribution {
+    Vec3 desired{};
+    double angle_degrees{0.0};
+    double direction_weight{0.0};
+    double cell_weight{0.0};
+};
+
+void prepare_direction_guide_contributions(
     const Vec3& position,
-    const Vec3& normal,
-    const Vec3& direction_fallback,
-    const Vec3& cell_fallback,
-    bool evaluate_cell,
     std::uint32_t triangle_index,
-    const PreparedGuides& guides) {
-    const Vec3 direction_base = normalize(
-        project_on_plane(direction_fallback, normal),
-        direction_fallback);
-    const Vec3 cell_base = normalize(
-        project_on_plane(cell_fallback, normal),
-        cell_fallback);
-    Vec3 direction_accumulated = direction_base;
-    Vec3 cell_accumulated = cell_base;
-    double direction_remaining = 1.0;
-    double cell_remaining = 1.0;
+    const PreparedGuides& guides,
+    std::vector<DirectionGuideContribution>& result) {
+    result.clear();
     for (const PreparedGuide& guide : guides) {
         const Guide& source = *guide.source;
-        if (!source.enabled || !guide.uses_direction) {
-            continue;
-        }
-        if (outside_guide_bounds(guide, position, guide.radius)) {
+        if (!source.enabled || !guide.uses_direction ||
+            outside_guide_bounds(guide, position, guide.radius)) {
             continue;
         }
         const double field = guide_influence_from_distance(
@@ -1107,27 +1100,60 @@ DirectionSolution guided_direction_solution(
             0.0,
             1.0);
         const double cell_weight = clamp(
-            (evaluate_cell ? clamp(source.cell_anisotropy, 0.0, 1.0) : 0.0) *
-                field,
+            clamp(source.cell_anisotropy, 0.0, 1.0) * field,
             0.0,
             1.0);
         if (direction_weight <= 0.0 && cell_weight <= 0.0) {
             continue;
         }
         const GuideNearest nearest = nearest_on_guide(guide, position);
-        Vec3 desired = guide.curve
-            ? nearest.tangent
-            : sub(nearest.point, position);
+        if (result.empty()) {
+            result.reserve(std::min<std::size_t>(guides.size(), 8U));
+        }
+        result.push_back({
+            guide.curve ? nearest.tangent : sub(nearest.point, position),
+            source.angle_degrees,
+            direction_weight,
+            cell_weight,
+        });
+    }
+}
+
+DirectionSolution guided_direction_solution(
+    const Vec3& normal,
+    const Vec3& direction_fallback,
+    const Vec3& cell_fallback,
+    bool evaluate_cell,
+    const std::vector<DirectionGuideContribution>& contributions) {
+    const Vec3 direction_base = normalize(
+        project_on_plane(direction_fallback, normal),
+        direction_fallback);
+    const Vec3 cell_base = normalize(
+        project_on_plane(cell_fallback, normal),
+        cell_fallback);
+    Vec3 direction_accumulated = direction_base;
+    Vec3 cell_accumulated = cell_base;
+    double direction_remaining = 1.0;
+    double cell_remaining = 1.0;
+    for (const DirectionGuideContribution& contribution : contributions) {
+        const double direction_weight = contribution.direction_weight;
+        const double cell_weight =
+            evaluate_cell ? contribution.cell_weight : 0.0;
+        if (direction_weight <= 0.0 && cell_weight <= 0.0) {
+            continue;
+        }
         const Vec3 desired_fallback = direction_weight > 0.0
             ? direction_accumulated
             : cell_accumulated;
-        desired = normalize(project_on_plane(desired, normal), desired_fallback);
-        if (std::abs(source.angle_degrees) > kEpsilon) {
+        Vec3 desired = normalize(
+            project_on_plane(contribution.desired, normal),
+            desired_fallback);
+        if (std::abs(contribution.angle_degrees) > kEpsilon) {
             desired = normalize(
                 rotate_around_axis(
                     desired,
                     normal,
-                    source.angle_degrees * kPi / 180.0),
+                    contribution.angle_degrees * kPi / 180.0),
                 desired_fallback);
         }
         if (direction_weight > 0.0) {
@@ -4888,6 +4914,8 @@ std::vector<OrientedSample> orientation_field(
             "Direction Relax requires the CPU exact preview path";
     }
     std::vector<Vec3> tangents(samples.size());
+    std::vector<std::vector<DirectionGuideContribution>>
+        direction_contributions(samples.size());
     const std::uint32_t initial_workers = parallel_for_chunks(
         samples.size(),
         512U,
@@ -4902,14 +4930,17 @@ std::vector<OrientedSample> orientation_field(
                         normal,
                         settings.direction_degrees * kPi / 180.0),
                     tangent);
-                tangents[index] = guided_direction_solution(
+                prepare_direction_guide_contributions(
                     sample.position,
+                    sample.triangle_index,
+                    guides,
+                    direction_contributions[index]);
+                tangents[index] = guided_direction_solution(
                     normal,
                     tangent,
                     tangent,
                     false,
-                    sample.triangle_index,
-                    guides).tangent;
+                    direction_contributions[index]).tangent;
             }
         });
     if (used_workers != nullptr) {
@@ -4933,6 +4964,56 @@ std::vector<OrientedSample> orientation_field(
             direction_grid[cell_for(samples[index].position, radius)].push_back(index);
         }
     }
+    const auto& direction_grid_view = direction_grid;
+    auto collect_direction_neighbors = [&](
+        std::size_t index,
+        std::vector<std::uint32_t>& nearby_indices) {
+        nearby_indices.clear();
+        const GridCell origin = cell_for(samples[index].position, radius);
+        for (std::int64_t x = -1; x <= 1; ++x) {
+            for (std::int64_t y = -1; y <= 1; ++y) {
+                for (std::int64_t z = -1; z <= 1; ++z) {
+                    const auto found = direction_grid_view.find({
+                        origin.x + x,
+                        origin.y + y,
+                        origin.z + z,
+                    });
+                    if (found == direction_grid_view.end()) {
+                        continue;
+                    }
+                    nearby_indices.insert(
+                        nearby_indices.end(),
+                        found->second.begin(),
+                        found->second.end());
+                }
+            }
+        }
+        std::sort(nearby_indices.begin(), nearby_indices.end());
+    };
+
+    // Settled look-development commonly performs several identical relax
+    // iterations. Cache the position-only neighbor query after the first pass;
+    // Interactive's single iteration keeps the lower-memory direct path.
+    const bool reuse_direction_neighbors =
+        iterations > 1U && samples.size() > 1U;
+    std::vector<std::vector<std::uint32_t>> direction_neighbors(
+        reuse_direction_neighbors ? samples.size() : 0U);
+    if (reuse_direction_neighbors) {
+        const std::uint32_t neighbor_workers = parallel_for_chunks(
+            samples.size(),
+            384U,
+            [&](std::size_t begin, std::size_t end, std::uint32_t) {
+                for (std::size_t index = begin; index < end; ++index) {
+                    collect_direction_neighbors(
+                        index,
+                        direction_neighbors[index]);
+                }
+            });
+        if (used_workers != nullptr) {
+            *used_workers = std::max(*used_workers, neighbor_workers);
+        }
+    }
+
     for (std::uint32_t iteration = 0U;
          iteration < iterations && tangents.size() > 1U;
          ++iteration) {
@@ -4941,36 +5022,22 @@ std::vector<OrientedSample> orientation_field(
             samples.size(),
             384U,
             [&](std::size_t begin, std::size_t end, std::uint32_t) {
-                std::vector<std::uint32_t> nearby_indices;
-                nearby_indices.reserve(96U);
+                std::vector<std::uint32_t> nearby_scratch;
+                if (!reuse_direction_neighbors) {
+                    nearby_scratch.reserve(96U);
+                }
                 for (std::size_t index = begin; index < end; ++index) {
                     const Vec3 reference = tangents[index];
                     Vec3 accumulated = reference;
                     std::uint32_t count = 1U;
-                    nearby_indices.clear();
-                    const GridCell origin = cell_for(
-                        samples[index].position,
-                        radius);
-                    for (std::int64_t x = -1; x <= 1; ++x) {
-                        for (std::int64_t y = -1; y <= 1; ++y) {
-                            for (std::int64_t z = -1; z <= 1; ++z) {
-                                const auto found = direction_grid.find({
-                                    origin.x + x,
-                                    origin.y + y,
-                                    origin.z + z,
-                                });
-                                if (found == direction_grid.end()) {
-                                    continue;
-                                }
-                                nearby_indices.insert(
-                                    nearby_indices.end(),
-                                    found->second.begin(),
-                                    found->second.end());
-                            }
-                        }
+                    const std::vector<std::uint32_t>* nearby_indices;
+                    if (reuse_direction_neighbors) {
+                        nearby_indices = &direction_neighbors[index];
+                    } else {
+                        collect_direction_neighbors(index, nearby_scratch);
+                        nearby_indices = &nearby_scratch;
                     }
-                    std::sort(nearby_indices.begin(), nearby_indices.end());
-                    for (const std::uint32_t other_index : nearby_indices) {
+                    for (const std::uint32_t other_index : *nearby_indices) {
                         if (other_index == index ||
                             length_squared(sub(
                                 samples[index].position,
@@ -5023,13 +5090,11 @@ std::vector<OrientedSample> orientation_field(
                         settings.direction_degrees * kPi / 180.0),
                     cell_base);
                 const DirectionSolution solution = guided_direction_solution(
-                    sample.position,
                     normal,
                     tangents[index],
                     cell_base,
                     true,
-                    sample.triangle_index,
-                    guides);
+                    direction_contributions[index]);
                 const Vec3 partition_tangent = solution.cell_tangent;
                 const double random_angle =
                     (sample.random_rotation * 2.0 - 1.0) *
