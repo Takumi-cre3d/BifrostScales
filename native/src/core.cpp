@@ -5101,7 +5101,79 @@ std::vector<OrientedSample> orientation_field(
     }
     const auto direction_relax_started =
         std::chrono::steady_clock::now();
+    bool gpu_direction_relax_used = false;
+    if (reuse_direction_neighbors && iterations > 0U &&
+        !direction_neighbor_offsets.empty() &&
+        direction_neighbor_offsets.back() <=
+            std::numeric_limits<std::uint32_t>::max()) {
+        gpu::ExecutionInfo gate_info;
+        if (gpu::should_attempt_direction_relax(
+                samples.size(), gate_info)) {
+            std::vector<std::uint32_t> gpu_neighbor_offsets(
+                direction_neighbor_offsets.size());
+            std::transform(
+                direction_neighbor_offsets.begin(),
+                direction_neighbor_offsets.end(),
+                gpu_neighbor_offsets.begin(),
+                [](std::size_t value) {
+                    return static_cast<std::uint32_t>(value);
+                });
+            std::vector<gpu::Float4> gpu_normals(samples.size());
+            std::vector<gpu::Float4> gpu_tangents(samples.size());
+            const std::uint32_t transfer_workers = parallel_for_chunks(
+                samples.size(),
+                512U,
+                [&](std::size_t begin, std::size_t end, std::uint32_t) {
+                    for (std::size_t index = begin; index < end; ++index) {
+                        const Vec3 normal = normalize(samples[index].normal);
+                        gpu_normals[index] = {
+                            static_cast<float>(normal.x),
+                            static_cast<float>(normal.y),
+                            static_cast<float>(normal.z),
+                            0.0F,
+                        };
+                        gpu_tangents[index] = {
+                            static_cast<float>(tangents[index].x),
+                            static_cast<float>(tangents[index].y),
+                            static_cast<float>(tangents[index].z),
+                            0.0F,
+                        };
+                    }
+                });
+            if (used_workers != nullptr) {
+                *used_workers = std::max(*used_workers, transfer_workers);
+            }
+            gpu::ExecutionInfo execution_info;
+            gpu_direction_relax_used = gpu::try_compute_direction_relax(
+                gpu_normals,
+                gpu_neighbor_offsets,
+                direction_neighbor_indices,
+                iterations,
+                static_cast<float>(amount),
+                gpu_tangents,
+                execution_info);
+            merge_gpu_profile(
+                profile, execution_info, "direction-relax");
+            if (gpu_direction_relax_used) {
+                parallel_for_chunks(
+                    samples.size(),
+                    512U,
+                    [&](std::size_t begin, std::size_t end, std::uint32_t) {
+                        for (std::size_t index = begin; index < end; ++index) {
+                            tangents[index] = {
+                                gpu_tangents[index].x,
+                                gpu_tangents[index].y,
+                                gpu_tangents[index].z,
+                            };
+                        }
+                    });
+            }
+        } else {
+            merge_gpu_profile(profile, gate_info, "direction-relax");
+        }
+    }
     for (std::uint32_t iteration = 0U;
+         !gpu_direction_relax_used &&
          iteration < iterations && tangents.size() > 1U;
          ++iteration) {
         std::vector<Vec3> updated = tangents;

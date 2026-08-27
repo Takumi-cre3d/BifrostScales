@@ -2459,7 +2459,7 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                 )
             if getattr(report, "native_gpu_compute", False):
                 performance_text += (
-                    "\nGPU Orientation: {} samples | upload {:.2f} / kernel {:.2f} / "
+                    "\nGPU Compute: {} samples | upload {:.2f} / kernel {:.2f} / "
                     "readback {:.2f} ms | {}".format(
                         report.native_gpu_sample_count,
                         report.native_gpu_upload_ms,
@@ -2512,6 +2512,7 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                 "r{} native-profile: backend={} gpu={} workers={}/{}/{}/{} cache={}/{} evict={} "
                 "payload={:.2f} source={:.2f} distribution={:.2f} "
                 "orientation={:.2f} orientParts={:.2f}/{:.2f}/{:.2f}/{:.2f} "
+                "gpuParts={:.2f}/{:.2f}/{:.2f} "
                 "cells={:.2f} "
                 "cellParts={:.2f}/{:.2f}/{:.2f}/{:.2f} "
                 "boundaryParts={:.2f}/{:.2f} "
@@ -2535,6 +2536,9 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                     report.native_direction_neighbors_ms,
                     report.native_direction_relax_ms,
                     report.native_orientation_finalize_ms,
+                    report.native_gpu_upload_ms,
+                    report.native_gpu_kernel_ms,
+                    report.native_gpu_readback_ms,
                     report.native_cells_ms,
                     report.native_cell_setup_ms,
                     report.native_cell_neighbors_ms,

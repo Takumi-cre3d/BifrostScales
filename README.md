@@ -40,6 +40,8 @@ Bifrost Scales is a procedural scale-generation tool for Autodesk Maya 2026 and 
 ## Execution model
 
 Settled output caches the surface-connected Guide field at visited triangle corners and interpolates deterministically inside each triangle, accelerating look-development redistribution. Orientation evaluates each sample's Direction Guide field once and reuses it for initial and final direction solving; multi-iteration Settled Direction Relax stores only distance-qualified neighbors in a bounded compact CSR array. The Native Performance log exposes Orientation as prepare / neighbors / relax / finalize timings. Final keeps the previous per-candidate double-precision CPU-exact evaluation. Interactive Distribution evaluates compact, deterministic, prefix-stable surface candidates in parallel and arbitrates spatial conflicts with OpenCL. It falls back automatically to the same-priority CPU reference when GPU execution is unavailable. CPU-authored open-boundary and Guide-curve anchors, Stable Cell IDs, and post-Cell Mask filtering remain intact. Direction anisotropy changes only the pair-symmetric metric between neighboring Cells, without adding or removing centers. The global maximum uses a bounded 2.25 axis ratio, while each guide can reduce or disable its contribution independently.
+For multi-iteration Settled previews above the GPU crossover, surface-connected Guide evaluation stays CPU-exact while compact-CSR Direction Relax runs on OpenCL. Any unavailable device, dense-neighborhood fallback, or GPU failure automatically keeps the existing CPU path.
+
 
 - `bifrost-scales/interactive-candidate-batch/1`: production Interactive surface candidates
 - `bifrost-scales/interactive-conflict-reference/1`: deterministic CPU fallback
