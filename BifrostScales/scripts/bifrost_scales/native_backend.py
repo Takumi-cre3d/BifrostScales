@@ -31,7 +31,7 @@ PACK_CONFIG_NAME = "BifrostScalesPackConfig.json"
 MANIFEST_NAME = "manifest.bifrost-scales.json"
 MINIMUM_NATIVE_PACK_VERSION = (0, 10, 6)
 MINIMUM_NATIVE_PACK_VERSION_TEXT = "0.10.6"
-NATIVE_BEHAVIOR_CONTRACT = "bifrost-scales/native-core/0.10.6-cell-hot-path-1"
+NATIVE_BEHAVIOR_CONTRACT = "bifrost-scales/native-core/0.10.6-settled-field-cache-1"
 NATIVE_PROFILE_SCHEMA = "bifrost-scales/native-profile/9"
 
 NATIVE_GRAPH_PATH_ATTR = "bsNativeGraphPath"

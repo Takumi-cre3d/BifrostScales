@@ -37,4 +37,4 @@
 5. Viewport常駐Bufferと再Upload削減
 6. 対象GPUでの自動Crossover学習
 
-Stable Cell ID、Cell境界、Settled／Final／BakeはCPU exactの正本を維持します。DistributionのFieldだけを部分移植せず、Candidate生成と競合解決を一括したPreview経路として測定します。GPU対応のために簡易形状へ置換したり、最終ルックを変更したりしません。
+Stable Cell IDとCell境界は決定的CPU処理を維持し、Final／BakeはCPU exactの正本を維持します。Settled Distributionは三角形Guide Field Cacheによる決定的なルック開発経路です。DistributionのFieldだけを部分移植せず、Candidate生成と競合解決を一括したPreview経路として測定します。GPU対応のために簡易形状へ置換したり、最終ルックを変更したりしません。

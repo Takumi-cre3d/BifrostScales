@@ -43,7 +43,7 @@ Global Cell Direction Anisotropy: distribution=hit orientation=hit cell=miss
 
 `Direction Strength`を固定し、Direction Curveの`Center Alignment`を0、0.35、1へ変えて、中心へ寄る候補数だけが増えることを確認します。次に`Center Alignment`を固定して`Direction Strength`を変え、鱗の向きだけが変わることを確認します。`Cell Direction Anisotropy=0`ではCell Cache basisが`distribution`になります。全体値を0.4、1.0へ上げ、Guide別`Cell Anisotropy`を0、0.5、1へ変えて、中心配置を保ったままCell境界の方向性だけが最大2.25軸比まで明確に変化することを確認します。
 
-メッシュ表面接続距離を使うDirection Guideでは、Interactive Orientationも現在は理由付きCPU exact fallbackが正解です。停止後のSettledは常にgpu=FalseのCPU exactになります。Interactive Distribution側のGPU利用可否はnative-profileで別に確認します。
+メッシュ表面接続距離を使うDirection Guideでは、Interactive Orientationも現在は理由付きCPU exact fallbackが正解です。停止後のSettledは常にgpu=Falseの決定的CPU Field Cache経路になります。Interactive Distribution側のGPU利用可否はnative-profileで別に確認します。
 
 ## 6. 開放エッジDensity
 
@@ -57,4 +57,4 @@ Sceneを保存して再読込し、System、Guide、Group、Scale Types、Native
 
 `bifrost-scales/interactive-candidate-batch/1`、`bifrost-scales/interactive-conflict-reference/1`、`bifrost-scales/interactive-conflict-gpu/1`はMaya RuntimeのInteractive Distributionで使用されます。GPUが利用できない場合は同じ優先規則のCPU referenceへfallbackします。
 
-同じMesh／Seed／SettingsでSettledを2回評価し、vertices、faces、Stable Cell IDと見た目が一致することを確認します。Interactive編集からSettledへ戻した結果も従来のCPU exact結果と一致すれば合格です。
+同じMesh／Seed／SettingsでSettledを2回評価し、vertices、faces、Stable Cell IDと見た目が一致することを確認します。Interactive編集からSettledへ戻した結果が毎回一致すれば合格です。SettledとFinalはGuide Falloff境界で微小な差が許容されます。

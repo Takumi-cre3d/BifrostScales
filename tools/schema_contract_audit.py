@@ -13,7 +13,7 @@ EXPECTED_PRODUCT_VERSION = "0.10.6"
 EXPECTED_PAYLOAD_SCHEMA = "bifrost-scales/native-payload/10"
 EXPECTED_OPERATOR_CONTRACT = "bifrost-scales/operator-contract/18"
 EXPECTED_MINIMUM_PACK = "0.10.6"
-EXPECTED_NATIVE_BEHAVIOR_CONTRACT = "bifrost-scales/native-core/0.10.6-cell-hot-path-1"
+EXPECTED_NATIVE_BEHAVIOR_CONTRACT = "bifrost-scales/native-core/0.10.6-settled-field-cache-1"
 EXPECTED_NATIVE_PROFILE_SCHEMA = "bifrost-scales/native-profile/9"
 
 
@@ -87,6 +87,30 @@ def audit(root: Path = ROOT) -> dict[str, Any]:
             operator_data.get("performance_contract", {}).get("gpu_buffer_schema", "")
         ),
         "manifest_gpu_buffer_schema": str(manifest_data.get("gpu_buffer_schema", "")),
+        "operator_gpu_preview_benchmark_schema": str(
+            operator_data.get("performance_contract", {}).get(
+                "gpu_preview_benchmark_schema", ""
+            )
+        ),
+        "manifest_gpu_preview_benchmark_schema": str(
+            manifest_data.get("gpu_preview_benchmark_schema", "")
+        ),
+        "operator_settled_distribution_field": str(
+            operator_data.get("performance_contract", {}).get(
+                "settled_distribution_field", ""
+            )
+        ),
+        "operator_final_distribution_field": str(
+            operator_data.get("performance_contract", {}).get(
+                "final_distribution_field", ""
+            )
+        ),
+        "manifest_settled_distribution_field": str(
+            manifest_data.get("settled_distribution_field", "")
+        ),
+        "manifest_final_distribution_field": str(
+            manifest_data.get("final_distribution_field", "")
+        ),
         "operator_cell_cache_key_basis": str(
             operator_data.get("performance_contract", {}).get(
                 "cell_cache_key_basis", ""
@@ -120,10 +144,36 @@ def audit(root: Path = ROOT) -> dict[str, Any]:
         "module_native_profile_schema": values["module_native_profile_schema"] == EXPECTED_NATIVE_PROFILE_SCHEMA,
         "operator_profile_schema": values["operator_profile_schema"] == EXPECTED_NATIVE_PROFILE_SCHEMA,
         "python_native_profile_schema": values["python_native_profile_schema"] == EXPECTED_NATIVE_PROFILE_SCHEMA,
-        "operator_compute_backend": values["operator_compute_backend"] == "hybrid-opencl-gpu-interactive-cpu-exact-settled-final",
+        "operator_compute_backend": values["operator_compute_backend"] == "hybrid-opencl-gpu-interactive-cpu-deterministic-settled-cpu-exact-final",
         "operator_gpu_generation_compute": values["operator_gpu_generation_compute"] is True,
         "operator_gpu_buffer_schema": values["operator_gpu_buffer_schema"] == "bifrost-scales/compact-orientation-buffer/2",
         "manifest_gpu_buffer_schema": values["manifest_gpu_buffer_schema"] == "bifrost-scales/compact-orientation-buffer/2",
+        "operator_gpu_preview_benchmark_schema": values[
+            "operator_gpu_preview_benchmark_schema"
+        ] == "bifrost-scales/gpu-preview-benchmark/3",
+        "manifest_gpu_preview_benchmark_schema": values[
+            "manifest_gpu_preview_benchmark_schema"
+        ] == "bifrost-scales/gpu-preview-benchmark/3",
+        "operator_settled_distribution_field": values[
+            "operator_settled_distribution_field"
+        ] == "triangle-corner-cached-barycentric",
+        "operator_final_distribution_field": values[
+            "operator_final_distribution_field"
+        ] == "exact-per-candidate-surface-connected",
+        "manifest_settled_distribution_field": values[
+            "manifest_settled_distribution_field"
+        ] == "triangle-corner-cached-barycentric",
+        "manifest_final_distribution_field": values[
+            "manifest_final_distribution_field"
+        ] == "exact-per-candidate-surface-connected",
+        "core_settled_distribution_field_cache": all(
+            token in core_source_text
+            for token in (
+                "class SettledDistributionFieldCache",
+                "mode == PreviewMode::Settled",
+                "triangle_fields_",
+            )
+        ),
         "operator_cell_cache_key_basis": values["operator_cell_cache_key_basis"] == "distribution-or-guide-anisotropic",
         "manifest_cell_cache_key_basis": values["manifest_cell_cache_key_basis"] == "distribution-or-guide-anisotropic",
         "operator_process_shared_stage_cache": values["operator_stage_cache"] == "process-shared-bounded-lru-exact-dual-hash",

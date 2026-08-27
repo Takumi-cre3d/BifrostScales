@@ -34,12 +34,12 @@ Bifrost Scales is a procedural scale-generation tool for Autodesk Maya 2026 and 
 1. Open Bifrost Scales from the Maya Python API with `import bifrost_scales; bifrost_scales.show()`.
 2. Select a polygon mesh and create a Bifrost Scales system.
 3. Add and edit guides to control density, size, direction, flow, and masking. `Direction Strength` controls scale orientation, `Center Alignment` controls the fraction of curve-centered candidates, and per-guide `Cell Anisotropy` scales the global `Cell Direction Anisotropy`.
-4. Use Interactive preview while authoring and Settled preview for deterministic CPU-exact output.
+4. Use Interactive preview while authoring and Settled preview for deterministic CPU output.
 5. Save the Maya scene; systems, guides, guide groups, scale types, and native graph connections are stored in the scene.
 
 ## Execution model
 
-Settled output keeps the deterministic CPU-exact path. Interactive Distribution evaluates compact, deterministic, prefix-stable surface candidates in parallel and arbitrates spatial conflicts with OpenCL. It falls back automatically to the same-priority CPU reference when GPU execution is unavailable. CPU-authored open-boundary and Guide-curve anchors, surface-connected Guide fields, Stable Cell IDs, and post-Cell Mask filtering remain intact. Direction anisotropy changes only the pair-symmetric metric between neighboring Cells, without adding or removing centers. The global maximum uses a bounded 2.25 axis ratio, while each guide can reduce or disable its contribution independently.
+Settled output caches the surface-connected Guide field at visited triangle corners and interpolates deterministically inside each triangle, accelerating look-development redistribution. Final keeps the previous per-candidate double-precision CPU-exact evaluation. Interactive Distribution evaluates compact, deterministic, prefix-stable surface candidates in parallel and arbitrates spatial conflicts with OpenCL. It falls back automatically to the same-priority CPU reference when GPU execution is unavailable. CPU-authored open-boundary and Guide-curve anchors, Stable Cell IDs, and post-Cell Mask filtering remain intact. Direction anisotropy changes only the pair-symmetric metric between neighboring Cells, without adding or removing centers. The global maximum uses a bounded 2.25 axis ratio, while each guide can reduce or disable its contribution independently.
 
 - `bifrost-scales/interactive-candidate-batch/1`: production Interactive surface candidates
 - `bifrost-scales/interactive-conflict-reference/1`: deterministic CPU fallback

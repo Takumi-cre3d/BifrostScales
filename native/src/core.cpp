@@ -2335,6 +2335,10 @@ public:
         };
     }
 
+    [[nodiscard]] bool empty() const noexcept {
+        return items_.empty();
+    }
+
 private:
     struct Item {
         std::uint32_t guide_index{0U};
@@ -2440,6 +2444,68 @@ private:
     const PreparedGuides& guides_;
     std::vector<Item> items_;
     std::vector<Node> nodes_;
+};
+
+// Settled look-development preserves the deterministic CPU candidate stream,
+// but evaluating surface-connected Guide distances for every rejected
+// candidate can dominate a stroke. Cache the field at each visited triangle
+// corner and interpolate it across that triangle. Final mode continues to use
+// the exact per-candidate field.
+class SettledDistributionFieldCache {
+public:
+    SettledDistributionFieldCache(
+        const Mesh& mesh,
+        const DistributionGuideIndex& guide_index,
+        bool enabled)
+        : mesh_(mesh),
+          guide_index_(guide_index),
+          triangle_fields_(
+              enabled && !guide_index.empty() ? mesh.triangles.size() : 0U),
+          initialized_(
+              enabled && !guide_index.empty() ? mesh.triangles.size() : 0U,
+              0U) {}
+
+    DistributionGuideField evaluate(
+        std::uint32_t triangle_index,
+        const std::array<double, 3>& barycentric,
+        std::vector<std::uint32_t>& scratch) {
+        if (initialized_.empty() ||
+            triangle_index >= mesh_.triangles.size()) {
+            return {};
+        }
+        if (initialized_[triangle_index] == 0U) {
+            const Triangle& triangle = mesh_.triangles[triangle_index];
+            const std::array<std::uint32_t, 3> vertices{
+                triangle.a,
+                triangle.b,
+                triangle.c,
+            };
+            for (std::size_t corner = 0U; corner < vertices.size(); ++corner) {
+                triangle_fields_[triangle_index][corner] = guide_index_.evaluate(
+                    mesh_.vertices[vertices[corner]],
+                    triangle_index,
+                    scratch);
+            }
+            initialized_[triangle_index] = 1U;
+        }
+        const auto& fields = triangle_fields_[triangle_index];
+        double density = 0.0;
+        double size = 0.0;
+        for (std::size_t corner = 0U; corner < fields.size(); ++corner) {
+            density += fields[corner].density * barycentric[corner];
+            size += fields[corner].size * barycentric[corner];
+        }
+        return {
+            clamp(density, 0.02, 16.0),
+            clamp(size, 0.05, 8.0),
+        };
+    }
+
+private:
+    const Mesh& mesh_;
+    const DistributionGuideIndex& guide_index_;
+    std::vector<std::array<DistributionGuideField, 3>> triangle_fields_;
+    std::vector<std::uint8_t> initialized_;
 };
 
 enum class BoundaryFeatureKind : std::uint8_t {
@@ -4103,6 +4169,10 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
     const double cell_size = initial_spacing;
     const double maximum_density = maximum_density_factor(guides);
     const DistributionGuideIndex distribution_guide_index(guides);
+    SettledDistributionFieldCache settled_distribution_fields(
+        mesh,
+        distribution_guide_index,
+        mode == PreviewMode::Settled);
     std::vector<std::uint32_t> distribution_guide_scratch;
     distribution_guide_scratch.reserve(guides.size());
 
@@ -4481,11 +4551,15 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                 add(mul(mesh.vertices[triangle.a], barycentric[0]),
                     mul(mesh.vertices[triangle.b], barycentric[1])),
                 mul(mesh.vertices[triangle.c], barycentric[2]));
-            const DistributionGuideField field =
-                distribution_guide_index.evaluate(
-                    position,
-                    triangle_index,
-                    distribution_guide_scratch);
+            const DistributionGuideField field = mode == PreviewMode::Settled
+                ? settled_distribution_fields.evaluate(
+                      triangle_index,
+                      barycentric,
+                      distribution_guide_scratch)
+                : distribution_guide_index.evaluate(
+                      position,
+                      triangle_index,
+                      distribution_guide_scratch);
             const double density_multiplier = field.density;
             const double size_multiplier = field.size;
             const double acceptance = clamp(

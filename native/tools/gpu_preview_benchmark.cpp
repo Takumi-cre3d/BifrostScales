@@ -158,7 +158,7 @@ int main(int argc, char** argv) {
     bifrost_scales::clear_native_stage_cache();
     const auto settled_force = bifrost_scales::generate(
         mesh, settings, bifrost_scales::PreviewMode::Settled, guides);
-    const bool settled_exact =
+    const bool settled_deterministic =
         settled_cpu.mesh.vertices == settled_force.mesh.vertices &&
         settled_cpu.mesh.faces == settled_force.mesh.faces &&
         settled_cpu.mesh.cell_ids == settled_force.mesh.cell_ids;
@@ -171,7 +171,7 @@ int main(int argc, char** argv) {
     const double gpu_total_median = median(gpu_total_times);
     std::cout.imbue(std::locale::classic());
     std::cout << std::fixed << std::setprecision(6)
-              << "{\"schema\":\"bifrost-scales/gpu-preview-benchmark/2\""
+              << "{\"schema\":\"bifrost-scales/gpu-preview-benchmark/3\""
               << ",\"requested\":" << requested
               << ",\"accepted\":" << gpu.result.report.accepted_count
               << ",\"gpu_requested\":"
@@ -191,11 +191,11 @@ int main(int argc, char** argv) {
               << ",\"gpu_upload_ms\":" << gpu.result.profile.gpu_upload_ms
               << ",\"gpu_kernel_ms\":" << gpu.result.profile.gpu_kernel_ms
               << ",\"gpu_readback_ms\":" << gpu.result.profile.gpu_readback_ms
-              << ",\"settled_cpu_exact\":"
-              << (settled_exact ? "true" : "false")
+              << ",\"settled_cpu_deterministic\":"
+              << (settled_deterministic ? "true" : "false")
               << ",\"device\":\"" << gpu.result.profile.gpu_device << "\""
               << ",\"fallback_reason\":\""
               << gpu.result.profile.gpu_fallback_reason << "\"}\n";
     set_environment("BIFROST_SCALES_GPU", "auto");
-    return settled_exact ? 0 : 1;
+    return settled_deterministic ? 0 : 1;
 }

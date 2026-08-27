@@ -47,9 +47,10 @@ bifrost_scales::Mesh make_grid(std::uint32_t divisions, double extent) {
     return mesh;
 }
 
-std::vector<bifrost_scales::Guide> make_guides() {
+std::vector<bifrost_scales::Guide> make_guides(std::uint32_t guide_count) {
     std::vector<bifrost_scales::Guide> guides;
-    for (std::uint32_t index = 0U; index < 16U; ++index) {
+    guides.reserve(guide_count);
+    for (std::uint32_t index = 0U; index < guide_count; ++index) {
         const double offset = -7.5 + static_cast<double>(index);
         bifrost_scales::Guide guide;
         guide.id = "distribution-guide-" + std::to_string(index);
@@ -90,10 +91,19 @@ int main(int argc, char** argv) {
     const std::uint32_t repeats = argc > 2
         ? static_cast<std::uint32_t>(std::max(1, std::atoi(argv[2])))
         : 5U;
+    const std::string mode_name = argc > 3 ? std::string(argv[3]) : "interactive";
+    const bifrost_scales::PreviewMode preview_mode = mode_name == "settled"
+        ? bifrost_scales::PreviewMode::Settled
+        : (mode_name == "final"
+            ? bifrost_scales::PreviewMode::Final
+            : bifrost_scales::PreviewMode::Interactive);
+    const std::uint32_t guide_count = argc > 4
+        ? static_cast<std::uint32_t>(std::max(1, std::atoi(argv[4])))
+        : 16U;
     set_environment("BIFROST_SCALES_CPU_THREADS", "8");
     set_environment("BIFROST_SCALES_GPU", "off");
     const bifrost_scales::Mesh mesh = make_grid(80U, 20.0);
-    const std::vector<bifrost_scales::Guide> guides = make_guides();
+    const std::vector<bifrost_scales::Guide> guides = make_guides(guide_count);
     bifrost_scales::Settings settings;
     settings.target_count = requested;
     settings.interactive_budget = requested;
@@ -106,21 +116,27 @@ int main(int argc, char** argv) {
     std::vector<double> distribution_times;
     std::vector<double> total_times;
     std::uint32_t accepted = 0U;
+    std::uint64_t attempts = 0U;
+    double final_spacing = 0.0;
     for (std::uint32_t repeat = 0U; repeat < repeats; ++repeat) {
         bifrost_scales::clear_native_stage_cache();
         const auto result = bifrost_scales::generate(
             mesh,
             settings,
-            bifrost_scales::PreviewMode::Interactive,
+            preview_mode,
             guides);
         accepted = result.report.accepted_count;
+        attempts = result.report.attempts;
+        final_spacing = result.report.final_spacing;
         distribution_times.push_back(result.profile.distribution_ms);
         total_times.push_back(result.profile.total_ms);
     }
     std::cout.imbue(std::locale::classic());
     std::cout << std::fixed << std::setprecision(3)
-              << "requested_count,accepted_count,guide_count,distribution_ms,total_ms\n"
+              << "mode,requested_count,accepted_count,guide_count,attempts,final_spacing,distribution_ms,total_ms\n"
+              << mode_name << ','
               << requested << ',' << accepted << ',' << guides.size() << ','
+              << attempts << ',' << final_spacing << ','
               << median(distribution_times) << ',' << median(total_times) << '\n';
     return 0;
 }
