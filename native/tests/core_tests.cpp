@@ -1769,6 +1769,7 @@ int main() {
     cache_settings.target_count = 37U;
     cache_settings.settled_budget = 37U;
     cache_settings.seed = 987654U;
+    cache_settings.direction_relax_iterations = 2U;
     const GenerationResult cache_first = bifrost_scales::generate(
         mesh,
         cache_settings,
@@ -1825,6 +1826,7 @@ int main() {
         PreviewMode::Settled);
     CHECK(cache_direction.profile.distribution_cache_hit);
     CHECK(!cache_direction.profile.orientation_cache_hit);
+    CHECK(cache_direction.profile.direction_neighbors_cache_hit);
     CHECK(cache_direction.profile.cell_cache_hit);
     CHECK(cache_direction.profile.cell_cache_reused_after_orientation_change);
     bifrost_scales::clear_native_stage_cache();
@@ -1832,6 +1834,7 @@ int main() {
         mesh,
         cache_settings,
         PreviewMode::Settled);
+    CHECK(!cache_direction_cold.profile.direction_neighbors_cache_hit);
     CHECK(cache_direction.mesh.vertices == cache_direction_cold.mesh.vertices);
     CHECK(cache_direction.mesh.faces == cache_direction_cold.mesh.faces);
     CHECK(cache_direction.mesh.cell_ids == cache_direction_cold.mesh.cell_ids);

@@ -19,6 +19,7 @@
   "settled_distribution_field": "triangle-corner-cached-barycentric",
   "orientation_guide_field": "once-per-sample-reused-initial-final",
   "direction_relax_neighbor_query": "distance-qualified-compact-csr-settled-multi-iteration",
+  "direction_relax_neighbor_cache": "distribution-keyed-process-shared-bounded",
   "direction_relax_compute_backend": "opencl-gpu-with-cpu-exact-guide-evaluation-and-fallback",
   "direction_relax_gpu_runtime_enabled": true,
   "direction_relax_gpu_transfer_conversion": "serial-compact-8k-15k-optimized",

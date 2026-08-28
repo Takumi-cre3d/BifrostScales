@@ -2510,7 +2510,7 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         if getattr(report, "native_profile_available", False):
             self._append(
                 "r{} native-profile: backend={} gpu={} workers={}/{}/{}/{} cache={}/{} evict={} "
-                "payload={:.2f} source={:.2f} distribution={:.2f} "
+                "neighborCache={} payload={:.2f} source={:.2f} distribution={:.2f} "
                 "orientation={:.2f} orientParts={:.2f}/{:.2f}/{:.2f}/{:.2f} "
                 "gpuParts={:.2f}/{:.2f}/{:.2f} "
                 "relaxParts={:.2f}/{:.2f}/{:.2f} "
@@ -2529,6 +2529,11 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                     report.native_stage_cache_scope or "-",
                     report.native_stage_cache_capacity,
                     report.native_stage_cache_evictions,
+                    (
+                        "hit"
+                        if report.native_direction_neighbors_cache_hit
+                        else "miss"
+                    ),
                     report.native_payload_decode_ms,
                     report.native_source_decode_ms,
                     report.native_distribution_ms,

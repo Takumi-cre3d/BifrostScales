@@ -285,6 +285,7 @@ struct GenerationProfile {
     double total_ms{0.0};
     bool distribution_cache_hit{false};
     bool orientation_cache_hit{false};
+    bool direction_neighbors_cache_hit{false};
     bool cell_cache_hit{false};
     bool cell_cache_reused_after_orientation_change{false};
     std::string cell_cache_basis{"distribution"};
