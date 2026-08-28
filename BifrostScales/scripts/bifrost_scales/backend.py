@@ -63,6 +63,7 @@ class BackendApplyReport:
     native_orientation_ms: float = 0.0
     native_orientation_prepare_ms: float = 0.0
     native_direction_neighbors_ms: float = 0.0
+    native_direction_neighbors_cache_hit: bool = False
     native_direction_relax_ms: float = 0.0
     native_direction_relax_pack_ms: float = 0.0
     native_direction_relax_gpu_call_ms: float = 0.0
@@ -734,6 +735,9 @@ class NativeMayaBackend:
             ),
             native_direction_neighbors_ms=profile_ms(
                 "direction_neighbors_ms"
+            ),
+            native_direction_neighbors_cache_hit=bool(
+                profile.get("direction_neighbors_cache_hit", False)
             ),
             native_direction_relax_ms=profile_ms("direction_relax_ms"),
             native_direction_relax_pack_ms=profile_ms(

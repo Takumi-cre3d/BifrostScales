@@ -361,6 +361,8 @@ std::string make_profile_json(
         << (generation.distribution_cache_hit ? "true" : "false")
         << ",\"orientation_cache_hit\":"
         << (generation.orientation_cache_hit ? "true" : "false")
+        << ",\"direction_neighbors_cache_hit\":"
+        << (generation.direction_neighbors_cache_hit ? "true" : "false")
         << ",\"cell_cache_hit\":"
         << (generation.cell_cache_hit ? "true" : "false")
         << ",\"cell_cache_basis\":";

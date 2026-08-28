@@ -62,6 +62,7 @@ class FakeNativeCmds:
                         "orientation_ms": 2.0,
                         "orientation_prepare_ms": 0.4,
                         "direction_neighbors_ms": 0.3,
+                        "direction_neighbors_cache_hit": True,
                         "direction_relax_ms": 0.8,
                         "direction_relax_pack_ms": 0.1,
                         "direction_relax_gpu_call_ms": 0.6,
@@ -831,6 +832,7 @@ def test_native_graph_is_imported_and_world_mesh_connected_once_then_updates_pay
     assert first.profile["orientation_ms"] == 2.0
     assert first.profile["orientation_prepare_ms"] == 0.4
     assert first.profile["direction_neighbors_ms"] == 0.3
+    assert first.profile["direction_neighbors_cache_hit"] is True
     assert first.profile["direction_relax_ms"] == 0.8
     assert first.profile["direction_relax_pack_ms"] == 0.1
     assert first.profile["direction_relax_gpu_call_ms"] == 0.6

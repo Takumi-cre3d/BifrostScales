@@ -138,11 +138,15 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "class SettledDistributionFieldCache" in source
     assert "struct DirectionGuideContribution" in source
     assert "reuse_direction_neighbors" in source
-    assert "direction_neighbor_offsets" in source
+    assert "struct DirectionNeighborGraph" in source
+    assert "find_direction_neighbors" in source
     assert "maximum_average_cached_neighbors" in source
     assert "orientation_prepare_ms" in header
     assert "direction_neighbors_ms" in operator
+    assert "direction_neighbors_cache_hit" in operator
     assert "native_direction_neighbors_ms" in backend
+    assert "native_direction_neighbors_cache_hit" in backend
+    assert "neighborCache=" in ui
     assert "orientParts=" in ui
     assert "gpuParts=" in ui
     assert "relaxParts=" in ui
@@ -246,6 +250,9 @@ def test_build_info_records_the_native_only_boundary():
     )
     assert info["direction_relax_neighbor_query"] == (
         "distance-qualified-compact-csr-settled-multi-iteration"
+    )
+    assert info["direction_relax_neighbor_cache"] == (
+        "distribution-keyed-process-shared-bounded"
     )
     assert info["orientation_profile_breakdown"] == (
         "prepare-neighbors-relax-finalize"

@@ -4862,12 +4862,141 @@ std::optional<std::vector<OrientedSample>> try_gpu_orientation_field(
     return result;
 }
 
+struct DirectionNeighborGraph {
+    std::vector<std::size_t> offsets;
+    std::vector<std::uint32_t> indices;
+};
+
+DirectionNeighborGraph build_direction_neighbor_graph(
+    const std::vector<Sample>& samples,
+    double radius,
+    std::uint32_t* used_workers = nullptr) {
+    DirectionNeighborGraph result;
+    if (samples.size() <= 1U) {
+        return result;
+    }
+
+    const double radius_squared = radius * radius;
+    std::unordered_map<GridCell, std::vector<std::uint32_t>, GridCellHash>
+        direction_grid;
+    direction_grid.reserve(samples.size() * 2U);
+    for (std::uint32_t index = 0U; index < samples.size(); ++index) {
+        direction_grid[cell_for(samples[index].position, radius)].push_back(index);
+    }
+    const auto& direction_grid_view = direction_grid;
+    auto visit_direction_candidates = [
+        &samples,
+        radius,
+        &direction_grid_view](std::size_t index, const auto& visitor) {
+        const GridCell origin = cell_for(samples[index].position, radius);
+        for (std::int64_t x = -1; x <= 1; ++x) {
+            for (std::int64_t y = -1; y <= 1; ++y) {
+                for (std::int64_t z = -1; z <= 1; ++z) {
+                    const auto found = direction_grid_view.find({
+                        origin.x + x,
+                        origin.y + y,
+                        origin.z + z,
+                    });
+                    if (found == direction_grid_view.end()) {
+                        continue;
+                    }
+                    for (const std::uint32_t other_index : found->second) {
+                        visitor(other_index);
+                    }
+                }
+            }
+        }
+    };
+    auto is_direction_neighbor = [
+        &samples,
+        radius_squared](std::size_t index, std::uint32_t other_index) {
+        return other_index != index &&
+            !(length_squared(sub(
+                  samples[index].position,
+                  samples[other_index].position)) > radius_squared);
+    };
+
+    std::vector<std::uint32_t> neighbor_counts(samples.size(), 0U);
+    const std::uint32_t count_workers = parallel_for_chunks(
+        samples.size(),
+        384U,
+        [&](std::size_t begin, std::size_t end, std::uint32_t) {
+            for (std::size_t index = begin; index < end; ++index) {
+                std::uint32_t count = 0U;
+                visit_direction_candidates(
+                    index,
+                    [&](std::uint32_t other_index) {
+                        if (is_direction_neighbor(index, other_index)) {
+                            ++count;
+                        }
+                    });
+                neighbor_counts[index] = count;
+            }
+        });
+    if (used_workers != nullptr) {
+        *used_workers = std::max(*used_workers, count_workers);
+    }
+
+    result.offsets.resize(samples.size() + 1U, 0U);
+    constexpr std::size_t maximum_average_cached_neighbors = 128U;
+    const std::size_t maximum_cached_links =
+        samples.size() <=
+                std::numeric_limits<std::size_t>::max() /
+                    maximum_average_cached_neighbors
+            ? samples.size() * maximum_average_cached_neighbors
+            : std::numeric_limits<std::size_t>::max();
+    for (std::size_t index = 0U; index < samples.size(); ++index) {
+        const std::size_t next = result.offsets[index] + neighbor_counts[index];
+        if (next > maximum_cached_links) {
+            result.offsets.clear();
+            return result;
+        }
+        result.offsets[index + 1U] = next;
+    }
+
+    result.indices.resize(result.offsets.back());
+    const std::uint32_t fill_workers = parallel_for_chunks(
+        samples.size(),
+        384U,
+        [&](std::size_t begin, std::size_t end, std::uint32_t) {
+            std::vector<std::uint32_t> nearby_indices;
+            nearby_indices.reserve(96U);
+            for (std::size_t index = begin; index < end; ++index) {
+                nearby_indices.clear();
+                visit_direction_candidates(
+                    index,
+                    [&](std::uint32_t other_index) {
+                        nearby_indices.push_back(other_index);
+                    });
+                std::sort(nearby_indices.begin(), nearby_indices.end());
+                std::size_t write = result.offsets[index];
+                for (const std::uint32_t other_index : nearby_indices) {
+                    if (is_direction_neighbor(index, other_index)) {
+                        result.indices[write++] = other_index;
+                    }
+                }
+            }
+        });
+    if (used_workers != nullptr) {
+        *used_workers = std::max(*used_workers, fill_workers);
+    }
+    return result;
+}
+
+bool valid_direction_neighbor_graph(
+    const DirectionNeighborGraph& graph,
+    std::size_t sample_count) {
+    return graph.offsets.size() == sample_count + 1U &&
+        graph.offsets.back() == graph.indices.size();
+}
+
 std::vector<OrientedSample> orientation_field(
     const std::vector<Sample>& samples,
     const Settings& settings,
     PreviewMode mode,
     const PreparedGuides& guides,
     double spacing,
+    const DirectionNeighborGraph* cached_direction_neighbors = nullptr,
     std::uint32_t* used_workers = nullptr,
     GenerationProfile* profile = nullptr) {
     if (used_workers != nullptr) {
@@ -4966,9 +5095,30 @@ std::vector<OrientedSample> orientation_field(
     // Sample positions do not change during direction relaxation. Build the
     // spatial index once and preserve the original ascending sample-index
     // accumulation order for deterministic output across worker counts.
+    // Multi-iteration Settled Direction Relax uses a distribution-owned CSR
+    // graph. Direction-only edits can therefore reuse the exact same ordered
+    // neighbors without changing the relaxation result.
+    DirectionNeighborGraph local_direction_neighbors;
+    const DirectionNeighborGraph* direction_neighbors =
+        cached_direction_neighbors;
+    bool reuse_direction_neighbors =
+        direction_neighbors != nullptr &&
+        valid_direction_neighbor_graph(*direction_neighbors, samples.size());
+    if (!reuse_direction_neighbors && iterations > 1U && samples.size() > 1U) {
+        local_direction_neighbors = build_direction_neighbor_graph(
+            samples, radius, used_workers);
+        reuse_direction_neighbors = valid_direction_neighbor_graph(
+            local_direction_neighbors, samples.size());
+        if (reuse_direction_neighbors) {
+            direction_neighbors = &local_direction_neighbors;
+        }
+    }
+
+    // Interactive's single iteration and the bounded-density fallback keep the
+    // lower-memory direct query path.
     std::unordered_map<GridCell, std::vector<std::uint32_t>, GridCellHash>
         direction_grid;
-    if (iterations > 0U && samples.size() > 1U) {
+    if (!reuse_direction_neighbors && iterations > 0U && samples.size() > 1U) {
         direction_grid.reserve(samples.size() * 2U);
         for (std::uint32_t index = 0U; index < samples.size(); ++index) {
             direction_grid[cell_for(samples[index].position, radius)].push_back(index);
@@ -5017,83 +5167,7 @@ std::vector<OrientedSample> orientation_field(
                   samples[other_index].position)) > radius_squared);
     };
 
-    // Settled look-development commonly performs several identical relax
-    // iterations. Store only distance-qualified neighbors in a compact CSR
-    // array, avoiding one allocation per sample and repeated distance tests.
-    // Interactive's single iteration keeps the lower-memory direct path.
-    bool reuse_direction_neighbors =
-        iterations > 1U && samples.size() > 1U;
-    std::vector<std::size_t> direction_neighbor_offsets;
-    std::vector<std::uint32_t> direction_neighbor_indices;
-    if (reuse_direction_neighbors) {
-        std::vector<std::uint32_t> neighbor_counts(samples.size(), 0U);
-        const std::uint32_t count_workers = parallel_for_chunks(
-            samples.size(),
-            384U,
-            [&](std::size_t begin, std::size_t end, std::uint32_t) {
-                for (std::size_t index = begin; index < end; ++index) {
-                    std::uint32_t count = 0U;
-                    visit_direction_candidates(
-                        index,
-                        [&](std::uint32_t other_index) {
-                            if (is_direction_neighbor(index, other_index)) {
-                                ++count;
-                            }
-                        });
-                    neighbor_counts[index] = count;
-                }
-            });
-        if (used_workers != nullptr) {
-            *used_workers = std::max(*used_workers, count_workers);
-        }
-
-        direction_neighbor_offsets.resize(samples.size() + 1U, 0U);
-        constexpr std::size_t maximum_average_cached_neighbors = 128U;
-        const std::size_t maximum_cached_links =
-            samples.size() <=
-                    std::numeric_limits<std::size_t>::max() /
-                        maximum_average_cached_neighbors
-                ? samples.size() * maximum_average_cached_neighbors
-                : std::numeric_limits<std::size_t>::max();
-        for (std::size_t index = 0U; index < samples.size(); ++index) {
-            const std::size_t next =
-                direction_neighbor_offsets[index] + neighbor_counts[index];
-            if (next > maximum_cached_links) {
-                reuse_direction_neighbors = false;
-                break;
-            }
-            direction_neighbor_offsets[index + 1U] = next;
-        }
-
-        if (reuse_direction_neighbors) {
-            direction_neighbor_indices.resize(
-                direction_neighbor_offsets.back());
-            const std::uint32_t fill_workers = parallel_for_chunks(
-                samples.size(),
-                384U,
-                [&](std::size_t begin, std::size_t end, std::uint32_t) {
-                    std::vector<std::uint32_t> nearby_indices;
-                    nearby_indices.reserve(96U);
-                    for (std::size_t index = begin; index < end; ++index) {
-                        collect_direction_neighbors(index, nearby_indices);
-                        std::size_t write = direction_neighbor_offsets[index];
-                        for (const std::uint32_t other_index : nearby_indices) {
-                            if (is_direction_neighbor(index, other_index)) {
-                                direction_neighbor_indices[write++] =
-                                    other_index;
-                            }
-                        }
-                    }
-                });
-            if (used_workers != nullptr) {
-                *used_workers = std::max(*used_workers, fill_workers);
-            }
-        } else {
-            direction_neighbor_offsets.clear();
-        }
-    }
-
-    if (profile != nullptr) {
+    if (profile != nullptr && cached_direction_neighbors == nullptr) {
         profile->direction_neighbors_ms =
             std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() -
@@ -5103,8 +5177,9 @@ std::vector<OrientedSample> orientation_field(
         std::chrono::steady_clock::now();
     bool gpu_direction_relax_used = false;
     if (reuse_direction_neighbors && iterations > 0U &&
-        !direction_neighbor_offsets.empty() &&
-        direction_neighbor_offsets.back() <=
+        direction_neighbors != nullptr &&
+        !direction_neighbors->offsets.empty() &&
+        direction_neighbors->offsets.back() <=
             std::numeric_limits<std::uint32_t>::max()) {
         gpu::ExecutionInfo gate_info;
         if (gpu::should_attempt_direction_relax(
@@ -5112,10 +5187,10 @@ std::vector<OrientedSample> orientation_field(
             const auto direction_relax_pack_started =
                 std::chrono::steady_clock::now();
             std::vector<std::uint32_t> gpu_neighbor_offsets(
-                direction_neighbor_offsets.size());
+                direction_neighbors->offsets.size());
             std::transform(
-                direction_neighbor_offsets.begin(),
-                direction_neighbor_offsets.end(),
+                direction_neighbors->offsets.begin(),
+                direction_neighbors->offsets.end(),
                 gpu_neighbor_offsets.begin(),
                 [](std::size_t value) {
                     return static_cast<std::uint32_t>(value);
@@ -5152,7 +5227,7 @@ std::vector<OrientedSample> orientation_field(
             gpu_direction_relax_used = gpu::try_compute_direction_relax(
                 gpu_normals,
                 gpu_neighbor_offsets,
-                direction_neighbor_indices,
+                direction_neighbors->indices,
                 iterations,
                 static_cast<float>(amount),
                 gpu_tangents,
@@ -5221,11 +5296,11 @@ std::vector<OrientedSample> orientation_field(
                         };
                     if (reuse_direction_neighbors) {
                         for (std::size_t offset =
-                                 direction_neighbor_offsets[index];
-                             offset < direction_neighbor_offsets[index + 1U];
+                                 direction_neighbors->offsets[index];
+                             offset < direction_neighbors->offsets[index + 1U];
                              ++offset) {
                             accumulate_direction_neighbor(
-                                direction_neighbor_indices[offset]);
+                                direction_neighbors->indices[offset]);
                         }
                     } else {
                         collect_direction_neighbors(index, nearby_scratch);
@@ -6434,6 +6509,7 @@ OrientationResult orient_samples_impl(
     PreviewMode mode,
     const PreparedGuides& guides,
     GenerationReport report,
+    const DirectionNeighborGraph* cached_direction_neighbors = nullptr,
     std::uint32_t* used_workers = nullptr,
     GenerationProfile* profile = nullptr) {
     double spacing = report.final_spacing;
@@ -6451,6 +6527,7 @@ OrientationResult orient_samples_impl(
         mode,
         guides,
         spacing,
+        cached_direction_neighbors,
         used_workers,
         profile);
     report.direction_guide_count = guide_count(guides, false);
@@ -6730,6 +6807,12 @@ public:
         return find_locked(orientations_, key);
     }
 
+    std::shared_ptr<const DirectionNeighborGraph> find_direction_neighbors(
+        const CacheKey& key) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return find_locked(direction_neighbors_, key);
+    }
+
     std::shared_ptr<const CellResult> find_cells(const CacheKey& key) {
         std::lock_guard<std::mutex> lock(mutex_);
         return find_locked(cells_, key);
@@ -6749,6 +6832,13 @@ public:
         return insert_locked(orientations_, key, std::move(value));
     }
 
+    bool insert_direction_neighbors(
+        const CacheKey& key,
+        std::shared_ptr<const DirectionNeighborGraph> value) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return insert_locked(direction_neighbors_, key, std::move(value));
+    }
+
     bool insert_cells(
         const CacheKey& key,
         std::shared_ptr<const CellResult> value) {
@@ -6760,6 +6850,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         distributions_.clear();
         orientations_.clear();
+        direction_neighbors_.clear();
         cells_.clear();
         access_clock_ = 0U;
     }
@@ -6823,6 +6914,7 @@ private:
     std::uint64_t access_clock_{0U};
     std::vector<SharedStageEntry<DistributionResult>> distributions_;
     std::vector<SharedStageEntry<OrientationResult>> orientations_;
+    std::vector<SharedStageEntry<DirectionNeighborGraph>> direction_neighbors_;
     std::vector<SharedStageEntry<CellResult>> cells_;
 };
 
@@ -6905,6 +6997,42 @@ GenerationResult generate(
         GenerationReport distribution_report = distribution->report;
         distribution_report.active_scale_type_count =
             active_scale_type_count(settings);
+        std::shared_ptr<const DirectionNeighborGraph> direction_neighbors;
+        if (effective_direction_relax_iterations(settings, mode) > 1U &&
+            distribution->samples.size() > 1U) {
+            const auto neighbors_started = Clock::now();
+            direction_neighbors = cache.find_direction_neighbors(
+                distribution_key);
+            if (direction_neighbors) {
+                profile.direction_neighbors_cache_hit = true;
+            } else {
+                double spacing = distribution_report.final_spacing;
+                if (!(spacing > 0.0)) {
+                    spacing = distribution_report.initial_spacing;
+                }
+                if (!(spacing > 0.0)) {
+                    for (const Sample& sample : distribution->samples) {
+                        spacing = std::max(spacing, sample.local_spacing);
+                    }
+                }
+                auto built = std::make_shared<const DirectionNeighborGraph>(
+                    build_direction_neighbor_graph(
+                        distribution->samples,
+                        std::max(1.0e-8, spacing * 2.4),
+                        &profile.orientation_worker_threads));
+                if (valid_direction_neighbor_graph(
+                        *built, distribution->samples.size())) {
+                    direction_neighbors = std::move(built);
+                    profile.stage_cache_evictions +=
+                        cache.insert_direction_neighbors(
+                            distribution_key,
+                            direction_neighbors) ? 1U : 0U;
+                }
+            }
+            profile.direction_neighbors_ms =
+                std::chrono::duration<double, std::milli>(
+                    Clock::now() - neighbors_started).count();
+        }
         orientation = std::make_shared<const OrientationResult>(
             orient_samples_impl(
                 distribution->samples,
@@ -6912,6 +7040,7 @@ GenerationResult generate(
                 mode,
                 prepared_guides,
                 std::move(distribution_report),
+                direction_neighbors.get(),
                 &profile.orientation_worker_threads,
                 &profile));
         profile.stage_cache_evictions += cache.insert_orientation(
