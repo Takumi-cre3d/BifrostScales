@@ -2513,6 +2513,7 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                 "payload={:.2f} source={:.2f} distribution={:.2f} "
                 "orientation={:.2f} orientParts={:.2f}/{:.2f}/{:.2f}/{:.2f} "
                 "gpuParts={:.2f}/{:.2f}/{:.2f} "
+                "relaxParts={:.2f}/{:.2f}/{:.2f} "
                 "cells={:.2f} "
                 "cellParts={:.2f}/{:.2f}/{:.2f}/{:.2f} "
                 "boundaryParts={:.2f}/{:.2f} "
@@ -2539,6 +2540,9 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                     report.native_gpu_upload_ms,
                     report.native_gpu_kernel_ms,
                     report.native_gpu_readback_ms,
+                    report.native_direction_relax_pack_ms,
+                    report.native_direction_relax_gpu_call_ms,
+                    report.native_direction_relax_unpack_ms,
                     report.native_cells_ms,
                     report.native_cell_setup_ms,
                     report.native_cell_neighbors_ms,
