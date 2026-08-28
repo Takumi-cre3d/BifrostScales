@@ -270,6 +270,9 @@ struct GenerationProfile {
     double orientation_prepare_ms{0.0};
     double direction_neighbors_ms{0.0};
     double direction_relax_ms{0.0};
+    double direction_relax_pack_ms{0.0};
+    double direction_relax_gpu_call_ms{0.0};
+    double direction_relax_unpack_ms{0.0};
     double orientation_finalize_ms{0.0};
     double cells_ms{0.0};
     double cell_setup_ms{0.0};

@@ -1,7 +1,7 @@
 {
   "product": "Bifrost Scales",
   "version": "0.10.6",
-  "source_development_state": "post-0.10.6-gpu-direction-relax",
+  "source_development_state": "post-0.10.6-gpu-direction-relax-host-transfer",
   "interactive_candidate_batch_schema": "bifrost-scales/interactive-candidate-batch/1",
   "interactive_candidate_batch_runtime_enabled": true,
   "interactive_conflict_reference_schema": "bifrost-scales/interactive-conflict-reference/1",
@@ -21,6 +21,8 @@
   "direction_relax_neighbor_query": "distance-qualified-compact-csr-settled-multi-iteration",
   "direction_relax_compute_backend": "opencl-gpu-with-cpu-exact-guide-evaluation-and-fallback",
   "direction_relax_gpu_runtime_enabled": true,
+  "direction_relax_gpu_transfer_conversion": "serial-compact-8k-15k-optimized",
+  "direction_relax_profile_breakdown": "pack-gpu-call-unpack",
   "orientation_profile_breakdown": "prepare-neighbors-relax-finalize",
   "settled_distribution_deterministic": true,
   "final_distribution_field": "exact-per-candidate-surface-connected",

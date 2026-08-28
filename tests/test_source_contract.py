@@ -145,6 +145,11 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "native_direction_neighbors_ms" in backend
     assert "orientParts=" in ui
     assert "gpuParts=" in ui
+    assert "relaxParts=" in ui
+    assert "direction_relax_pack_ms" in header
+    assert "direction_relax_gpu_call_ms" in operator
+    assert "native_direction_relax_unpack_ms" in backend
+    assert "intentionally serial" in source
     assert "try_compute_direction_relax" in source
     assert "__kernel void direction_relax" in gpu
     assert "mode == PreviewMode::Settled" in source
@@ -247,6 +252,12 @@ def test_build_info_records_the_native_only_boundary():
     )
     assert info["direction_relax_compute_backend"] == (
         "opencl-gpu-with-cpu-exact-guide-evaluation-and-fallback"
+    )
+    assert info["direction_relax_gpu_transfer_conversion"] == (
+        "serial-compact-8k-15k-optimized"
+    )
+    assert info["direction_relax_profile_breakdown"] == (
+        "pack-gpu-call-unpack"
     )
     assert info["direction_relax_gpu_runtime_enabled"] is True
     assert info["settled_distribution_deterministic"] is True

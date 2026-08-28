@@ -5109,6 +5109,8 @@ std::vector<OrientedSample> orientation_field(
         gpu::ExecutionInfo gate_info;
         if (gpu::should_attempt_direction_relax(
                 samples.size(), gate_info)) {
+            const auto direction_relax_pack_started =
+                std::chrono::steady_clock::now();
             std::vector<std::uint32_t> gpu_neighbor_offsets(
                 direction_neighbor_offsets.size());
             std::transform(
@@ -5120,30 +5122,33 @@ std::vector<OrientedSample> orientation_field(
                 });
             std::vector<gpu::Float4> gpu_normals(samples.size());
             std::vector<gpu::Float4> gpu_tangents(samples.size());
-            const std::uint32_t transfer_workers = parallel_for_chunks(
-                samples.size(),
-                512U,
-                [&](std::size_t begin, std::size_t end, std::uint32_t) {
-                    for (std::size_t index = begin; index < end; ++index) {
-                        const Vec3 normal = normalize(samples[index].normal);
-                        gpu_normals[index] = {
-                            static_cast<float>(normal.x),
-                            static_cast<float>(normal.y),
-                            static_cast<float>(normal.z),
-                            0.0F,
-                        };
-                        gpu_tangents[index] = {
-                            static_cast<float>(tangents[index].x),
-                            static_cast<float>(tangents[index].y),
-                            static_cast<float>(tangents[index].z),
-                            0.0F,
-                        };
-                    }
-                });
-            if (used_workers != nullptr) {
-                *used_workers = std::max(*used_workers, transfer_workers);
+            // These compact conversion loops are intentionally serial. Maya
+            // scenes in the 8k-15k sample range spend more time creating and
+            // joining temporary worker threads than converting the buffers.
+            for (std::size_t index = 0U; index < samples.size(); ++index) {
+                const Vec3 normal = normalize(samples[index].normal);
+                gpu_normals[index] = {
+                    static_cast<float>(normal.x),
+                    static_cast<float>(normal.y),
+                    static_cast<float>(normal.z),
+                    0.0F,
+                };
+                gpu_tangents[index] = {
+                    static_cast<float>(tangents[index].x),
+                    static_cast<float>(tangents[index].y),
+                    static_cast<float>(tangents[index].z),
+                    0.0F,
+                };
+            }
+            if (profile != nullptr) {
+                profile->direction_relax_pack_ms =
+                    std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() -
+                        direction_relax_pack_started).count();
             }
             gpu::ExecutionInfo execution_info;
+            const auto direction_relax_gpu_call_started =
+                std::chrono::steady_clock::now();
             gpu_direction_relax_used = gpu::try_compute_direction_relax(
                 gpu_normals,
                 gpu_neighbor_offsets,
@@ -5152,21 +5157,32 @@ std::vector<OrientedSample> orientation_field(
                 static_cast<float>(amount),
                 gpu_tangents,
                 execution_info);
+            if (profile != nullptr) {
+                profile->direction_relax_gpu_call_ms =
+                    std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() -
+                        direction_relax_gpu_call_started).count();
+            }
             merge_gpu_profile(
                 profile, execution_info, "direction-relax");
             if (gpu_direction_relax_used) {
-                parallel_for_chunks(
-                    samples.size(),
-                    512U,
-                    [&](std::size_t begin, std::size_t end, std::uint32_t) {
-                        for (std::size_t index = begin; index < end; ++index) {
-                            tangents[index] = {
-                                gpu_tangents[index].x,
-                                gpu_tangents[index].y,
-                                gpu_tangents[index].z,
-                            };
-                        }
-                    });
+                const auto direction_relax_unpack_started =
+                    std::chrono::steady_clock::now();
+                for (std::size_t index = 0U;
+                     index < samples.size();
+                     ++index) {
+                    tangents[index] = {
+                        gpu_tangents[index].x,
+                        gpu_tangents[index].y,
+                        gpu_tangents[index].z,
+                    };
+                }
+                if (profile != nullptr) {
+                    profile->direction_relax_unpack_ms =
+                        std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() -
+                            direction_relax_unpack_started).count();
+                }
             }
         } else {
             merge_gpu_profile(profile, gate_info, "direction-relax");

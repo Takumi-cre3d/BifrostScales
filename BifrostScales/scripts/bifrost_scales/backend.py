@@ -64,6 +64,9 @@ class BackendApplyReport:
     native_orientation_prepare_ms: float = 0.0
     native_direction_neighbors_ms: float = 0.0
     native_direction_relax_ms: float = 0.0
+    native_direction_relax_pack_ms: float = 0.0
+    native_direction_relax_gpu_call_ms: float = 0.0
+    native_direction_relax_unpack_ms: float = 0.0
     native_orientation_finalize_ms: float = 0.0
     native_cells_ms: float = 0.0
     native_cell_setup_ms: float = 0.0
@@ -733,6 +736,15 @@ class NativeMayaBackend:
                 "direction_neighbors_ms"
             ),
             native_direction_relax_ms=profile_ms("direction_relax_ms"),
+            native_direction_relax_pack_ms=profile_ms(
+                "direction_relax_pack_ms"
+            ),
+            native_direction_relax_gpu_call_ms=profile_ms(
+                "direction_relax_gpu_call_ms"
+            ),
+            native_direction_relax_unpack_ms=profile_ms(
+                "direction_relax_unpack_ms"
+            ),
             native_orientation_finalize_ms=profile_ms(
                 "orientation_finalize_ms"
             ),

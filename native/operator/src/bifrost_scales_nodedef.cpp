@@ -338,6 +338,12 @@ std::string make_profile_json(
         << ",\"direction_neighbors_ms\":"
         << generation.direction_neighbors_ms
         << ",\"direction_relax_ms\":" << generation.direction_relax_ms
+        << ",\"direction_relax_pack_ms\":"
+        << generation.direction_relax_pack_ms
+        << ",\"direction_relax_gpu_call_ms\":"
+        << generation.direction_relax_gpu_call_ms
+        << ",\"direction_relax_unpack_ms\":"
+        << generation.direction_relax_unpack_ms
         << ",\"orientation_finalize_ms\":"
         << generation.orientation_finalize_ms
         << ",\"cells_ms\":" << generation.cells_ms
