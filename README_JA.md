@@ -29,6 +29,10 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 - OpenCL Interactive Orientationと自動CPU fallback
 - Published Bifrost Graph v4とNative-only製品Runtime
 
+## ワンクリック導入
+
+Maya 2026用Native Packのビルド後に`python tools/build_one_click_installer.py`を実行すると、他のWindows PCへ配布できるZIPを生成します。導入先ではZIPを展開し、Mayaを終了して`Install_BifrostScales.cmd`をダブルクリックします。Payload検証、既存版バックアップ、Native Pack登録、失敗時ロールバックを自動実行します。詳細は[ワンクリックインストーラー](docs/ONE_CLICK_INSTALLER_JA.md)を参照してください。
+
 ## Mayaでのワークフロー
 
 1. Maya Python APIから `import bifrost_scales; bifrost_scales.show()` を実行してUIを開きます。
@@ -39,7 +43,7 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 
 ## 実行モデル
 
-Settled出力は表面接続Guide Fieldを訪問済み三角形の頂点でキャッシュし、三角形内を決定的に補間してルック開発時の再分布を高速化します。Orientationは各SampleのDirection Guide Fieldを1回だけ評価して初期方向と最終方向で再利用し、複数反復するSettled Direction Relaxは距離判定済み近傍だけを上限付きcompact CSR配列へ保持します。Native PerformanceログはOrientationをprepare／neighbors／relax／finalizeの4区間で表示します。Finalは従来の候補ごとの倍精度CPU exact評価を維持します。Interactive Distributionはcompact・決定的・prefix-stableなSurface Candidateを並列評価し、空間競合をOpenCLで裁定します。GPUを利用できない場合は同じ優先規則のCPU referenceへ自動fallbackします。CPUで生成するOpen Boundary／Guide Curve Anchor、Stable Cell ID、Maskのpost-Cell出力制御は維持されます。Direction異方性は中心点を追加・削除せず、隣接Cell間で対称な距離計量だけを変えます。全体効果の最大は上限付き2.25軸比で、Guideごとに効果を弱めるか無効化できます。
+Settled出力は表面接続Guide Fieldを訪問済み三角形の頂点でキャッシュし、三角形内を決定的に補間してルック開発時の再分布を高速化します。Orientationは各SampleのDirection Guide Fieldを1回だけ評価して初期方向と最終方向で再利用し、複数反復するSettled Direction Relaxは距離判定済み近傍だけを上限付きcompact CSR配列へ保持し、Distributionが同一のDirection-only編集では近傍Graphを再利用します。Native PerformanceログはOrientationをprepare／neighbors／relax／finalizeの4区間と`neighborCache`状態で表示します。Finalは従来の候補ごとの倍精度CPU exact評価を維持します。Interactive Distributionはcompact・決定的・prefix-stableなSurface Candidateを並列評価し、空間競合をOpenCLで裁定します。GPUを利用できない場合は同じ優先規則のCPU referenceへ自動fallbackします。CPUで生成するOpen Boundary／Guide Curve Anchor、Stable Cell ID、Maskのpost-Cell出力制御は維持されます。Direction異方性は中心点を追加・削除せず、隣接Cell間で対称な距離計量だけを変えます。全体効果の最大は上限付き2.25軸比で、Guideごとに効果を弱めるか無効化できます。
 GPU Crossover以上の複数反復Settled Previewでは、表面接続Guide評価をCPU exactのまま維持し、compact CSRを使うDirection RelaxだけをOpenCLで実行します。GPUが利用できない場合、近傍が高密度な場合、または実行に失敗した場合は既存CPU経路へ自動fallbackします。
 GPU転送準備は典型的な8k～15k Settled Sample向けのcompactな直列変換を使用し、一時スレッド生成を避けます。Native Profileログは診断用に`relaxParts=pack/GPU-call/unpack`を表示します。
 

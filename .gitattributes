@@ -6,5 +6,6 @@
 *.cmake text eol=lf
 CMakeLists.txt text eol=lf
 *.ps1 text eol=crlf
+*.cmd text eol=crlf
 *.json text eol=lf
 *.md text eol=lf

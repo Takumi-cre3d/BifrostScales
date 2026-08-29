@@ -297,6 +297,19 @@ def test_build_info_records_the_native_only_boundary():
     assert info["installer_native_preservation_scope"] == "installed-pack-only"
     assert info["installer_discards_transient_bifrost_out"] is True
     assert info["installer_revision"] == 2
+    assert info["one_click_installer_schema"] == (
+        "bifrost-scales/one-click-build/1"
+    )
+    assert info["one_click_payload_schema"] == (
+        "bifrost-scales/one-click-payload/1"
+    )
+    assert info["one_click_platform"] == "windows-x64-maya2026"
+    assert info["one_click_integrity"] == (
+        "sha256-all-payload-files-before-and-after-copy"
+    )
+    assert info["one_click_transaction"] == (
+        "unique-backup-with-automatic-rollback"
+    )
 
 
 def test_interactive_distribution_uses_candidate_gpu_runtime_only():

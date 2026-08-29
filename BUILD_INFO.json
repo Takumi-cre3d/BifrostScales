@@ -141,6 +141,11 @@
   "installer_native_preservation_scope": "installed-pack-only",
   "installer_discards_transient_bifrost_out": true,
   "installer_revision": 2,
+  "one_click_installer_schema": "bifrost-scales/one-click-build/1",
+  "one_click_payload_schema": "bifrost-scales/one-click-payload/1",
+  "one_click_platform": "windows-x64-maya2026",
+  "one_click_integrity": "sha256-all-payload-files-before-and-after-copy",
+  "one_click_transaction": "unique-backup-with-automatic-rollback",
   "source_zip_excludes_stale_top_level_release_artifacts": true,
   "release_consistency_audit_schema": "bifrost-scales/release-consistency-audit/2",
   "native_only_runtime_audit_schema": "bifrost-scales/native-only-runtime-audit/1"
