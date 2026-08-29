@@ -1465,6 +1465,59 @@ int main() {
         CHECK(std::abs((gapped.second - gapped.first) - 0.1) < 1.0e-9);
     }
 
+    // Sparse centers can be farther apart than the nominal Poisson spacing.
+    // Their shared Voronoi edge must still reach the pair midpoint instead of
+    // stopping at the authored open-radius base and leaving a visible hole.
+    Mesh sparse_coverage_mesh{
+        {
+            Vec3{-5.0, 0.0, -5.0},
+            Vec3{5.0, 0.0, -5.0},
+            Vec3{5.0, 0.0, 5.0},
+            Vec3{-5.0, 0.0, 5.0},
+        },
+        {Triangle{0U, 1U, 2U}, Triangle{0U, 2U, 3U}},
+    };
+    Sample sparse_left;
+    sparse_left.position = {-3.5, 0.0, 0.0};
+    sparse_left.normal = {0.0, 1.0, 0.0};
+    sparse_left.triangle_index = 1U;
+    sparse_left.local_spacing = 2.0;
+    Sample sparse_right = sparse_left;
+    sparse_right.position = {3.5, 0.0, 0.0};
+    sparse_right.triangle_index = 0U;
+    Settings sparse_coverage_settings;
+    sparse_coverage_settings.cell_mode = GeometryMode::Cells;
+    sparse_coverage_settings.cell_settled_resolution = 8U;
+    sparse_coverage_settings.cell_gap = 0.0;
+    sparse_coverage_settings.cell_collision_margin = 0.0;
+    sparse_coverage_settings.cell_radius_multiplier = 1.65;
+    sparse_coverage_settings.cell_project_to_surface = false;
+    GenerationReport sparse_coverage_report;
+    sparse_coverage_report.initial_spacing = 2.0;
+    sparse_coverage_report.final_spacing = 2.0;
+    const auto sparse_coverage = bifrost_scales::build_cells(
+        sparse_coverage_mesh,
+        {sparse_left, sparse_right},
+        sparse_coverage_settings,
+        PreviewMode::Settled,
+        sparse_coverage_report);
+    CHECK(sparse_coverage.cells.size() == 2U);
+    CHECK(std::abs(
+        sparse_coverage.cells[0U].boundary[2U].x) < 1.0e-9);
+    CHECK(std::abs(
+        sparse_coverage.cells[1U].boundary[6U].x) < 1.0e-9);
+    sparse_coverage_settings.cell_gap = 0.1;
+    const auto sparse_gapped = bifrost_scales::build_cells(
+        sparse_coverage_mesh,
+        {sparse_left, sparse_right},
+        sparse_coverage_settings,
+        PreviewMode::Settled,
+        sparse_coverage_report);
+    const double sparse_gap =
+        sparse_gapped.cells[1U].boundary[6U].x -
+        sparse_gapped.cells[0U].boundary[2U].x;
+    CHECK(std::abs(sparse_gap - 0.2) < 1.0e-9);
+
     Settings coverage_settings;
     coverage_settings.target_count = 48U;
     coverage_settings.settled_budget = 48U;
