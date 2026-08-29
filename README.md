@@ -29,6 +29,10 @@ Bifrost Scales is a procedural scale-generation tool for Autodesk Maya 2026 and 
 - OpenCL interactive orientation with automatic CPU fallback
 - Published Bifrost graph v4 and native-only production runtime
 
+## Installation bundle
+
+After building the Maya 2026 Native Pack, run `python tools/build_one_click_installer.py`. The generated ZIP is installed on another Windows PC by extracting it, closing Maya, and double-clicking `Install_BifrostScales.cmd`. The installer verifies every payload file, backs up an existing installation, registers the bundled Native Pack, and rolls back on failure. See [one-click installer details](docs/ONE_CLICK_INSTALLER_JA.md).
+
 ## Maya workflow
 
 1. Open Bifrost Scales from the Maya Python API with `import bifrost_scales; bifrost_scales.show()`.

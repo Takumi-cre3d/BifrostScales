@@ -1,0 +1,1 @@
+"""One-click installer sources."""
