@@ -3787,6 +3787,12 @@ CellResult build_cells_impl(
                     base_open_radius * 2.5 +
                     maximum_spacing +
                     maximum_spacing * collision_amount;
+                // A sparse Poisson hole may put the true Voronoi edge beyond
+                // the authored open-radius base. Reuse the existing neighbor
+                // query for a bounded extension instead of a second search.
+                double coverage_open_radius = base_open_radius;
+                const double sparse_pair_distance =
+                    2.0 * base_open_radius + shared_gap_world;
                 const std::uint32_t component = components[sample_index];
 
                 const auto neighbors_started = Clock::now();
@@ -3816,6 +3822,19 @@ CellResult build_cells_impl(
                     neighbors.resize(neighbor_limit);
                 } else {
                     std::sort(neighbors.begin(), neighbors.end(), neighbor_less);
+                }
+                const double sparse_pair_distance_squared =
+                    sparse_pair_distance * sparse_pair_distance;
+                const bool has_sparse_neighbor = std::any_of(
+                    neighbors.begin(),
+                    neighbors.end(),
+                    [&](const NeighborIndex& neighbor) {
+                        return neighbor.distance_squared >
+                            sparse_pair_distance_squared;
+                    });
+                if (has_sparse_neighbor) {
+                    coverage_open_radius =
+                        std::max(0.0, search_radius - shared_gap_world) * 0.5;
                 }
                 local_stats.neighbors += neighbors.size();
 
@@ -3863,7 +3882,7 @@ CellResult build_cells_impl(
                 const auto boundaries_started = Clock::now();
                 boundary_index.query(
                     sample.position,
-                    base_open_radius + fallback_spacing,
+                    coverage_open_radius + fallback_spacing,
                     component,
                     nearby_boundaries,
                     boundary_traversal_stack);
@@ -3887,8 +3906,8 @@ CellResult build_cells_impl(
                     const double cosine = ray_directions[ray_index].x;
                     const double sine = ray_directions[ray_index].y;
                     const Vec2 direction{cosine, sine};
-                    const double directional_maximum = base_open_radius;
-                    double radius = directional_maximum;
+                    const double directional_maximum = coverage_open_radius;
+                    double radius = base_open_radius;
                     bool found_reach = false;
                     const auto interval = ray_interval_for_constraints(
                         direction,
@@ -3898,7 +3917,10 @@ CellResult build_cells_impl(
                         directional_maximum);
                     if (interval.has_value()) {
                         const auto [lower, upper] = *interval;
-                        if (lower <= 1.0e-8 && upper > 0.0) {
+                        const bool bounded_by_neighbor =
+                            upper < directional_maximum - 1.0e-10;
+                        if (lower <= 1.0e-8 && upper > 0.0 &&
+                            bounded_by_neighbor) {
                             radius = upper;
                             found_reach = true;
                         }
