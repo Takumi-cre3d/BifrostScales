@@ -1,12 +1,12 @@
-# Native Bifrost Pack ビルド手順 — 0.10.6
+# Native Bifrost Pack ビルド手順 — 0.10.7
 
 ~~~text
-Product / Native Pack    0.10.6
+Product / Native Pack    0.10.7
 Payload                  bifrost-scales/native-payload/10
 Operator                 bifrost-scales/operator-contract/18
-Behavior                 bifrost-scales/native-core/0.10.6-settled-field-cache-1
+Behavior                 bifrost-scales/native-core/0.10.7-density-margin-curvature-surface-follow-1
 Profile                  bifrost-scales/native-profile/9
-Install Root             BifrostScalesCore-0.10.6
+Install Root             BifrostScalesCore-0.10.7
 ~~~
 
 ## 導入手順
@@ -23,7 +23,7 @@ Visual Studio、Maya 2026 Bifrost SDK、CMakeを検出し、Release DLL、Node D
 ## 検証手順
 
 ~~~powershell
-$tools = "$HOME\Documents\maya\modules\BifrostScales\bifrost\native\out\BifrostScalesCore-0.10.6\tools"
+$tools = "$HOME\Documents\maya\modules\BifrostScales\bifrost\native\out\BifrostScalesCore-0.10.7\tools"
 & "$tools\bifrost_scales_stage_cache_benchmark.exe" 10000
 & "$tools\bifrost_scales_performance_benchmark.exe" 30000
 & "$tools\bifrost_scales_gpu_preview_benchmark.exe" 10000

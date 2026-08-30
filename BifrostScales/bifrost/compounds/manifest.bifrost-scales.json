@@ -1,6 +1,6 @@
 {
   "product": "Bifrost Scales",
-  "version": "0.10.6",
+  "version": "0.10.7",
   "graph_definition": "Graphs::BifrostScales::native_scales_v4",
   "graph_asset_revision": 4,
   "native_payload_schema": "bifrost-scales/native-payload/10",
@@ -12,7 +12,7 @@
   ],
   "graph_input_contract": "top-level-object-plus-maya-dg-worldMesh",
   "host_binding_contract": "bifrost-scales/native-graph/4-dgmesh-1",
-  "native_behavior_contract": "bifrost-scales/native-core/0.10.6-settled-field-cache-1",
+  "native_behavior_contract": "bifrost-scales/native-core/0.10.7-density-margin-curvature-surface-follow-1",
   "random_stream_contract": "cpython-random.Random-int-v2",
   "parity_dump_schema": "bifrost-scales/parity-dump/1",
   "generated_face_winding": "source-surface-normal",

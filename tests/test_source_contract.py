@@ -50,10 +50,10 @@ def test_release_version_and_module_are_consistent():
     version_source = (PACKAGE / "version.py").read_text(encoding="utf-8")
     module_source = (ROOT / "BifrostScales.mod").read_text(encoding="utf-8")
     plugin_source = (ROOT / "BifrostScales/plug-ins/bifrostScalesCellPicker.py").read_text(encoding="utf-8")
-    assert 'VERSION = "0.10.6"' in version_source
+    assert 'VERSION = "0.10.7"' in version_source
     assert 'SCHEMA_VERSION = "bifrost-scales/5"' in version_source
-    assert module_source.startswith("+ BifrostScales 0.10.6 ")
-    assert 'MFnPlugin(plugin, "Bifrost Scales", "0.10.6", "Any")' in plugin_source
+    assert module_source.startswith("+ BifrostScales 0.10.7 ")
+    assert 'MFnPlugin(plugin, "Bifrost Scales", "0.10.7", "Any")' in plugin_source
 
 
 def test_ui_is_native_only_and_new_create_finishes_first_preview():
@@ -210,7 +210,7 @@ def test_guide_authoring_and_internal_cell_identity_foundation_remain_available(
 
 def test_build_info_records_the_native_only_boundary():
     info = json.loads((ROOT / "BUILD_INFO.json").read_text(encoding="utf-8"))
-    assert info["version"] == "0.10.6"
+    assert info["version"] == "0.10.7"
     assert info["runtime_engine"] == "native-bifrost-only"
     assert info["python_reference_runtime"] is False
     assert info["python_reference_preview"] is False
@@ -219,7 +219,7 @@ def test_build_info_records_the_native_only_boundary():
     assert info["create_button_contract"] == (
         "selected-mesh-to-system-native-graph-and-first-settled-preview"
     )
-    assert info["minimum_native_pack"] == "0.10.6"
+    assert info["minimum_native_pack"] == "0.10.7"
     assert info["cell_cache_key_basis"] == "distribution-or-guide-anisotropic"
     assert info["direction_edits_reuse_exact_cell_partition"] is False
     assert info["direction_strength_affects_orientation_only"] is True

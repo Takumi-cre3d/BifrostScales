@@ -1,4 +1,4 @@
-# Native Runtime Validation — Bifrost Scales 0.10.6
+# Native Runtime Validation — Bifrost Scales 0.10.7
 
 ## 必須検証
 

@@ -202,6 +202,8 @@ struct CellData {
     std::uint32_t sample_index{0};
     std::vector<Vec3> boundary;
     std::vector<Vec3> boundary_normals;
+    std::vector<Vec3> boundary_midpoints;
+    std::vector<Vec3> boundary_midpoint_normals;
     Vec3 stable_tangent{1.0, 0.0, 0.0};
     Vec3 stable_bitangent{0.0, 0.0, 1.0};
     double local_spacing{0.0};
@@ -398,6 +400,15 @@ CellResult build_cells(
     const std::vector<Guide>& guides,
     const std::vector<SymmetryPlane>& symmetry_planes,
     GenerationReport report = {});
+
+GeneratedMesh shape_cells(
+    const Mesh& mesh,
+    const std::vector<OrientedSample>& samples,
+    const std::vector<CellData>& cells,
+    const Settings& settings,
+    PreviewMode mode,
+    const std::vector<Guide>& guides = {},
+    const GenerationOptions& options = {});
 
 GeneratedMesh shape_cells(
     const std::vector<OrientedSample>& samples,

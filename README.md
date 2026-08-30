@@ -9,7 +9,7 @@ Bifrost Scales is a procedural scale-generation tool for Autodesk Maya 2026 and 
 - Autodesk Maya 2026
 - Autodesk Bifrost for Maya 2026
 - Maya C++ toolchain and Bifrost SDK for native source builds
-- Runtime baseline: 0.10.6
+- Runtime baseline: 0.10.7
 - Development status: pre-1.0; no packaged public release is available yet
 
 ## Features
@@ -22,6 +22,8 @@ Bifrost Scales is a procedural scale-generation tool for Autodesk Maya 2026 and 
 - Stable 64-bit cell identity and mesh-free picker metadata
 - Deterministic multicore CPU distribution, cells, and shape generation
 - Exact BVH-indexed Cell neighbor search for large radii and uneven density
+- Owner-safe Collision Margin constraints that remain valid under strong local Density guides
+- Curvature-following Cell interiors with selective exact surface reprojection on tight bends
 - Exact BVH lookup for open-boundary candidates, with a closed-mesh fast path that skips traversal
 - Process-shared bounded stage cache
 - Reusable target-mesh topology, boundary, and surface-guide acceleration data across edits
@@ -42,6 +44,8 @@ After building the Maya 2026 Native Pack, run `python tools/build_one_click_inst
 5. Save the Maya scene; systems, guides, guide groups, scale types, and native graph connections are stored in the scene.
 
 ## Execution model
+
+Cell partition constraints cap a fixed Gap or Collision Margin before it can cross the owning seed, preventing isolated oversized fallback Cells in high-density guide regions. Projected boundary midpoints provide a cached quadratic surface approximation for Shape edits; Cells whose sag or normal bend exceeds the safe threshold reproject their deformed inner rings and center exactly against the connected target surface. The exact path is selective, so planar and gently curved cached Cells retain the lightweight Shape path.
 
 Settled output caches the surface-connected Guide field at visited triangle corners and interpolates deterministically inside each triangle, accelerating look-development redistribution. Orientation evaluates each sample's Direction Guide field once and reuses it for initial and final direction solving; multi-iteration Settled Direction Relax stores only distance-qualified neighbors in a bounded compact CSR array and reuses that graph across Direction-only edits while Distribution remains unchanged. The Native Performance log exposes Orientation as prepare / neighbors / relax / finalize timings plus the neighbor-cache state. Final keeps the previous per-candidate double-precision CPU-exact evaluation. Interactive Distribution evaluates compact, deterministic, prefix-stable surface candidates in parallel and arbitrates spatial conflicts with OpenCL. It falls back automatically to the same-priority CPU reference when GPU execution is unavailable. CPU-authored open-boundary and Guide-curve anchors, Stable Cell IDs, and post-Cell Mask filtering remain intact. Direction anisotropy changes only the pair-symmetric metric between neighboring Cells, without adding or removing centers. The global maximum uses a bounded 2.25 axis ratio, while each guide can reduce or disable its contribution independently.
 For multi-iteration Settled previews above the GPU crossover, surface-connected Guide evaluation stays CPU-exact while compact-CSR Direction Relax runs on OpenCL. Any unavailable device, dense-neighborhood fallback, or GPU failure automatically keeps the existing CPU path.

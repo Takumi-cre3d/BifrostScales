@@ -3550,7 +3550,6 @@ void append_partition_constraint(
     double owner_spacing,
     const PartitionCompetitor& competitor,
     double shared_gap) {
-    const double separation = std::max(0.0, shared_gap);
     const double delta_x = competitor.point.x;
     const double delta_y = competitor.point.y;
     const double distance_squared = delta_x * delta_x + delta_y * delta_y;
@@ -3560,6 +3559,20 @@ void append_partition_constraint(
         competitor.spacing);
     const double owner_fraction = safe_owner_spacing /
         (safe_owner_spacing + safe_competitor_spacing);
+    const double distance = std::sqrt(distance_squared);
+    // A fixed world-space Gap/Collision Margin can be wider than the local
+    // center separation inside a strong Density guide. In that case the
+    // half-plane would move past its owning seed, make the cell interval
+    // empty, and trigger the open-radius fallback. Preserve the authored
+    // world width whenever it is feasible, but never let a pair constraint
+    // exclude the owner from its own partition.
+    const double feasible_separation = std::max(
+        0.0,
+        2.0 * owner_fraction * distance -
+            std::max(1.0e-10, distance * 1.0e-10));
+    const double separation = std::min(
+        std::max(0.0, shared_gap),
+        feasible_separation);
     if (owner_metric_weight <= 0.0 && competitor.metric_weight <= 0.0) {
         const double right = 2.0 * owner_fraction * distance_squared -
             separation * std::sqrt(distance_squared);
@@ -3959,6 +3972,8 @@ CellResult build_cells_impl(
                 cell.pair_influence = 0.0;
                 cell.boundary.reserve(ray_count);
                 cell.boundary_normals.reserve(ray_count);
+                cell.boundary_midpoints.reserve(ray_count);
+                cell.boundary_midpoint_normals.reserve(ray_count);
 
                 for (std::uint32_t ray_index = 0U;
                      ray_index < ray_count;
@@ -4021,14 +4036,27 @@ CellResult build_cells_impl(
                         boundaries_finished - boundary_query_finished).count();
                 if (settings.cell_project_to_surface) {
                     const auto projection_started = Clock::now();
-                    for (Vec3& endpoint : cell.boundary) {
-                        const SurfaceSampleProjection projected =
+                    for (std::size_t point_index = 0U;
+                         point_index < cell.boundary.size();
+                         ++point_index) {
+                        Vec3& endpoint = cell.boundary[point_index];
+                        const Vec3 midpoint_hint = mul(
+                            add(sample.position, endpoint),
+                            0.5);
+                        const SurfaceSampleProjection projected_midpoint =
+                            projector.project_sample_prepared(
+                                midpoint_hint,
+                                sample.triangle_index,
+                                projection_rings);
+                        const SurfaceSampleProjection projected_endpoint =
                             projector.project_sample_prepared(
                                 endpoint,
                                 sample.triangle_index,
                                 projection_rings);
-                        endpoint = projected.point;
-                        cell.boundary_normals.push_back(projected.normal);
+                        endpoint = projected_endpoint.point;
+                        cell.boundary_midpoints.push_back(projected_midpoint.point);
+                        cell.boundary_midpoint_normals.push_back(projected_midpoint.normal);
+                        cell.boundary_normals.push_back(projected_endpoint.normal);
                     }
                     local_stats.projection_ms +=
                         std::chrono::duration<double, std::milli>(
@@ -5610,34 +5638,6 @@ void append_face(
     append_face(mesh, indices.data(), Count, options);
 }
 
-void append_face(
-    GeneratedMesh& mesh,
-    const std::vector<std::uint32_t>& indices,
-    const GenerationOptions& options) {
-    append_face(mesh, indices.data(), indices.size(), options);
-}
-
-std::vector<std::uint32_t> triangle_toward_normal(
-    const std::vector<Vec3>& vertices,
-    std::uint32_t first,
-    std::uint32_t second,
-    std::uint32_t third,
-    const Vec3& normal) {
-    const Vec3 geometric_normal = cross(
-        sub(vertices[second], vertices[first]),
-        sub(vertices[third], vertices[first]));
-    const double orientation = dot(geometric_normal, normal);
-    // Hard masks and open-boundary clipping can collapse an individual
-    // center-fan triangle to nearly zero area. Ignore a numerically
-    // meaningless sign so Python and C++ keep the same deterministic order.
-    const double tolerance =
-        length(geometric_normal) * std::max(1.0, length(normal)) * 1.0e-12;
-    if (orientation < -tolerance) {
-        return {first, third, second};
-    }
-    return {first, second, third};
-}
-
 struct ScaleShape {
     std::uint32_t type_id{0};
     double size{0.1};
@@ -6054,12 +6054,189 @@ Vec2 clamp_inside_cell(
     return {lateral * amount, longitudinal * amount};
 }
 
+struct SurfaceFollowResult {
+    Vec3 point{};
+    Vec3 normal{0.0, 1.0, 0.0};
+};
+
+bool has_cell_surface_support(const CellData& cell) {
+    return cell.boundary_midpoints.size() == cell.boundary.size() &&
+        cell.boundary_midpoint_normals.size() == cell.boundary.size() &&
+        cell.boundary_normals.size() == cell.boundary.size();
+}
+
+bool cell_surface_is_curved(const CellData& cell, const Sample& sample) {
+    if (!has_cell_surface_support(cell)) {
+        return false;
+    }
+    const Vec3 sample_normal = normalize(sample.normal);
+    const double sag_threshold = std::max(
+        1.0e-8,
+        cell.local_spacing * 1.0e-5);
+    for (std::size_t index = 0U; index < cell.boundary.size(); ++index) {
+        const Vec3 midpoint_normal = normalize(
+            cell.boundary_midpoint_normals[index],
+            sample_normal);
+        const Vec3 chord_midpoint = mul(
+            add(sample.position, cell.boundary[index]),
+            0.5);
+        const double sag = std::abs(dot(
+            sub(cell.boundary_midpoints[index], chord_midpoint),
+            midpoint_normal));
+        if (sag > sag_threshold ||
+            dot(midpoint_normal, sample_normal) < 0.9999) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool cell_requires_exact_surface_projection(
+    const CellData& cell,
+    const Sample& sample) {
+    if (!has_cell_surface_support(cell)) {
+        return false;
+    }
+    const Vec3 sample_normal = normalize(sample.normal);
+    const double sag_threshold = std::max(
+        1.0e-7,
+        cell.local_spacing * 1.0e-3);
+    // Below roughly three degrees of normal variation, the cached
+    // center/midpoint/boundary interpolation remains visually coincident
+    // with the target. Larger bends use an exact local surface query after
+    // Shape deformation so inner rings cannot cut through tight folds.
+    constexpr double minimum_normal_dot = 0.9986295347545738;
+    for (std::size_t index = 0U; index < cell.boundary.size(); ++index) {
+        const Vec3 midpoint_normal = normalize(
+            cell.boundary_midpoint_normals[index],
+            sample_normal);
+        const Vec3 chord_midpoint = mul(
+            add(sample.position, cell.boundary[index]),
+            0.5);
+        const double sag = std::abs(dot(
+            sub(cell.boundary_midpoints[index], chord_midpoint),
+            midpoint_normal));
+        if (sag > sag_threshold ||
+            dot(midpoint_normal, sample_normal) < minimum_normal_dot) {
+            return true;
+        }
+    }
+    return false;
+}
+
+SurfaceFollowResult follow_cell_surface(
+    const CellData& cell,
+    const Sample& sample,
+    const Vec3& candidate) {
+    const Vec3 sample_normal = normalize(sample.normal);
+    if (!has_cell_surface_support(cell) || cell.boundary.empty()) {
+        return {candidate, sample_normal};
+    }
+
+    const Vec3 candidate_delta = sub(candidate, sample.position);
+    const Vec3 candidate_planar = project_on_plane(
+        candidate_delta,
+        sample_normal);
+    const double candidate_length_squared = length_squared(candidate_planar);
+    if (candidate_length_squared <= 1.0e-20) {
+        return {candidate, sample_normal};
+    }
+    double angle = std::atan2(
+        dot(candidate_planar, cell.stable_tangent),
+        dot(candidate_planar, cell.stable_bitangent));
+    if (angle < 0.0) {
+        angle += 2.0 * kPi;
+    }
+    const double scaled_index = angle *
+        static_cast<double>(cell.boundary.size()) / (2.0 * kPi);
+    const double integral_index = std::floor(scaled_index);
+    const std::size_t first_index = std::min(
+        cell.boundary.size() - 1U,
+        static_cast<std::size_t>(integral_index));
+    const std::size_t second_index =
+        (first_index + 1U) % cell.boundary.size();
+    const double angular_blend = scaled_index - integral_index;
+    const Vec3 boundary = blend_point(
+        cell.boundary[first_index],
+        cell.boundary[second_index],
+        angular_blend);
+    const Vec3 midpoint = blend_point(
+        cell.boundary_midpoints[first_index],
+        cell.boundary_midpoints[second_index],
+        angular_blend);
+    const Vec3 midpoint_normal = normalize(
+        blend_point(
+            cell.boundary_midpoint_normals[first_index],
+            cell.boundary_midpoint_normals[second_index],
+            angular_blend),
+        sample_normal);
+    const Vec3 boundary_normal = normalize(
+        blend_point(
+            cell.boundary_normals[first_index],
+            cell.boundary_normals[second_index],
+            angular_blend),
+        sample_normal);
+    const Vec3 boundary_planar = project_on_plane(
+        sub(boundary, sample.position),
+        sample_normal);
+    const double boundary_length_squared = length_squared(boundary_planar);
+    if (boundary_length_squared <= 1.0e-20) {
+        return {candidate, sample_normal};
+    }
+    const double amount = clamp(
+        dot(candidate_planar, boundary_planar) / boundary_length_squared,
+        0.0,
+        1.0);
+    const double inverse = 1.0 - amount;
+    const Vec3 control = sub(
+        mul(midpoint, 2.0),
+        mul(add(sample.position, boundary), 0.5));
+    Vec3 curved = add(
+        add(
+            mul(sample.position, inverse * inverse),
+            mul(control, 2.0 * inverse * amount)),
+        mul(boundary, amount * amount));
+    const Vec3 linear = blend_point(sample.position, boundary, amount);
+
+    Vec3 followed_normal;
+    if (amount <= 0.5) {
+        followed_normal = normalize(
+            blend_point(
+                sample_normal,
+                midpoint_normal,
+                amount * 2.0),
+            sample_normal);
+    } else {
+        followed_normal = normalize(
+            blend_point(
+                midpoint_normal,
+                boundary_normal,
+                amount * 2.0 - 1.0),
+            sample_normal);
+    }
+    // A quadratic through three projected samples can still dip slightly
+    // below a strongly convex/concave surface between those samples. Reuse
+    // the measured midpoint sag as a small outward clearance guard. It is
+    // exactly zero on planar regions and does not require Shape-stage mesh
+    // queries.
+    const Vec3 chord_midpoint = mul(add(sample.position, boundary), 0.5);
+    const double outward_sag = std::max(
+        0.0,
+        dot(sub(midpoint, chord_midpoint), followed_normal));
+    curved = add(
+        curved,
+        mul(followed_normal, outward_sag * 0.20 * 4.0 * amount * inverse));
+    return {add(candidate, sub(curved, linear)), followed_normal};
+}
+
 GeneratedMesh build_cell_mesh_range(
     const std::vector<OrientedSample>& oriented_samples,
     const std::vector<CellData>& cells,
     const Settings& settings,
     const PreparedGuides& guides,
     const GenerationOptions& options,
+    const Mesh* surface_mesh,
+    std::uint32_t projection_rings,
     std::size_t begin_index,
     std::size_t end_index,
     const std::vector<std::uint32_t>& global_scale_indices) {
@@ -6109,6 +6286,14 @@ GeneratedMesh build_cell_mesh_range(
         options.cell_metadata_indices.size() + options.resolve_cell_ids.size());
     const double growth = clamp(settings.cell_growth, 0.0, 1.0);
 
+    std::unique_ptr<SurfaceProjector> surface_projector;
+    if (surface_mesh != nullptr && settings.cell_project_to_surface) {
+        surface_projector = std::make_unique<SurfaceProjector>(
+            *surface_mesh,
+            true,
+            false);
+    }
+
     for (std::size_t scale_index = begin_index;
          scale_index < end_index;
          ++scale_index) {
@@ -6129,7 +6314,12 @@ GeneratedMesh build_cell_mesh_range(
         // outer ring verbatim so local Density/Size cannot open an additional
         // visual gap.  Cell Growth develops only the interior rings.
         const std::vector<Vec3> source_boundary = cell.boundary;
-        const Vec3 full_center = average_points(source_boundary);
+        const bool curved_surface = cell_surface_is_curved(cell, sample);
+        const bool exact_surface_projection = surface_projector &&
+            cell_requires_exact_surface_projection(cell, sample);
+        const Vec3 full_center = curved_surface
+            ? sample.position
+            : average_points(source_boundary);
         const double start_fill = clamp(
             shape.size / std::max(1.0e-8, cell.local_spacing),
             0.12,
@@ -6295,11 +6485,28 @@ GeneratedMesh build_cell_mesh_range(
                         settings.lift +
                         shape.normal_offset * edit_weight +
                         shape.curvature * shape.size * curve_weight * edit_weight;
-                    point = add(
+                    const Vec3 surface_candidate = add(
                         add(
                             add(center, mul(bitangent, lateral)),
                             mul(tangent, longitudinal)),
-                        mul(normal, surface_height + normal_height));
+                        mul(normal, surface_height));
+                    SurfaceFollowResult followed;
+                    if (exact_surface_projection) {
+                        const SurfaceSampleProjection projected =
+                            surface_projector->project_sample(
+                                surface_candidate,
+                                sample.triangle_index,
+                                projection_rings);
+                        followed = {projected.point, projected.normal};
+                    } else {
+                        followed = follow_cell_surface(
+                            cell,
+                            sample,
+                            surface_candidate);
+                    }
+                    point = add(
+                        followed.point,
+                        mul(followed.normal, normal_height));
                 }
 
                 if (options.include_uvs) {
@@ -6332,16 +6539,30 @@ GeneratedMesh build_cell_mesh_range(
             polygon);
         center_lateral = clamped_center.x;
         center_longitudinal = clamped_center.y;
-        Vec3 center_point = add(
+        const Vec3 center_candidate = add(
             add(center, mul(bitangent, center_lateral)),
             mul(tangent, center_longitudinal));
-        center_point = add(
-            center_point,
-            mul(
-                normal,
-                settings.lift + shape.normal_offset +
-                    shape.curvature * shape.size *
-                        (0.78 + 0.12 * shape.roundness)));
+        SurfaceFollowResult followed_center;
+        if (exact_surface_projection) {
+            const SurfaceSampleProjection projected =
+                surface_projector->project_sample(
+                    center_candidate,
+                    sample.triangle_index,
+                    projection_rings);
+            followed_center = {projected.point, projected.normal};
+        } else {
+            followed_center = follow_cell_surface(
+                cell,
+                sample,
+                center_candidate);
+        }
+        const double center_height =
+            settings.lift + shape.normal_offset +
+            shape.curvature * shape.size *
+                (0.78 + 0.12 * shape.roundness);
+        const Vec3 center_point = add(
+            followed_center.point,
+            mul(followed_center.normal, center_height));
         const std::uint32_t center_index =
             static_cast<std::uint32_t>(result.vertices.size());
         result.vertices.push_back(center_point);
@@ -6370,17 +6591,28 @@ GeneratedMesh build_cell_mesh_range(
         }
         const std::uint32_t final_ring = ring_starts.back();
         for (std::uint32_t point_index = 0U; point_index < ring_size; ++point_index) {
-            // Cell boundaries are clockwise when viewed along the sample
-            // normal. The ring quads already account for that convention;
-            // use next -> current for the center fan as well.
+            const std::uint32_t next_index =
+                (point_index + 1U) % ring_size;
+            // Derive winding from the cached Cell boundary rather than the
+            // shaped vertices. This preserves outward faces while keeping
+            // topology identical across Shape-only edits.
+            const bool next_first = dot(
+                cross(
+                    sub(source_boundary[next_index], center),
+                    sub(source_boundary[point_index], center)),
+                normal) >= 0.0;
+            const std::array<std::uint32_t, 3> center_face = next_first
+                ? std::array<std::uint32_t, 3>{
+                    center_index,
+                    final_ring + next_index,
+                    final_ring + point_index}
+                : std::array<std::uint32_t, 3>{
+                    center_index,
+                    final_ring + point_index,
+                    final_ring + next_index};
             append_face(
                 result,
-                triangle_toward_normal(
-                    result.vertices,
-                    center_index,
-                    final_ring + ((point_index + 1U) % ring_size),
-                    final_ring + point_index,
-                    normal),
+                center_face,
                 options);
         }
         if (options.include_scale_type_ids) {
@@ -6502,7 +6734,9 @@ GeneratedMesh build_cell_mesh_impl(
     const Settings& settings,
     const PreparedGuides& guides,
     const GenerationOptions& options,
-    std::uint32_t* used_workers = nullptr) {
+    std::uint32_t* used_workers = nullptr,
+    const Mesh* surface_mesh = nullptr,
+    std::uint32_t projection_rings = 0U) {
     if (used_workers != nullptr) {
         *used_workers = 1U;
     }
@@ -6533,6 +6767,8 @@ GeneratedMesh build_cell_mesh_impl(
             settings,
             guides,
             options,
+            surface_mesh,
+            projection_rings,
             0U,
             available_count,
             global_scale_indices);
@@ -6549,6 +6785,8 @@ GeneratedMesh build_cell_mesh_impl(
                 settings,
                 guides,
                 options,
+                surface_mesh,
+                projection_rings,
                 begin,
                 end,
                 global_scale_indices);
@@ -7225,7 +7463,9 @@ GenerationResult generate(
             settings,
             prepared_guides,
             options,
-            &profile.shape_worker_threads);
+            &profile.shape_worker_threads,
+            &mesh,
+            effective_cell_projection_rings(settings, mode));
         profile.shape_ms = std::chrono::duration<double, std::milli>(
             Clock::now() - shape_started).count();
         report = std::move(cell_report);
@@ -7352,6 +7592,27 @@ CellResult build_cells(
         prepared_guides,
         symmetry_planes,
         std::move(report));
+}
+
+GeneratedMesh shape_cells(
+    const Mesh& mesh,
+    const std::vector<OrientedSample>& samples,
+    const std::vector<CellData>& cells,
+    const Settings& settings,
+    PreviewMode mode,
+    const std::vector<Guide>& guides,
+    const GenerationOptions& options) {
+    validate_mesh(mesh);
+    const PreparedGuides prepared_guides = prepare_guides(guides);
+    return build_cell_mesh_impl(
+        samples,
+        cells,
+        settings,
+        prepared_guides,
+        options,
+        nullptr,
+        &mesh,
+        effective_cell_projection_rings(settings, mode));
 }
 
 GeneratedMesh shape_cells(

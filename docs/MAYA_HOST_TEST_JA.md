@@ -1,8 +1,8 @@
-# Maya 2026 Host Test — Bifrost Scales 0.10.6
+# Maya 2026 Host Test — Bifrost Scales 0.10.7
 
 ## 1. Version／Native Pack
 
-BifrostScales_0_10_6_POST_INSTALL_CHECK.pyをMaya Script EditorのPythonタブで実行します。Product、Pack、Minimum Packが0.10.6、ready=True、Payload／Behavior／Profile契約がすべてTrueなら合格です。
+BifrostScales_0_10_7_POST_INSTALL_CHECK.pyをMaya Script EditorのPythonタブで実行します。Product、Pack、Minimum Packが0.10.7、ready=True、Payload／Behavior／Profile契約がすべてTrueなら合格です。
 
 ## 2. 新規作成
 

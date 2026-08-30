@@ -600,6 +600,36 @@ int main() {
     }
     CHECK(cylinder_projection_error < 1.0e-8);
 
+    // Projected Cell boundaries alone are insufficient on high curvature:
+    // interior vertices must follow the target surface between the owning
+    // sample and each projected perimeter point instead of using a 3D chord.
+    Settings cylinder_shape_settings = cylinder_wide_settings;
+    cylinder_shape_settings.cell_shape_divisions = 2U;
+    cylinder_shape_settings.cell_growth = 0.0;
+    cylinder_shape_settings.size = 0.2;
+    cylinder_shape_settings.lift = 0.0;
+    cylinder_shape_settings.curvature = 0.0;
+    cylinder_shape_settings.random_size = 0.0;
+    cylinder_shape_settings.random_rotation_degrees = 0.0;
+    OrientedSample cylinder_oriented;
+    cylinder_oriented.sample = cylinder_sample;
+    cylinder_oriented.tangent = {0.0, 1.0, 0.0};
+    cylinder_oriented.partition_tangent = cylinder_oriented.tangent;
+    const auto cylinder_shape = bifrost_scales::shape_cells(
+        cylinder,
+        {cylinder_oriented},
+        cylinder_wide.cells,
+        cylinder_shape_settings,
+        PreviewMode::Settled);
+    CHECK(cylinder_shape.scale_count == 1U);
+    CHECK(cylinder_shape.vertices.size() ==
+          cylinder_wide.cells.front().boundary.size() * 3U + 1U);
+    for (const Vec3& point : cylinder_shape.vertices) {
+        // The 32-sided target approximates radius 1 with a minimum face
+        // radius of cos(pi / 32) ~= 0.995. Allow a small numerical margin.
+        CHECK(std::hypot(point.x, point.z) > 0.98);
+    }
+
     // Boundary clipping is component-local. A small disconnected shell close
     // to a larger shell must not cut a bite into the larger shell's Cell.
     Mesh nearby_shells;
@@ -1647,6 +1677,35 @@ int main() {
         density_transition_gapped.cells[1U].boundary[6U].x -
         density_transition_gapped.cells[0U].boundary[2U].x;
     CHECK(std::abs(density_transition_gap - 0.2) < 1.0e-9);
+
+    // A strong Density guide can make local centers closer than the fixed
+    // world-space Collision Margin. The margin must not move every pair
+    // boundary past its owning seed and reopen the cell to Radius * Spacing.
+    Sample dense_margin_left = sparse_left;
+    dense_margin_left.position = {-0.05, 0.0, 0.0};
+    dense_margin_left.local_spacing = 0.1;
+    Sample dense_margin_right = dense_margin_left;
+    dense_margin_right.position = {0.05, 0.0, 0.0};
+    Settings dense_margin_settings = sparse_coverage_settings;
+    dense_margin_settings.cell_gap = 0.0;
+    dense_margin_settings.cell_collision_margin = 0.157;
+    dense_margin_settings.cell_radius_multiplier = 6.0;
+    GenerationReport dense_margin_report;
+    dense_margin_report.initial_spacing = 1.0;
+    dense_margin_report.final_spacing = 1.0;
+    const auto dense_margin_cells = bifrost_scales::build_cells(
+        sparse_coverage_mesh,
+        {dense_margin_left, dense_margin_right},
+        dense_margin_settings,
+        PreviewMode::Settled,
+        dense_margin_report);
+    CHECK(dense_margin_cells.cells.size() == 2U);
+    CHECK(dense_margin_cells.cells[0U].clipped_rays > 0U);
+    CHECK(dense_margin_cells.cells[1U].clipped_rays > 0U);
+    CHECK(dense_margin_cells.cells[0U].boundary[2U].x < 0.0);
+    CHECK(dense_margin_cells.cells[1U].boundary[6U].x > 0.0);
+    CHECK(dense_margin_cells.cells[0U].boundary[2U].x <
+          dense_margin_cells.cells[1U].boundary[6U].x);
 
 
     Settings coverage_settings;

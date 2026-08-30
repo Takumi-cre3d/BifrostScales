@@ -10,11 +10,22 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.10.6"
-INSTALLER_NAME = "BifrostScales_0_10_6_Standalone_Installer.py"
-SOURCE_ZIP_NAME = "BifrostScales_0_10_6.zip"
+VERSION = "0.10.7"
+INSTALLER_NAME = "BifrostScales_0_10_7_Standalone_Installer.py"
+POST_CHECK_NAME = "BifrostScales_0_10_7_POST_INSTALL_CHECK.py"
+SOURCE_ZIP_NAME = "BifrostScales_0_10_7.zip"
 FIXED_TIME = (2026, 8, 21, 0, 0, 0)
 
+
+CANONICAL_MOD = """+ BifrostScales 0.10.7 BifrostScales
+PYTHONPATH +:= scripts
+PATH +:= bin
+plug-ins: plug-ins
+"""
+
+
+def _release_file_bytes(path: Path) -> bytes:
+    return CANONICAL_MOD.encode("utf-8") if path == ROOT / "BifrostScales.mod" else path.read_bytes()
 
 def _zip_bytes(paths: list[tuple[Path, str]]) -> bytes:
     import io
@@ -25,8 +36,46 @@ def _zip_bytes(paths: list[tuple[Path, str]]) -> bytes:
             info = zipfile.ZipInfo(archive_name, FIXED_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = (0o100644 & 0xFFFF) << 16
-            archive.writestr(info, source.read_bytes())
+            archive.writestr(info, _release_file_bytes(source))
     return buffer.getvalue()
+
+
+def _post_install_check_source() -> str:
+    return f'''"""Run in Maya Script Editor after installing Bifrost Scales {VERSION}."""
+
+from __future__ import annotations
+
+import pprint
+
+import bifrost_scales
+
+print("Bifrost Scales version:", bifrost_scales.__version__)
+print("Module:", bifrost_scales.__file__)
+status = bifrost_scales.probe_native_backend()
+pprint.pprint(status.to_mapping())
+
+expected = {{
+    "product_version": bifrost_scales.__version__ == {VERSION!r},
+    "native_ready": bool(status.ready),
+    "pack_version": str(status.pack_version) == {VERSION!r},
+    "minimum_pack_version": str(status.minimum_pack_version) == {VERSION!r},
+    "pack_registered": bool(status.pack_config_registered),
+    "pack_active": bool(status.pack_config_active),
+    "operator_available": bool(status.operator_definition_available),
+    "payload_contract": bool(status.payload_schema_contract_valid),
+    "behavior_contract": bool(status.native_behavior_contract_valid),
+    "profile_contract": bool(status.native_profile_schema_contract_valid),
+    "profile_output_contract": bool(status.profile_output_contract_valid),
+}}
+print("Checks:")
+pprint.pprint(expected)
+print("PASS" if all(expected.values()) else "CHECK FAILED")
+
+print("\\nCell surface validation:")
+print("Open a high-curvature target and confirm inner Cell vertices remain outside the surface.")
+print("Under a strong Density guide, confirm Collision Margin does not create isolated oversized Cells.")
+print("GPU validation: Interactive may use gpu=True; Settled remains deterministic.")
+'''
 
 
 def _runtime_paths() -> list[tuple[Path, str]]:
@@ -512,7 +561,7 @@ def _manifest_profile_schema(manifest):
 
 
 def _operator_compatible_native_pack(pack_config):
-    """Return whether an existing 0.10.6 Native Pack satisfies this release.
+    """Return whether an existing 0.10.7 Native Pack satisfies this release.
 
     Payload Schema 10 and Static Graph v4 remain stable, but the OpenCL GPU
     execution layer, density-adaptive boundary placement, Operator Contract
@@ -544,7 +593,7 @@ def _operator_compatible_native_pack(pack_config):
         and _manifest_payload_schema(manifest)
         == "bifrost-scales/native-payload/10"
         and _manifest_behavior_contract(manifest)
-        == "bifrost-scales/native-core/0.10.6-settled-field-cache-1"
+        == "bifrost-scales/native-core/0.10.7-density-margin-curvature-surface-follow-1"
         and _manifest_profile_schema(manifest)
         == "bifrost-scales/native-profile/9"
     )
@@ -561,11 +610,11 @@ def _native_version_text(pack_config):
             if re.match(r"^\\d+\\.\\d+\\.\\d+", value):
                 return value
     version = _native_pack_version(pack_config)
-    return ".".join(str(part) for part in version) if version else "0.10.6"
+    return ".".join(str(part) for part in version) if version else "0.10.7"
 
 
 def _upgrade_native_pack_graph_contract(pack_config, package_root):
-    """Normalize a compatible 0.10.6+ pack to the graph-v4 scene-input contract."""
+    """Normalize a compatible 0.10.7+ pack to the graph-v4 scene-input contract."""
 
     if not _operator_compatible_native_pack(pack_config):
         return False
@@ -701,7 +750,7 @@ def _is_valid_native_pack_config(pack_config):
         return False
     if _manifest_payload_schema(manifest) != "bifrost-scales/native-payload/10":
         return False
-    if _manifest_behavior_contract(manifest) != "bifrost-scales/native-core/0.10.6-settled-field-cache-1":
+    if _manifest_behavior_contract(manifest) != "bifrost-scales/native-core/0.10.7-density-margin-curvature-surface-follow-1":
         return False
     if _manifest_profile_schema(manifest) != "bifrost-scales/native-profile/9":
         return False
@@ -789,7 +838,7 @@ def _installation_choice(cmds):
         title="Install Bifrost Scales",
         message=(
             "Bifrost Scales {VERSION}を独立製品としてインストールします。\\n"
-            "0.10.6はSettled Cell Partitionの正確な結果を維持したまま、共通Ray表、近傍Metadata事前計算、Maskなし高速経路でCellsを短縮します。\\n"
+            "0.10.7は強いDensity Guideでの巨大Cellを防ぎ、高曲率Cellの内側をTarget表面へ追従させます。\\n"
             "互換Native Packがない場合のみ、同梱PowerShellでOperator PackをビルドしてMayaを再起動してください。\\n"
             "旧ツールを削除してもシーン内の制作データは削除しません。"
         ),
@@ -813,7 +862,7 @@ def install(show_tool=True, remove_legacy=None):
         if remove_legacy is None:
             return None
 
-    staging_root = Path(tempfile.mkdtemp(prefix="BifrostScales_0_10_6_"))
+    staging_root = Path(tempfile.mkdtemp(prefix="BifrostScales_0_10_7_"))
     modules_dir = Path(cmds.internalVar(userAppDir=True)) / "modules"
     destination_package = modules_dir / "BifrostScales"
     destination_mod = modules_dir / "BifrostScales.mod"
@@ -1003,12 +1052,12 @@ def install(show_tool=True, remove_legacy=None):
         )
         if preserved_native_pack:
             message += (
-                "\\n互換Native Core 0.10.6 Packを保持し、GraphとManifestを検証してBifrostScales.modへ再登録しました。"
+                "\\n互換Native Core 0.10.7 Packを保持し、GraphとManifestを検証してBifrostScales.modへ再登録しました。"
                 "\\n追加ビルドは不要ですが、BifrostがPackConfigを読み直すためMayaを完全に再起動してください。"
             )
         elif incompatible_native_pack_preserved:
             message += (
-                "\\n旧Native Packは診断用に保持しましたが、Payload Schema 10 / Operator Contract 18 / 0.10.6 Cell Hot Path Contractを満たさないため登録していません。"
+                "\\n旧Native Packは診断用に保持しましたが、Payload Schema 10 / Operator Contract 18 / 0.10.7 Surface Follow Contractを満たさないため登録していません。"
                 "\\nMayaを完全に終了し、{VERSION}同梱のNative Build Scriptを-Cleanで実行してください。"
             )
         else:
@@ -1132,7 +1181,7 @@ def _write_checksums() -> None:
         ):
             continue
         relative = path.relative_to(ROOT).as_posix()
-        lines.append("{}  {}".format(hashlib.sha256(path.read_bytes()).hexdigest(), relative))
+        lines.append("{}  {}".format(hashlib.sha256(_release_file_bytes(path)).hexdigest(), relative))
     (ROOT / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -1144,14 +1193,15 @@ def build() -> dict[str, str]:
         "product": "Bifrost Scales",
         "version": VERSION,
         "schema": "bifrost-scales/5",
-        "milestone": "deterministic-settled-distribution-field-cache",
-        "build_date": "2026-08-24",
+        "source_development_state": "0.10.7-density-margin-curvature-surface-follow",
+        "milestone": "density-margin-curvature-surface-follow",
+        "build_date": "2026-08-31",
         "runtime_payload_sha256": hashlib.sha256(payload).hexdigest(),
         "standalone": True,
         "runtime_engine": "native-bifrost-only",
-        "generation_compute_backend": "hybrid-opencl-interactive-cpu-deterministic-settled-cpu-exact-final",
+        "generation_compute_backend": "hybrid-opencl-interactive-and-direction-relax-cpu-exact-guides-and-final",
         "gpu_generation_compute": True,
-        "gpu_stage": "interactive-distribution-conflict-and-eligible-orientation",
+        "gpu_stage": "interactive-distribution-conflict-eligible-orientation-and-settled-direction-relax",
         "gpu_buffer_schema": "interactive-conflict-gpu/1-plus-compact-orientation-buffer/2",
         "gpu_preview_benchmark_schema": "bifrost-scales/gpu-preview-benchmark/3",
         "gpu_environment_policy": "BIFROST_SCALES_GPU=auto|off|force",
@@ -1163,15 +1213,26 @@ def build() -> dict[str, str]:
         "interactive_conflict_reference_runtime_enabled": True,
         "interactive_conflict_gpu_schema": "bifrost-scales/interactive-conflict-gpu/1",
         "interactive_conflict_gpu_runtime_enabled": True,
+        "interactive_conflict_gpu_algorithm": "parallel-lexicographic-mis-exact-priority",
         "interactive_conflict_gpu_default_crossover_candidates": 8192,
+        "interactive_conflict_gpu_environment_override": "BIFROST_SCALES_GPU_MIN_CANDIDATES",
+        "interactive_conflict_gpu_failure_policy": "automatic-cpu-reference-fallback",
         "interactive_distribution_candidate_multiplier": 4,
         "interactive_distribution_preserves_cpu_anchors": True,
         "interactive_distribution_mask_stage": "post-cell-shape-only",
         "settled_distribution_unchanged": False,
         "settled_distribution_field": "triangle-corner-cached-barycentric",
+        "orientation_guide_field": "once-per-sample-reused-initial-final",
+        "direction_relax_neighbor_query": "distance-qualified-compact-csr-settled-multi-iteration",
+        "direction_relax_neighbor_cache": "distribution-keyed-process-shared-bounded",
+        "direction_relax_compute_backend": "opencl-gpu-with-cpu-exact-guide-evaluation-and-fallback",
+        "direction_relax_gpu_runtime_enabled": True,
+        "direction_relax_gpu_transfer_conversion": "serial-compact-8k-15k-optimized",
+        "direction_relax_profile_breakdown": "pack-gpu-call-unpack",
+        "orientation_profile_breakdown": "prepare-neighbors-relax-finalize",
         "settled_distribution_deterministic": True,
         "final_distribution_field": "exact-per-candidate-surface-connected",
-        "settled_and_final_backend": "deterministic-cpu-multicore",
+        "settled_and_final_backend": "settled-hybrid-opencl-cpu-fallback-final-cpu-exact",
         "viewport_rendering": "maya-viewport-2-gpu-managed",
         "cpu_thread_environment_override": "BIFROST_SCALES_CPU_THREADS",
         "cpu_thread_automatic_policy": "hardware-concurrency-minus-one-capped-at-32",
@@ -1197,12 +1258,16 @@ def build() -> dict[str, str]:
         "create_transaction_rollback": True,
         "existing_system_missing_graph_policy": "explicit-rebuild-only",
         "final_and_bake_status": "not-exposed-until-native-final-contract",
-        "native_core_api": "0.10.6-settled-field-cache-contract",
-        "minimum_native_pack": "0.10.6",
+        "native_core_api": "0.10.7-surface-follow-contract",
+        "minimum_native_pack": "0.10.7",
         "native_payload_schema": "bifrost-scales/native-payload/10",
         "operator_contract": "bifrost-scales/operator-contract/18",
-        "native_behavior_contract": "bifrost-scales/native-core/0.10.6-settled-field-cache-1",
+        "native_behavior_contract": "bifrost-scales/native-core/0.10.7-density-margin-curvature-surface-follow-1",
         "native_profile_schema": "bifrost-scales/native-profile/9",
+        "cell_pair_gap_feasibility": "owner-preserving-local-center-distance-cap",
+        "cell_surface_follow": "cached-midpoint-quadratic-plus-selective-exact-shape-projection",
+        "cell_exact_surface_projection_trigger": "relative-sag-0.001-or-normal-bend-over-3-degrees",
+        "cell_shape_edits_preserve_partition_cache": True,
         "cell_cache_key_basis": "distribution-or-guide-anisotropic",
         "native_stage_cache": "process-shared-bounded-lru-exact-dual-hash",
         "native_stage_cache_default_entries_per_stage": 2,
@@ -1262,6 +1327,11 @@ def build() -> dict[str, str]:
         "installer_native_preservation_scope": "installed-pack-only",
         "installer_discards_transient_bifrost_out": True,
         "installer_revision": 2,
+        "one_click_installer_schema": "bifrost-scales/one-click-build/1",
+        "one_click_payload_schema": "bifrost-scales/one-click-payload/1",
+        "one_click_platform": "windows-x64-maya2026",
+        "one_click_integrity": "sha256-all-payload-files-before-and-after-copy",
+        "one_click_transaction": "unique-backup-with-automatic-rollback",
         "source_zip_excludes_stale_top_level_release_artifacts": True,
         "release_consistency_audit_schema": "bifrost-scales/release-consistency-audit/2",
         "native_only_runtime_audit_schema": "bifrost-scales/native-only-runtime-audit/1",
@@ -1269,6 +1339,10 @@ def build() -> dict[str, str]:
     (ROOT / "BUILD_INFO.json").write_text(
         json.dumps(build_info, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
+    )
+    post_check = ROOT / POST_CHECK_NAME
+    post_check.write_text(
+        _post_install_check_source(), encoding="utf-8", newline="\n"
     )
     _write_checksums()
     source_zip = ROOT.parent / SOURCE_ZIP_NAME
@@ -1288,6 +1362,7 @@ def build() -> dict[str, str]:
     return {
         "installer": str(public_installer),
         "installer_sha256": installer_digest,
+        "post_install_check": str(post_check),
         "source_zip": str(source_zip),
         "source_zip_sha256": source_digest,
         "payload_sha256": build_info["runtime_payload_sha256"],
