@@ -1054,6 +1054,19 @@ double maximum_density_factor(const PreparedGuides& guides) {
     return clamp(maximum, 1.0, 256.0);
 }
 
+double minimum_density_factor(const PreparedGuides& guides) {
+    double minimum = 1.0;
+    for (const PreparedGuide& guide : guides) {
+        const Guide& source = *guide.source;
+        if (source.enabled && guide.uses_density) {
+            minimum *= std::min(
+                1.0,
+                clamp(source.density_multiplier, 0.0, 16.0));
+        }
+    }
+    return clamp(minimum, 0.02, 1.0);
+}
+
 std::uint32_t guide_count(const PreparedGuides& guides, bool density) {
     return static_cast<std::uint32_t>(std::count_if(
         guides.begin(),
@@ -3510,6 +3523,7 @@ struct PartitionCompetitor {
     Vec2 point{};
     Vec2 perpendicular{1.0, 0.0};
     double metric_weight{0.0};
+    double spacing{1.0};
 };
 
 Vec2 normalize_direction_2d(const Vec2& value, const Vec2& fallback) {
@@ -3529,51 +3543,52 @@ double direction_metric_weight(double setting, double influence) {
     return ratio * ratio - 1.0;
 }
 
-void append_partition_constraints(
+void append_partition_constraint(
     std::vector<PartitionConstraint>& constraints,
     const Vec2& owner_perpendicular,
     double owner_metric_weight,
-    const std::vector<PartitionCompetitor>& competitors,
+    double owner_spacing,
+    const PartitionCompetitor& competitor,
     double shared_gap) {
     const double separation = std::max(0.0, shared_gap);
-    for (const PartitionCompetitor& competitor : competitors) {
-        const double delta_x = competitor.point.x;
-        const double delta_y = competitor.point.y;
-        const double distance_squared = delta_x * delta_x + delta_y * delta_y;
-        if (owner_metric_weight <= 0.0 && competitor.metric_weight <= 0.0) {
-            // Preserve the previous arithmetic exactly when anisotropy has no
-            // influence, including old scenes that explicitly set it to zero.
-            const double right = distance_squared -
-                separation * std::sqrt(distance_squared);
-            constraints.push_back({delta_x, delta_y, right});
-            continue;
-        }
-
-        const double owner_projection =
-            owner_perpendicular.x * delta_x +
-            owner_perpendicular.y * delta_y;
-        const double competitor_projection =
-            competitor.perpendicular.x * delta_x +
-            competitor.perpendicular.y * delta_y;
-        const double metric_delta_x = delta_x + 0.5 * (
-            owner_metric_weight * owner_perpendicular.x * owner_projection +
-            competitor.metric_weight * competitor.perpendicular.x *
-                competitor_projection);
-        const double metric_delta_y = delta_y + 0.5 * (
-            owner_metric_weight * owner_perpendicular.y * owner_projection +
-            competitor.metric_weight * competitor.perpendicular.y *
-                competitor_projection);
-        const double metric_squared =
-            delta_x * metric_delta_x + delta_y * metric_delta_y;
-        double right = metric_squared;
-        if (separation > 0.0 && distance_squared > 1.0e-20) {
-            // Keep the authored Gap in world units along the site-to-site line
-            // even though the partition distance itself is anisotropic.
-            right -= separation * metric_squared /
-                std::sqrt(distance_squared);
-        }
-        constraints.push_back({metric_delta_x, metric_delta_y, right});
+    const double delta_x = competitor.point.x;
+    const double delta_y = competitor.point.y;
+    const double distance_squared = delta_x * delta_x + delta_y * delta_y;
+    const double safe_owner_spacing = std::max(1.0e-20, owner_spacing);
+    const double safe_competitor_spacing = std::max(
+        1.0e-20,
+        competitor.spacing);
+    const double owner_fraction = safe_owner_spacing /
+        (safe_owner_spacing + safe_competitor_spacing);
+    if (owner_metric_weight <= 0.0 && competitor.metric_weight <= 0.0) {
+        const double right = 2.0 * owner_fraction * distance_squared -
+            separation * std::sqrt(distance_squared);
+        constraints.push_back({delta_x, delta_y, right});
+        return;
     }
+
+    const double owner_projection =
+        owner_perpendicular.x * delta_x +
+        owner_perpendicular.y * delta_y;
+    const double competitor_projection =
+        competitor.perpendicular.x * delta_x +
+        competitor.perpendicular.y * delta_y;
+    const double metric_delta_x = delta_x + 0.5 * (
+        owner_metric_weight * owner_perpendicular.x * owner_projection +
+        competitor.metric_weight * competitor.perpendicular.x *
+            competitor_projection);
+    const double metric_delta_y = delta_y + 0.5 * (
+        owner_metric_weight * owner_perpendicular.y * owner_projection +
+        competitor.metric_weight * competitor.perpendicular.y *
+            competitor_projection);
+    const double metric_squared =
+        delta_x * metric_delta_x + delta_y * metric_delta_y;
+    double right = 2.0 * owner_fraction * metric_squared;
+    if (separation > 0.0 && distance_squared > 1.0e-20) {
+        right -= separation * metric_squared /
+            std::sqrt(distance_squared);
+    }
+    constraints.push_back({metric_delta_x, metric_delta_y, right});
 }
 
 std::optional<std::pair<double, double>> ray_interval_for_constraints(
@@ -3791,8 +3806,6 @@ CellResult build_cells_impl(
             std::vector<std::uint32_t> nearby_boundaries;
             std::vector<std::uint32_t> boundary_traversal_stack;
             boundary_traversal_stack.reserve(64U);
-            std::vector<PartitionCompetitor> competitors;
-            competitors.reserve(neighbor_limit * 2U);
             std::vector<PartitionConstraint> prepared_constraints;
             prepared_constraints.reserve(neighbor_limit * 4U);
 
@@ -3860,16 +3873,27 @@ CellResult build_cells_impl(
                 }
                 const double sparse_pair_distance_squared =
                     sparse_pair_distance * sparse_pair_distance;
-                const bool has_sparse_neighbor = std::any_of(
-                    neighbors.begin(),
-                    neighbors.end(),
-                    [&](const NeighborIndex& neighbor) {
-                        return neighbor.distance_squared >
-                            sparse_pair_distance_squared;
-                    });
-                if (has_sparse_neighbor) {
-                    coverage_open_radius =
-                        std::max(0.0, search_radius - shared_gap_world) * 0.5;
+                for (const NeighborIndex& neighbor : neighbors) {
+                    if (neighbor.distance_squared <=
+                        sparse_pair_distance_squared) {
+                        continue;
+                    }
+                    const double distance = std::sqrt(
+                        neighbor.distance_squared);
+                    const double neighbor_spacing =
+                        spacings[neighbor.index];
+                    const double owner_fraction = local_spacing /
+                        (local_spacing + neighbor_spacing);
+                    const double required_reach = std::max(
+                        0.0,
+                        distance * owner_fraction - shared_gap_world * 0.5);
+                    if (required_reach > base_open_radius) {
+                        coverage_open_radius = std::max(
+                            coverage_open_radius,
+                            required_reach + std::max(
+                                1.0e-9,
+                                required_reach * 1.0e-10));
+                    }
                 }
                 local_stats.neighbors += neighbors.size();
 
@@ -3881,7 +3905,7 @@ CellResult build_cells_impl(
                     };
                 };
 
-                competitors.clear();
+                prepared_constraints.clear();
                 for (const NeighborIndex& neighbor : neighbors) {
                     const Vec2 neighbor_direction = normalize_direction_2d(
                         {
@@ -3893,23 +3917,23 @@ CellResult build_cells_impl(
                                 stable_tangent),
                         },
                         owner_direction);
-                    competitors.push_back({
-                        local_point(samples[neighbor.index].position),
+                    append_partition_constraint(
+                        prepared_constraints,
+                        owner_perpendicular,
+                        owner_metric_weight,
+                        local_spacing,
                         {
-                            -neighbor_direction.y,
-                            neighbor_direction.x,
+                            local_point(samples[neighbor.index].position),
+                            {
+                                -neighbor_direction.y,
+                                neighbor_direction.x,
+                            },
+                            direction_metric_weights[neighbor.index],
+                            spacings[neighbor.index],
                         },
-                        direction_metric_weights[neighbor.index],
-                    });
+                        shared_gap_world);
                 }
 
-                prepared_constraints.clear();
-                append_partition_constraints(
-                    prepared_constraints,
-                    owner_perpendicular,
-                    owner_metric_weight,
-                    competitors,
-                    shared_gap_world);
                 local_stats.neighbors_ms +=
                     std::chrono::duration<double, std::milli>(
                         Clock::now() - neighbors_started).count();
@@ -4258,7 +4282,12 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
     const double initial_spacing = std::max(
         1.0e-12,
         nominal_spacing * clamp(settings.spacing_factor, 0.15, 2.5));
-    const double cell_size = initial_spacing;
+    // Size the spatial grid for the largest possible local spacing. This
+    // keeps exact neighbor rejection within the adjacent 27 buckets even
+    // when low-density guides enlarge spacing far beyond the base value.
+    const double minimum_density = minimum_density_factor(guides);
+    const double cell_size = initial_spacing /
+        std::sqrt(std::max(0.02, minimum_density));
     const double maximum_density = maximum_density_factor(guides);
     const DistributionGuideIndex distribution_guide_index(guides);
     SettledDistributionFieldCache settled_distribution_fields(

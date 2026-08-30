@@ -1614,6 +1614,41 @@ int main() {
         sparse_gapped.cells[0U].boundary[2U].x;
     CHECK(std::abs(sparse_gap - 0.2) < 1.0e-9);
 
+    // Density transitions use a spacing-weighted shared boundary. A dense
+    // sample must not stretch halfway toward a much larger sparse sample.
+    sparse_coverage_settings.cell_gap = 0.0;
+    Sample dense_left = sparse_left;
+    dense_left.position = {-5.0, 0.0, 0.0};
+    dense_left.local_spacing = 1.0;
+    Sample sparse_large_right = sparse_right;
+    sparse_large_right.position = {5.0, 0.0, 0.0};
+    sparse_large_right.local_spacing = 10.0;
+    const auto density_transition = bifrost_scales::build_cells(
+        sparse_coverage_mesh,
+        {dense_left, sparse_large_right},
+        sparse_coverage_settings,
+        PreviewMode::Settled,
+        sparse_coverage_report);
+    const double shared_boundary = -5.0 + 10.0 / 11.0;
+    CHECK(std::abs(
+        density_transition.cells[0U].boundary[2U].x - shared_boundary) <
+        1.0e-9);
+    CHECK(std::abs(
+        density_transition.cells[1U].boundary[6U].x - shared_boundary) <
+        1.0e-9);
+    sparse_coverage_settings.cell_gap = 0.1;
+    const auto density_transition_gapped = bifrost_scales::build_cells(
+        sparse_coverage_mesh,
+        {dense_left, sparse_large_right},
+        sparse_coverage_settings,
+        PreviewMode::Settled,
+        sparse_coverage_report);
+    const double density_transition_gap =
+        density_transition_gapped.cells[1U].boundary[6U].x -
+        density_transition_gapped.cells[0U].boundary[2U].x;
+    CHECK(std::abs(density_transition_gap - 0.2) < 1.0e-9);
+
+
     Settings coverage_settings;
     coverage_settings.target_count = 48U;
     coverage_settings.settled_budget = 48U;
