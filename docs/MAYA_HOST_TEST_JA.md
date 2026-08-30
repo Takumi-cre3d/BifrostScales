@@ -1,8 +1,8 @@
-# Maya 2026 Host Test — Bifrost Scales 0.10.7
+# Maya 2026 Host Test — Bifrost Scales 0.10.8
 
 ## 1. Version／Native Pack
 
-BifrostScales_0_10_7_POST_INSTALL_CHECK.pyをMaya Script EditorのPythonタブで実行します。Product、Pack、Minimum Packが0.10.7、ready=True、Payload／Behavior／Profile契約がすべてTrueなら合格です。
+BifrostScales_0_10_8_POST_INSTALL_CHECK.pyをMaya Script EditorのPythonタブで実行します。Product、Pack、Minimum Packが0.10.8、ready=True、Payload／Behavior／Profile契約がすべてTrueなら合格です。
 
 ## 2. 新規作成
 
@@ -17,7 +17,7 @@ distribution=hit orientation=hit cell=hit
 cache=process-shared-bounded/2
 ~~~
 
-Shape生成時間は毎回発生します。Guideを追加・編集して入力が変わった直後のMISSは正常です。
+Shape生成時間は毎回発生します。初回評価後、TargetとGuide geometry／radiusが同一なら`guideSurface`のmissが0になります。InteractiveのTarget Meshが同一なら`meshSample=hit`、Settled／Finalでは`meshSample=n/a`が正常です。Guideを1本編集した場合は、そのGuide Fieldだけがmissとなり、他のGuide Fieldはhitを維持します。
 
 ## 4. Open Boundary BVH
 

@@ -59,6 +59,10 @@ class BackendApplyReport:
     native_profile_available: bool = False
     native_payload_decode_ms: float = 0.0
     native_source_decode_ms: float = 0.0
+    native_guide_surface_ms: float = 0.0
+    native_guide_surface_cache_hits: int = 0
+    native_guide_surface_cache_misses: int = 0
+    native_interactive_surface_cache_hit: bool = False
     native_distribution_ms: float = 0.0
     native_orientation_ms: float = 0.0
     native_orientation_prepare_ms: float = 0.0
@@ -728,6 +732,16 @@ class NativeMayaBackend:
             native_profile_available=bool(profile),
             native_payload_decode_ms=profile_ms("payload_decode_ms"),
             native_source_decode_ms=profile_ms("source_decode_ms"),
+            native_guide_surface_ms=profile_ms("guide_surface_ms"),
+            native_guide_surface_cache_hits=int(
+                profile.get("guide_surface_cache_hits", 0) or 0
+            ),
+            native_guide_surface_cache_misses=int(
+                profile.get("guide_surface_cache_misses", 0) or 0
+            ),
+            native_interactive_surface_cache_hit=bool(
+                profile.get("interactive_surface_cache_hit", False)
+            ),
             native_distribution_ms=profile_ms("distribution_ms"),
             native_orientation_ms=profile_ms("orientation_ms"),
             native_orientation_prepare_ms=profile_ms(

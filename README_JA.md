@@ -9,7 +9,7 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 - Autodesk Maya 2026
 - Autodesk Bifrost for Maya 2026
 - Native source build時はMaya C++ toolchainとBifrost SDK
-- Runtime基準: 0.10.7
+- Runtime基準: 0.10.8
 - 開発状況: pre-1.0。一般配布用Packageは未公開
 
 ## 機能
@@ -25,15 +25,15 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 - 強い局所Density GuideでもCell中心を越えないCollision Margin制約
 - 高曲率Cellの内側をターゲットへ追従させる選択的exact再投影
 - Open Boundary候補をexact BVHで検索し、境界のない閉メッシュでは走査を省略するCell高速経路
-- プロセス共有の上限付きStage Cache
-- 編集間で再利用するTarget Mesh topology／境界／Surface Guide高速化データ
-- PerformanceログにCell setup／neighbor／boundary候補検索／boundary ray／surface projectionの処理時間内訳を表示
+- プロセス共有の上限付きStage／Guide別Geodesic Field／Interactive Surface Sampling Cache
+- 編集間で再利用するTarget Mesh topology／境界／面積・法線Sampling Table／Surface Guide Field
+- PerformanceログにCell／Surface Guide setup、cache再利用、neighbor／boundary query／boundary ray／surface projectionの処理時間内訳を表示
 - OpenCL Interactive Orientationと自動CPU fallback
 - Published Bifrost Graph v4とNative-only製品Runtime
 
 ## ワンクリック導入
 
-Maya 2026用Native Packのビルド後に`python tools/build_one_click_installer.py`を実行すると、他のWindows PCへ配布できるZIPを生成します。導入先ではZIPを展開し、Mayaを終了して`Install_BifrostScales.cmd`をダブルクリックします。Payload検証、既存版バックアップ、Native Pack登録、失敗時ロールバックを自動実行します。詳細は[ワンクリックインストーラー](docs/ONE_CLICK_INSTALLER_JA.md)を参照してください。
+配布用にビルド済みのMaya 2026対応ZIPを展開し、Mayaを終了して`Install_BifrostScales.cmd`をダブルクリックするだけで導入できます。導入先でのビルド作業は不要です。Payload検証、既存版バックアップ、Native Pack登録、失敗時ロールバックを自動実行します。詳細は[ワンクリックインストーラー](docs/ONE_CLICK_INSTALLER_JA.md)を参照してください。
 
 ## Mayaでのワークフロー
 

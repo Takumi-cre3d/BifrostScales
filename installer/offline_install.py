@@ -15,9 +15,9 @@ from datetime import datetime
 from pathlib import Path
 
 
-VERSION = "0.10.7"
-PACK_NAME = "BifrostScalesCore-0.10.7"
-PROFILE_SCHEMA = "bifrost-scales/native-profile/9"
+VERSION = "0.10.8"
+PACK_NAME = "BifrostScalesCore-0.10.8"
+PROFILE_SCHEMA = "bifrost-scales/native-profile/10"
 PAYLOAD_SCHEMA = "bifrost-scales/native-payload/10"
 
 

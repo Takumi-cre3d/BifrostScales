@@ -307,7 +307,7 @@ std::string make_profile_json(
     stream.imbue(std::locale::classic());
     stream << std::fixed << std::setprecision(6);
     stream
-        << "{\"schema\":\"bifrost-scales/native-profile/9\""
+        << "{\"schema\":\"bifrost-scales/native-profile/10\""
         << ",\"compute_backend\":";
     append_json_string(stream, generation.gpu_compute_backend);
     stream
@@ -331,6 +331,13 @@ std::string make_profile_json(
         << ",\"cell_metadata_schema\":\"bifrost-scales/cell-metadata/1\""
         << ",\"payload_decode_ms\":" << payload_decode_ms
         << ",\"source_decode_ms\":" << source_decode_ms
+        << ",\"guide_surface_ms\":" << generation.guide_surface_ms
+        << ",\"guide_surface_cache_hits\":"
+        << generation.guide_surface_cache_hits
+        << ",\"guide_surface_cache_misses\":"
+        << generation.guide_surface_cache_misses
+        << ",\"interactive_surface_cache_hit\":"
+        << (generation.interactive_surface_cache_hit ? "true" : "false")
         << ",\"distribution_ms\":" << generation.distribution_ms
         << ",\"orientation_ms\":" << generation.orientation_ms
         << ",\"orientation_prepare_ms\":"

@@ -12,8 +12,8 @@ python tools/build_one_click_installer.py
 
 生成物:
 
-- `dist/BifrostScales_0_10_7_OneClick_Installer.zip`
-- `dist/BifrostScales_0_10_7_OneClick_Installer.zip.sha256`
+- `dist/BifrostScales_0_10_8_OneClick_Installer.zip`
+- `dist/BifrostScales_0_10_8_OneClick_Installer.zip.sha256`
 
 ローカル固有の`BifrostScales.mod`は配布物へ使用しません。Module定義は正規化され、インストール時に対象PCのPackConfig絶対パスを登録します。
 
@@ -36,4 +36,4 @@ print(bifrost_scales.__version__)
 bifrost_scales.show()
 ```
 
-`0.10.7`が表示され、UIからSystemを作成できることを確認します。Native Performanceログでは、Directionだけを再編集した際に`neighborCache=hit`が表示されます。
+`0.10.8`が表示され、UIからSystemを作成できることを確認します。Native Performanceログでは、初回評価後のGuide以外の編集で`guideSurface`のmissが0になり、Interactiveでは`meshSample=hit`、Directionだけの再編集では`neighborCache=hit`になることを確認します。

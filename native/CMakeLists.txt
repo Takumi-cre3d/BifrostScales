@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(BifrostScalesCore VERSION 0.10.7 LANGUAGES CXX)
+project(BifrostScalesCore VERSION 0.10.8 LANGUAGES CXX)
 
 option(
     BIFROST_SCALES_ENABLE_SANITIZERS

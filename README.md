@@ -9,7 +9,7 @@ Bifrost Scales is a procedural scale-generation tool for Autodesk Maya 2026 and 
 - Autodesk Maya 2026
 - Autodesk Bifrost for Maya 2026
 - Maya C++ toolchain and Bifrost SDK for native source builds
-- Runtime baseline: 0.10.7
+- Runtime baseline: 0.10.8
 - Development status: pre-1.0; no packaged public release is available yet
 
 ## Features
@@ -25,15 +25,15 @@ Bifrost Scales is a procedural scale-generation tool for Autodesk Maya 2026 and 
 - Owner-safe Collision Margin constraints that remain valid under strong local Density guides
 - Curvature-following Cell interiors with selective exact surface reprojection on tight bends
 - Exact BVH lookup for open-boundary candidates, with a closed-mesh fast path that skips traversal
-- Process-shared bounded stage cache
-- Reusable target-mesh topology, boundary, and surface-guide acceleration data across edits
-- Cell setup, neighbor, boundary candidate-query, boundary-ray, and surface-projection timing diagnostics in the Performance log
+- Process-shared bounded stage, per-guide geodesic-field, and Interactive surface-sampling caches
+- Reusable target-mesh topology, boundary, area/normal sampling tables, and Surface Guide fields across edits
+- Cell and Surface Guide setup, cache reuse, neighbor, boundary-query, boundary-ray, and surface-projection diagnostics in the Performance log
 - OpenCL interactive orientation with automatic CPU fallback
 - Published Bifrost graph v4 and native-only production runtime
 
 ## Installation bundle
 
-After building the Maya 2026 Native Pack, run `python tools/build_one_click_installer.py`. The generated ZIP is installed on another Windows PC by extracting it, closing Maya, and double-clicking `Install_BifrostScales.cmd`. The installer verifies every payload file, backs up an existing installation, registers the bundled Native Pack, and rolls back on failure. See [one-click installer details](docs/ONE_CLICK_INSTALLER_JA.md).
+The prebuilt Maya 2026 distribution ZIP is installed on another Windows PC by extracting it, closing Maya, and double-clicking `Install_BifrostScales.cmd`; no local build is required. The installer verifies every payload file, backs up an existing installation, registers the bundled Native Pack, and rolls back on failure. See [one-click installer details](docs/ONE_CLICK_INSTALLER_JA.md).
 
 ## Maya workflow
 

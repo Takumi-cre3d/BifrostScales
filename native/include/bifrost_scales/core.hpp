@@ -268,6 +268,10 @@ struct GenerationOptions {
 };
 
 struct GenerationProfile {
+    double guide_surface_ms{0.0};
+    std::uint32_t guide_surface_cache_hits{0};
+    std::uint32_t guide_surface_cache_misses{0};
+    bool interactive_surface_cache_hit{false};
     double distribution_ms{0.0};
     double orientation_ms{0.0};
     double orientation_prepare_ms{0.0};

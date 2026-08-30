@@ -24,6 +24,7 @@ struct InteractiveCandidateBatch {
     std::uint64_t seed{0U};
     std::uint32_t candidate_count{0U};
     double surface_area{0.0};
+    bool surface_cache_hit{false};
     std::vector<float> positions_xyz;
     std::vector<float> normals_xyz;
     std::vector<float> barycentric;
@@ -71,6 +72,8 @@ InteractiveCandidateBatch build_interactive_candidate_batch(
     const Mesh& mesh,
     const Settings& settings,
     std::uint32_t candidate_count);
+
+void clear_interactive_candidate_cache();
 
 // Applies density/mask stochastic gates, then deterministic spatial conflict
 // arbitration. Processing stops after max_accepted candidates have won.

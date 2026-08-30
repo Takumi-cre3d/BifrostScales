@@ -722,6 +722,12 @@ struct SurfaceGuideTopology {
     double maximum_connection_length{0.0};
 };
 
+struct SurfaceGuideField {
+    std::shared_ptr<const SurfaceGuideTopology> topology;
+    std::vector<double> node_distances;
+    std::vector<SurfaceGuideSeed> seeds;
+};
+
 struct PreparedGuide {
     const Guide* source{nullptr};
     bool curve{false};
@@ -738,9 +744,7 @@ struct PreparedGuide {
     double total_length{0.0};
     std::size_t anchor_segment_count{0U};
     std::vector<PreparedCurveSegment> segments;
-    std::shared_ptr<const SurfaceGuideTopology> surface_topology;
-    std::vector<double> surface_node_distances;
-    std::vector<SurfaceGuideSeed> surface_seeds;
+    std::shared_ptr<const SurfaceGuideField> surface_field;
 };
 
 using PreparedGuides = std::vector<PreparedGuide>;
@@ -858,38 +862,41 @@ double guide_distance(
     const PreparedGuide& guide,
     const Vec3& position,
     std::uint32_t triangle_index) {
-    if (guide.surface_topology == nullptr ||
-        guide.surface_node_distances.size() !=
-            guide.surface_topology->edge_midpoints.size() ||
-        triangle_index >= guide.surface_topology->triangle_edge_nodes.size()) {
+    if (guide.surface_field == nullptr ||
+        guide.surface_field->topology == nullptr ||
+        guide.surface_field->node_distances.size() !=
+            guide.surface_field->topology->edge_midpoints.size() ||
+        triangle_index >=
+            guide.surface_field->topology->triangle_edge_nodes.size()) {
         return nearest_on_guide(guide, position).distance;
     }
 
+    const SurfaceGuideField& field = *guide.surface_field;
     double best = std::numeric_limits<double>::infinity();
     const auto first = std::lower_bound(
-        guide.surface_seeds.begin(),
-        guide.surface_seeds.end(),
+        field.seeds.begin(),
+        field.seeds.end(),
         triangle_index,
         [](const SurfaceGuideSeed& seed, std::uint32_t value) {
             return seed.triangle_index < value;
         });
     for (auto iterator = first;
-         iterator != guide.surface_seeds.end() &&
+         iterator != field.seeds.end() &&
          iterator->triangle_index == triangle_index;
          ++iterator) {
         best = std::min(best, length(sub(position, iterator->point)));
     }
 
     const auto& nodes =
-        guide.surface_topology->triangle_edge_nodes[triangle_index];
+        field.topology->triangle_edge_nodes[triangle_index];
     for (const std::uint32_t node : nodes) {
-        const double distance = guide.surface_node_distances[node];
+        const double distance = field.node_distances[node];
         if (std::isfinite(distance)) {
             best = std::min(
                 best,
                 distance + length(sub(
                     position,
-                    guide.surface_topology->edge_midpoints[node])));
+                    field.topology->edge_midpoints[node])));
         }
     }
     return best;
@@ -2156,10 +2163,10 @@ SurfaceGuideTopologyCache& surface_guide_topology_cache() {
 }
 
 std::shared_ptr<const SurfaceGuideTopology> shared_surface_guide_topology(
-    const Mesh& mesh) {
+    const Mesh& mesh,
+    std::uint64_t geometry_hash) {
     SurfaceGuideTopologyCache& cache = surface_guide_topology_cache();
     std::lock_guard<std::mutex> lock(cache.mutex);
-    const std::uint64_t geometry_hash = mesh_geometry_hash(mesh);
     for (const SurfaceGuideTopologyCacheEntry& entry : cache.entries) {
         if (entry.geometry_hash == geometry_hash &&
             entry.vertex_count == mesh.vertices.size() &&
@@ -2237,25 +2244,164 @@ void clear_shared_surface_guide_topology_cache() {
     cache.entries.clear();
 }
 
+std::uint64_t surface_guide_field_hash(const PreparedGuide& guide) {
+    std::uint64_t result = fnv_text(
+        kFnvOffsetBasis64,
+        "bifrost-scales/surface-guide-field/1");
+    const unsigned char terminator = 0U;
+    result = fnv_bytes(result, &terminator, 1U);
+    result = fnv_u64(result, guide.curve ? 1U : 0U);
+    result = fnv_bytes(
+        result,
+        reinterpret_cast<const unsigned char*>(&guide.radius),
+        sizeof(guide.radius));
+    for (const double value : {
+             guide.fallback_point.x,
+             guide.fallback_point.y,
+             guide.fallback_point.z}) {
+        result = fnv_bytes(
+            result,
+            reinterpret_cast<const unsigned char*>(&value),
+            sizeof(value));
+    }
+    result = fnv_u64(
+        result,
+        static_cast<std::uint64_t>(guide.segments.size()));
+    for (const PreparedCurveSegment& segment : guide.segments) {
+        for (const double value : {
+                 segment.start.x,
+                 segment.start.y,
+                 segment.start.z,
+                 segment.end.x,
+                 segment.end.y,
+                 segment.end.z}) {
+            result = fnv_bytes(
+                result,
+                reinterpret_cast<const unsigned char*>(&value),
+                sizeof(value));
+        }
+    }
+    return result == 0U ? 1U : result;
+}
+
+struct SurfaceGuideFieldCacheEntry {
+    std::uint64_t geometry_hash{0U};
+    std::uint64_t guide_hash{0U};
+    std::shared_ptr<const SurfaceGuideField> field;
+    std::uint64_t access_stamp{0U};
+};
+
+struct SurfaceGuideFieldCache {
+    std::mutex mutex;
+    std::uint64_t access_clock{0U};
+    std::vector<SurfaceGuideFieldCacheEntry> entries;
+};
+
+SurfaceGuideFieldCache& surface_guide_field_cache() {
+    static SurfaceGuideFieldCache cache;
+    return cache;
+}
+
+std::shared_ptr<const SurfaceGuideField> find_surface_guide_field(
+    std::uint64_t geometry_hash,
+    std::uint64_t guide_hash) {
+    SurfaceGuideFieldCache& cache = surface_guide_field_cache();
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    const auto found = std::find_if(
+        cache.entries.begin(),
+        cache.entries.end(),
+        [&](const SurfaceGuideFieldCacheEntry& entry) {
+            return entry.geometry_hash == geometry_hash &&
+                   entry.guide_hash == guide_hash;
+        });
+    if (found == cache.entries.end()) {
+        return {};
+    }
+    found->access_stamp = ++cache.access_clock;
+    return found->field;
+}
+
+std::shared_ptr<const SurfaceGuideField> insert_surface_guide_field(
+    std::uint64_t geometry_hash,
+    std::uint64_t guide_hash,
+    std::shared_ptr<const SurfaceGuideField> field) {
+    SurfaceGuideFieldCache& cache = surface_guide_field_cache();
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    const auto found = std::find_if(
+        cache.entries.begin(),
+        cache.entries.end(),
+        [&](const SurfaceGuideFieldCacheEntry& entry) {
+            return entry.geometry_hash == geometry_hash &&
+                   entry.guide_hash == guide_hash;
+        });
+    if (found != cache.entries.end()) {
+        found->access_stamp = ++cache.access_clock;
+        return found->field;
+    }
+    constexpr std::size_t capacity = 64U;
+    if (cache.entries.size() >= capacity) {
+        const auto oldest = std::min_element(
+            cache.entries.begin(),
+            cache.entries.end(),
+            [](const SurfaceGuideFieldCacheEntry& left,
+               const SurfaceGuideFieldCacheEntry& right) {
+                return left.access_stamp < right.access_stamp;
+            });
+        cache.entries.erase(oldest);
+    }
+    cache.entries.push_back({
+        geometry_hash,
+        guide_hash,
+        std::move(field),
+        ++cache.access_clock,
+    });
+    return cache.entries.back().field;
+}
+
+void clear_shared_surface_guide_field_cache() {
+    SurfaceGuideFieldCache& cache = surface_guide_field_cache();
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    cache.entries.clear();
+    cache.access_clock = 0U;
+}
+
 void prepare_surface_guide_fields(
     const Mesh& mesh,
-    PreparedGuides& guides) {
+    PreparedGuides& guides,
+    GenerationProfile* profile = nullptr) {
     if (mesh.vertices.empty() || mesh.triangles.empty() || guides.empty()) {
         return;
     }
 
-    const auto topology = shared_surface_guide_topology(mesh);
-    SurfaceProjector projector(mesh, false, true);
+    const std::uint64_t geometry_hash = mesh_geometry_hash(mesh);
+    const auto topology = shared_surface_guide_topology(mesh, geometry_hash);
+    std::unique_ptr<SurfaceProjector> projector;
     using QueueItem = std::pair<double, std::uint32_t>;
     for (PreparedGuide& guide : guides) {
         if (guide.source == nullptr || !guide.source->enabled) {
             continue;
         }
-        guide.surface_topology = topology;
-        guide.surface_node_distances.assign(
+        const std::uint64_t guide_hash = surface_guide_field_hash(guide);
+        guide.surface_field = find_surface_guide_field(
+            geometry_hash,
+            guide_hash);
+        if (guide.surface_field != nullptr) {
+            if (profile != nullptr) {
+                ++profile->guide_surface_cache_hits;
+            }
+            continue;
+        }
+        if (profile != nullptr) {
+            ++profile->guide_surface_cache_misses;
+        }
+        if (projector == nullptr) {
+            projector = std::make_unique<SurfaceProjector>(mesh, false, true);
+        }
+        auto field = std::make_shared<SurfaceGuideField>();
+        field->topology = topology;
+        field->node_distances.assign(
             topology->edge_midpoints.size(),
             std::numeric_limits<double>::infinity());
-        guide.surface_seeds.clear();
 
         std::vector<Vec3> source_points;
         if (!guide.curve || guide.segments.empty()) {
@@ -2294,8 +2440,8 @@ void prepare_surface_guide_fields(
             guide.radius + topology->maximum_connection_length;
         for (const Vec3& source_point : source_points) {
             const SurfaceSampleProjection projected =
-                projector.project_sample_global(source_point);
-            guide.surface_seeds.push_back({
+                projector->project_sample_global(source_point);
+            field->seeds.push_back({
                 projected.triangle_index,
                 projected.point,
             });
@@ -2306,15 +2452,15 @@ void prepare_surface_guide_fields(
                     topology->edge_midpoints[node],
                     projected.point));
                 if (seed_distance <= search_limit &&
-                    seed_distance < guide.surface_node_distances[node]) {
-                    guide.surface_node_distances[node] = seed_distance;
+                    seed_distance < field->node_distances[node]) {
+                    field->node_distances[node] = seed_distance;
                     queue.push({seed_distance, node});
                 }
             }
         }
         std::sort(
-            guide.surface_seeds.begin(),
-            guide.surface_seeds.end(),
+            field->seeds.begin(),
+            field->seeds.end(),
             [](const SurfaceGuideSeed& left, const SurfaceGuideSeed& right) {
                 return left.triangle_index < right.triangle_index;
             });
@@ -2322,7 +2468,7 @@ void prepare_surface_guide_fields(
         while (!queue.empty()) {
             const auto [distance, node] = queue.top();
             queue.pop();
-            if (distance > guide.surface_node_distances[node]) {
+            if (distance > field->node_distances[node]) {
                 continue;
             }
             if (distance > search_limit) {
@@ -2331,12 +2477,16 @@ void prepare_surface_guide_fields(
             for (const SurfaceGraphEdge& edge : topology->graph[node]) {
                 const double candidate = distance + edge.length;
                 if (candidate <= search_limit &&
-                    candidate < guide.surface_node_distances[edge.vertex]) {
-                    guide.surface_node_distances[edge.vertex] = candidate;
+                    candidate < field->node_distances[edge.vertex]) {
+                    field->node_distances[edge.vertex] = candidate;
                     queue.push({candidate, edge.vertex});
                 }
             }
         }
+        guide.surface_field = insert_surface_guide_field(
+            geometry_hash,
+            guide_hash,
+            std::move(field));
     }
 }
 
@@ -4516,6 +4666,9 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                 std::numeric_limits<std::uint32_t>::max()));
         const InteractiveCandidateBatch batch =
             build_interactive_candidate_batch(mesh, settings, candidate_count);
+        if (profile != nullptr) {
+            profile->interactive_surface_cache_hit = batch.surface_cache_hit;
+        }
         InteractiveCandidateFields fields;
         fields.density_acceptance.resize(candidate_count);
         fields.local_spacing.resize(candidate_count);
@@ -5136,7 +5289,8 @@ std::vector<OrientedSample> orientation_field(
             return guide.source != nullptr &&
                    guide.source->enabled &&
                    guide.uses_direction &&
-                   !guide.surface_node_distances.empty();
+                   guide.surface_field != nullptr &&
+                   !guide.surface_field->node_distances.empty();
         });
     const bool interactive_gpu_eligible =
         mode == PreviewMode::Interactive &&
@@ -7269,6 +7423,8 @@ void clear_native_stage_cache() {
     SurfaceProjector::clear_shared_local_topology_cache();
     clear_shared_boundary_topology_cache();
     clear_shared_surface_guide_topology_cache();
+    clear_shared_surface_guide_field_cache();
+    clear_interactive_candidate_cache();
 }
 
 GenerationResult generate(
@@ -7292,7 +7448,10 @@ GenerationResult generate(
     validate_mesh(mesh);
     GenerationProfile profile;
     PreparedGuides prepared_guides = prepare_guides(guides);
-    prepare_surface_guide_fields(mesh, prepared_guides);
+    const auto guide_surface_started = Clock::now();
+    prepare_surface_guide_fields(mesh, prepared_guides, &profile);
+    profile.guide_surface_ms = std::chrono::duration<double, std::milli>(
+        Clock::now() - guide_surface_started).count();
     ProcessStageCache& cache = native_stage_cache();
     profile.stage_cache_capacity = cache.capacity();
 

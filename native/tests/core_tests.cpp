@@ -2104,6 +2104,36 @@ int main() {
     Settings guide_cache_settings = coverage_settings;
     guide_cache_settings.target_count = 41U;
     guide_cache_settings.settled_budget = 41U;
+    const GenerationResult surface_field_first = bifrost_scales::generate(
+        mesh,
+        guide_cache_settings,
+        PreviewMode::Settled,
+        {cache_curve});
+    CHECK(surface_field_first.profile.guide_surface_cache_hits == 0U);
+    CHECK(surface_field_first.profile.guide_surface_cache_misses == 1U);
+    Settings surface_field_seed_edit = guide_cache_settings;
+    surface_field_seed_edit.seed += 1U;
+    const GenerationResult surface_field_reused = bifrost_scales::generate(
+        mesh,
+        surface_field_seed_edit,
+        PreviewMode::Settled,
+        {cache_curve});
+    CHECK(!surface_field_reused.profile.distribution_cache_hit);
+    CHECK(surface_field_reused.profile.guide_surface_cache_hits == 1U);
+    CHECK(surface_field_reused.profile.guide_surface_cache_misses == 0U);
+    bifrost_scales::clear_native_stage_cache();
+    const GenerationResult surface_field_cold = bifrost_scales::generate(
+        mesh,
+        surface_field_seed_edit,
+        PreviewMode::Settled,
+        {cache_curve});
+    CHECK(surface_field_cold.profile.guide_surface_cache_hits == 0U);
+    CHECK(surface_field_cold.profile.guide_surface_cache_misses == 1U);
+    CHECK(surface_field_reused.mesh.vertices == surface_field_cold.mesh.vertices);
+    CHECK(surface_field_reused.mesh.faces == surface_field_cold.mesh.faces);
+    CHECK(surface_field_reused.mesh.cell_ids == surface_field_cold.mesh.cell_ids);
+
+    bifrost_scales::clear_native_stage_cache();
     (void)bifrost_scales::generate(
         mesh,
         guide_cache_settings,
@@ -2115,6 +2145,8 @@ int main() {
         guide_cache_settings,
         PreviewMode::Settled,
         {cache_curve});
+    CHECK(radius_edit.profile.guide_surface_cache_hits == 0U);
+    CHECK(radius_edit.profile.guide_surface_cache_misses == 1U);
     CHECK(radius_edit.profile.distribution_cache_hit);
     CHECK(!radius_edit.profile.orientation_cache_hit);
     CHECK(!radius_edit.profile.cell_cache_hit);
@@ -2419,6 +2451,9 @@ int main() {
             mesh,
             candidate_settings,
             128U);
+    CHECK(!candidate_small.surface_cache_hit);
+    CHECK(candidate_repeat.surface_cache_hit);
+    CHECK(candidate_large.surface_cache_hit);
     CHECK(candidate_small.has_consistent_sizes());
     CHECK(candidate_small.upload_bytes() == 32U * 72U);
     CHECK(candidate_small.positions_xyz == candidate_repeat.positions_xyz);
@@ -2457,6 +2492,7 @@ int main() {
             mesh,
             changed_candidate_seed,
             32U);
+    CHECK(candidate_changed.surface_cache_hit);
     CHECK(candidate_changed.positions_xyz != candidate_small.positions_xyz);
     CHECK(candidate_changed.candidate_keys != candidate_small.candidate_keys);
 

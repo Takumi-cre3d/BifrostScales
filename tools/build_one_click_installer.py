@@ -10,9 +10,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.10.7"
-PACK_NAME = "BifrostScalesCore-0.10.7"
-OUTPUT_NAME = "BifrostScales_0_10_7_OneClick_Installer.zip"
+VERSION = "0.10.8"
+PACK_NAME = "BifrostScalesCore-0.10.8"
+OUTPUT_NAME = "BifrostScales_0_10_8_OneClick_Installer.zip"
 FIXED_TIME = (2026, 8, 29, 0, 0, 0)
 
 _RETIRED_RUNTIME_MODULES = {
@@ -28,7 +28,7 @@ _RETIRED_RUNTIME_MODULES = {
     "surface_features.py",
 }
 
-_CANONICAL_MOD = """+ BifrostScales 0.10.7 BifrostScales
+_CANONICAL_MOD = """+ BifrostScales 0.10.8 BifrostScales
 PYTHONPATH +:= scripts
 PATH +:= bin
 plug-ins: plug-ins
@@ -65,7 +65,7 @@ def _runtime_files(source_root: Path) -> list[tuple[Path, str]]:
         raise RuntimeError("Native Pack version does not match the installer version")
     if str(manifest.get("native_payload_schema", "")) != "bifrost-scales/native-payload/10":
         raise RuntimeError("Native Pack payload schema is incompatible")
-    if str(manifest.get("native_profile_schema", "")) != "bifrost-scales/native-profile/9":
+    if str(manifest.get("native_profile_schema", "")) != "bifrost-scales/native-profile/10":
         raise RuntimeError("Native Pack profile schema is incompatible")
 
     result: list[tuple[Path, str]] = []

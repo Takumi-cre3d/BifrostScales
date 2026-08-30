@@ -113,8 +113,12 @@ int main(int argc, char** argv) {
     settings.relax_iterations = 1U;
     settings.direction_relax_iterations = 0U;
 
+    std::vector<double> cold_guide_surface_times;
     std::vector<double> distribution_times;
     std::vector<double> total_times;
+    std::vector<double> reused_guide_surface_times;
+    std::vector<double> reused_distribution_times;
+    std::vector<double> reused_total_times;
     std::uint32_t accepted = 0U;
     std::uint64_t attempts = 0U;
     double final_spacing = 0.0;
@@ -128,15 +132,39 @@ int main(int argc, char** argv) {
         accepted = result.report.accepted_count;
         attempts = result.report.attempts;
         final_spacing = result.report.final_spacing;
+        cold_guide_surface_times.push_back(result.profile.guide_surface_ms);
         distribution_times.push_back(result.profile.distribution_ms);
         total_times.push_back(result.profile.total_ms);
+
+        bifrost_scales::Settings seed_edit = settings;
+        seed_edit.seed += repeat + 1U;
+        const auto reused = bifrost_scales::generate(
+            mesh,
+            seed_edit,
+            preview_mode,
+            guides);
+        if (reused.profile.distribution_cache_hit ||
+            reused.profile.guide_surface_cache_hits != guides.size() ||
+            reused.profile.guide_surface_cache_misses != 0U) {
+            throw std::runtime_error(
+                "surface Guide field cache did not survive a Distribution miss");
+        }
+        reused_guide_surface_times.push_back(reused.profile.guide_surface_ms);
+        reused_distribution_times.push_back(reused.profile.distribution_ms);
+        reused_total_times.push_back(reused.profile.total_ms);
     }
     std::cout.imbue(std::locale::classic());
     std::cout << std::fixed << std::setprecision(3)
-              << "mode,requested_count,accepted_count,guide_count,attempts,final_spacing,distribution_ms,total_ms\n"
+              << "mode,requested_count,accepted_count,guide_count,attempts,final_spacing,"
+                 "cold_guide_surface_ms,distribution_ms,total_ms,"
+                 "reused_guide_surface_ms,reused_distribution_ms,reused_total_ms\n"
               << mode_name << ','
               << requested << ',' << accepted << ',' << guides.size() << ','
               << attempts << ',' << final_spacing << ','
-              << median(distribution_times) << ',' << median(total_times) << '\n';
+              << median(cold_guide_surface_times) << ','
+              << median(distribution_times) << ',' << median(total_times) << ','
+              << median(reused_guide_surface_times) << ','
+              << median(reused_distribution_times) << ','
+              << median(reused_total_times) << '\n';
     return 0;
 }

@@ -5,8 +5,11 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <unordered_map>
+#include <vector>
 
 namespace bifrost_scales {
 namespace {
@@ -98,6 +101,138 @@ void append_vec3(std::vector<float>& output, const Vec3& value) {
     output.push_back(static_cast<float>(value.z));
 }
 
+struct InteractiveSurfaceSamplingData {
+    std::vector<std::uint32_t> triangles;
+    std::vector<double> cumulative_areas;
+    std::vector<Vec3> normals;
+    double total_area{0.0};
+};
+
+std::uint64_t interactive_mesh_hash(const Mesh& mesh) noexcept {
+    constexpr std::uint64_t offset = 14695981039346656037ULL;
+    constexpr std::uint64_t prime = 1099511628211ULL;
+    std::uint64_t result = offset;
+    const auto bytes = [&](const void* data, std::size_t size) {
+        const auto* values = static_cast<const unsigned char*>(data);
+        for (std::size_t index = 0U; index < size; ++index) {
+            result ^= static_cast<std::uint64_t>(values[index]);
+            result *= prime;
+        }
+    };
+    const std::uint64_t vertex_count = mesh.vertices.size();
+    bytes(&vertex_count, sizeof(vertex_count));
+    for (const Vec3& point : mesh.vertices) {
+        bytes(&point.x, sizeof(point.x));
+        bytes(&point.y, sizeof(point.y));
+        bytes(&point.z, sizeof(point.z));
+    }
+    const std::uint64_t triangle_count = mesh.triangles.size();
+    bytes(&triangle_count, sizeof(triangle_count));
+    for (const Triangle& triangle : mesh.triangles) {
+        bytes(&triangle.a, sizeof(triangle.a));
+        bytes(&triangle.b, sizeof(triangle.b));
+        bytes(&triangle.c, sizeof(triangle.c));
+    }
+    return result == 0U ? 1U : result;
+}
+
+std::shared_ptr<const InteractiveSurfaceSamplingData>
+build_interactive_surface_sampling_data(const Mesh& mesh) {
+    auto data = std::make_shared<InteractiveSurfaceSamplingData>();
+    data->normals.resize(mesh.triangles.size());
+    data->triangles.reserve(mesh.triangles.size());
+    data->cumulative_areas.reserve(mesh.triangles.size());
+    for (std::uint32_t index = 0U; index < mesh.triangles.size(); ++index) {
+        const Triangle& triangle = mesh.triangles[index];
+        if (triangle.a >= mesh.vertices.size() ||
+            triangle.b >= mesh.vertices.size() ||
+            triangle.c >= mesh.vertices.size()) {
+            throw std::invalid_argument(
+                "interactive candidate mesh contains an invalid triangle index");
+        }
+        const Vec3& a = mesh.vertices[triangle.a];
+        const Vec3& b = mesh.vertices[triangle.b];
+        const Vec3& c = mesh.vertices[triangle.c];
+        const Vec3 area_vector = cross(subtract(b, a), subtract(c, a));
+        const double doubled_area = length(area_vector);
+        if (doubled_area <= 2.0e-14) {
+            continue;
+        }
+        data->total_area += 0.5 * doubled_area;
+        data->triangles.push_back(index);
+        data->cumulative_areas.push_back(data->total_area);
+        data->normals[index] = {
+            area_vector.x / doubled_area,
+            area_vector.y / doubled_area,
+            area_vector.z / doubled_area,
+        };
+    }
+    if (data->total_area <= 1.0e-14 || data->triangles.empty()) {
+        throw std::invalid_argument(
+            "interactive candidate mesh has no non-degenerate surface area");
+    }
+    return data;
+}
+
+struct InteractiveSurfaceCacheEntry {
+    std::uint64_t geometry_hash{0U};
+    std::size_t vertex_count{0U};
+    std::size_t triangle_count{0U};
+    std::shared_ptr<const InteractiveSurfaceSamplingData> data;
+    std::uint64_t access_stamp{0U};
+};
+
+struct InteractiveSurfaceCache {
+    std::mutex mutex;
+    std::uint64_t access_clock{0U};
+    std::vector<InteractiveSurfaceCacheEntry> entries;
+};
+
+InteractiveSurfaceCache& interactive_surface_cache() {
+    static InteractiveSurfaceCache cache;
+    return cache;
+}
+
+std::shared_ptr<const InteractiveSurfaceSamplingData>
+shared_interactive_surface_sampling_data(const Mesh& mesh, bool* cache_hit) {
+    const std::uint64_t geometry_hash = interactive_mesh_hash(mesh);
+    InteractiveSurfaceCache& cache = interactive_surface_cache();
+    {
+        std::lock_guard<std::mutex> lock(cache.mutex);
+        for (InteractiveSurfaceCacheEntry& entry : cache.entries) {
+            if (entry.geometry_hash == geometry_hash &&
+                entry.vertex_count == mesh.vertices.size() &&
+                entry.triangle_count == mesh.triangles.size()) {
+                entry.access_stamp = ++cache.access_clock;
+                *cache_hit = true;
+                return entry.data;
+            }
+        }
+    }
+    auto built = build_interactive_surface_sampling_data(mesh);
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    constexpr std::size_t capacity = 2U;
+    if (cache.entries.size() >= capacity) {
+        const auto oldest = std::min_element(
+            cache.entries.begin(),
+            cache.entries.end(),
+            [](const InteractiveSurfaceCacheEntry& left,
+               const InteractiveSurfaceCacheEntry& right) {
+                return left.access_stamp < right.access_stamp;
+            });
+        cache.entries.erase(oldest);
+    }
+    cache.entries.push_back({
+        geometry_hash,
+        mesh.vertices.size(),
+        mesh.triangles.size(),
+        std::move(built),
+        ++cache.access_clock,
+    });
+    *cache_hit = false;
+    return cache.entries.back().data;
+}
+
 }  // namespace
 
 std::size_t InteractiveCandidateBatch::upload_bytes() const noexcept {
@@ -123,47 +258,16 @@ InteractiveCandidateBatch build_interactive_candidate_batch(
     const Mesh& mesh,
     const Settings& settings,
     std::uint32_t candidate_count) {
-    std::vector<std::uint32_t> triangles;
-    std::vector<double> cumulative_areas;
-    std::vector<Vec3> normals(mesh.triangles.size());
-    triangles.reserve(mesh.triangles.size());
-    cumulative_areas.reserve(mesh.triangles.size());
-
-    double total_area = 0.0;
-    for (std::uint32_t index = 0U; index < mesh.triangles.size(); ++index) {
-        const Triangle& triangle = mesh.triangles[index];
-        if (triangle.a >= mesh.vertices.size() ||
-            triangle.b >= mesh.vertices.size() ||
-            triangle.c >= mesh.vertices.size()) {
-            throw std::invalid_argument(
-                "interactive candidate mesh contains an invalid triangle index");
-        }
-        const Vec3& a = mesh.vertices[triangle.a];
-        const Vec3& b = mesh.vertices[triangle.b];
-        const Vec3& c = mesh.vertices[triangle.c];
-        const Vec3 area_vector = cross(subtract(b, a), subtract(c, a));
-        const double doubled_area = length(area_vector);
-        if (doubled_area <= 2.0e-14) {
-            continue;
-        }
-        total_area += 0.5 * doubled_area;
-        triangles.push_back(index);
-        cumulative_areas.push_back(total_area);
-        normals[index] = {
-            area_vector.x / doubled_area,
-            area_vector.y / doubled_area,
-            area_vector.z / doubled_area,
-        };
-    }
-    if (total_area <= 1.0e-14 || triangles.empty()) {
-        throw std::invalid_argument(
-            "interactive candidate mesh has no non-degenerate surface area");
-    }
+    bool surface_cache_hit = false;
+    const auto surface = shared_interactive_surface_sampling_data(
+        mesh,
+        &surface_cache_hit);
 
     InteractiveCandidateBatch batch;
     batch.seed = settings.seed;
     batch.candidate_count = candidate_count;
-    batch.surface_area = total_area;
+    batch.surface_area = surface->total_area;
+    batch.surface_cache_hit = surface_cache_hit;
     const std::size_t count = candidate_count;
     batch.positions_xyz.reserve(count * 3U);
     batch.normals_xyz.reserve(count * 3U);
@@ -174,13 +278,15 @@ InteractiveCandidateBatch build_interactive_candidate_batch(
 
     for (std::uint64_t ordinal = 0U; ordinal < candidate_count; ++ordinal) {
         const double weighted = candidate_random(settings.seed, ordinal, 0U) *
-            total_area;
+            surface->total_area;
         const auto found = std::lower_bound(
-            cumulative_areas.begin(), cumulative_areas.end(), weighted);
+            surface->cumulative_areas.begin(),
+            surface->cumulative_areas.end(),
+            weighted);
         const std::size_t area_index = std::min<std::size_t>(
-            static_cast<std::size_t>(found - cumulative_areas.begin()),
-            triangles.size() - 1U);
-        const std::uint32_t triangle_index = triangles[area_index];
+            static_cast<std::size_t>(found - surface->cumulative_areas.begin()),
+            surface->triangles.size() - 1U);
+        const std::uint32_t triangle_index = surface->triangles[area_index];
         const Triangle& triangle = mesh.triangles[triangle_index];
         const double root = std::sqrt(candidate_random(settings.seed, ordinal, 1U));
         const double second = candidate_random(settings.seed, ordinal, 2U);
@@ -199,7 +305,7 @@ InteractiveCandidateBatch build_interactive_candidate_batch(
         };
 
         append_vec3(batch.positions_xyz, position);
-        append_vec3(batch.normals_xyz, normals[triangle_index]);
+        append_vec3(batch.normals_xyz, surface->normals[triangle_index]);
         for (const double weight : weights) {
             batch.barycentric.push_back(static_cast<float>(weight));
         }
@@ -217,6 +323,13 @@ InteractiveCandidateBatch build_interactive_candidate_batch(
             splitmix64(settings.seed ^ kCandidateStream) + ordinal);
     }
     return batch;
+}
+
+void clear_interactive_candidate_cache() {
+    InteractiveSurfaceCache& cache = interactive_surface_cache();
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    cache.entries.clear();
+    cache.access_clock = 0U;
 }
 
 
