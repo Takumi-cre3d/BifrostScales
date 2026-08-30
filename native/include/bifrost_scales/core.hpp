@@ -201,6 +201,7 @@ struct OrientedSample {
 struct CellData {
     std::uint32_t sample_index{0};
     std::vector<Vec3> boundary;
+    std::vector<Vec3> boundary_normals;
     Vec3 stable_tangent{1.0, 0.0, 0.0};
     Vec3 stable_bitangent{0.0, 0.0, 1.0};
     double local_spacing{0.0};

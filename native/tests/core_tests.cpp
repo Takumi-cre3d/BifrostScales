@@ -130,6 +130,27 @@ Mesh fan_mesh(std::uint32_t count = 12U) {
     return mesh;
 }
 
+Mesh cylinder_mesh(std::uint32_t segments = 32U) {
+    Mesh mesh;
+    const double pi = std::acos(-1.0);
+    for (std::uint32_t index = 0U; index < segments; ++index) {
+        const double angle = 2.0 * pi * static_cast<double>(index) /
+            static_cast<double>(segments);
+        mesh.vertices.push_back({std::cos(angle), -2.0, std::sin(angle)});
+        mesh.vertices.push_back({std::cos(angle), 2.0, std::sin(angle)});
+    }
+    for (std::uint32_t index = 0U; index < segments; ++index) {
+        const std::uint32_t next = (index + 1U) % segments;
+        const std::uint32_t bottom = index * 2U;
+        const std::uint32_t top = bottom + 1U;
+        const std::uint32_t next_bottom = next * 2U;
+        const std::uint32_t next_top = next_bottom + 1U;
+        mesh.triangles.push_back({bottom, next_top, next_bottom});
+        mesh.triangles.push_back({bottom, top, next_top});
+    }
+    return mesh;
+}
+
 std::uint32_t counted_types(
     const std::vector<std::pair<std::string, std::uint32_t>>& counts) {
     return std::accumulate(
@@ -425,6 +446,26 @@ int main() {
         normal_winding_settings);
     check_faces_follow_normal(normal_cells, normal_winding_sample.normal);
 
+    CellData boundary_lift_cell = normal_winding_cell;
+    boundary_lift_cell.boundary_normals.assign(
+        boundary_lift_cell.boundary.size(),
+        {1.0, 0.0, 0.0});
+    normal_winding_settings.lift = 0.2;
+    const auto boundary_lift_cells = bifrost_scales::shape_cells(
+        {normal_winding_oriented},
+        {boundary_lift_cell},
+        normal_winding_settings);
+    CHECK(!boundary_lift_cells.vertices.empty());
+    CHECK(std::abs(
+        boundary_lift_cells.vertices.front().x -
+        (boundary_lift_cell.boundary.front().x + normal_winding_settings.lift)) <
+        1.0e-9);
+    CHECK(std::abs(
+        boundary_lift_cells.vertices.front().y -
+        boundary_lift_cell.boundary.front().y) <
+        1.0e-9);
+    normal_winding_settings.lift = 0.0;
+
     Settings generated_winding_settings;
     generated_winding_settings.target_count = 32U;
     generated_winding_settings.interactive_budget = 32U;
@@ -503,6 +544,61 @@ int main() {
     for (const Vec3& point : fan_cells.cells.front().boundary) {
         CHECK(std::hypot(point.x, point.z) > 0.49);
     }
+
+    // A low-density Cell can span many source triangles on a curved surface.
+    // Projection must walk beyond the authored ring cache and converge to the
+    // same local surface result as a wide precomputed neighborhood.
+    const Mesh cylinder = cylinder_mesh();
+    Sample cylinder_sample;
+    cylinder_sample.position = {1.0, 0.0, 0.0};
+    cylinder_sample.normal = {1.0, 0.0, 0.0};
+    cylinder_sample.triangle_index = 1U;
+    cylinder_sample.local_spacing = 0.8;
+    Settings cylinder_low_settings;
+    cylinder_low_settings.cell_mode = GeometryMode::Cells;
+    cylinder_low_settings.cell_settled_resolution = 16U;
+    cylinder_low_settings.cell_gap = 0.0;
+    cylinder_low_settings.cell_collision_margin = 0.0;
+    cylinder_low_settings.cell_radius_multiplier = 1.65;
+    cylinder_low_settings.cell_projection_rings = 1U;
+    cylinder_low_settings.cell_project_to_surface = true;
+    GenerationReport cylinder_report;
+    cylinder_report.initial_spacing = 0.8;
+    cylinder_report.final_spacing = 0.8;
+    const auto cylinder_low = bifrost_scales::build_cells(
+        cylinder,
+        {cylinder_sample},
+        cylinder_low_settings,
+        PreviewMode::Settled,
+        cylinder_report);
+    Settings cylinder_wide_settings = cylinder_low_settings;
+    cylinder_wide_settings.cell_projection_rings = 16U;
+    const auto cylinder_wide = bifrost_scales::build_cells(
+        cylinder,
+        {cylinder_sample},
+        cylinder_wide_settings,
+        PreviewMode::Settled,
+        cylinder_report);
+    CHECK(cylinder_low.cells.size() == 1U);
+    CHECK(cylinder_wide.cells.size() == 1U);
+    double cylinder_projection_error = 0.0;
+    for (std::size_t index = 0U;
+         index < cylinder_low.cells.front().boundary.size();
+         ++index) {
+        const Vec3 delta{
+            cylinder_low.cells.front().boundary[index].x -
+                cylinder_wide.cells.front().boundary[index].x,
+            cylinder_low.cells.front().boundary[index].y -
+                cylinder_wide.cells.front().boundary[index].y,
+            cylinder_low.cells.front().boundary[index].z -
+                cylinder_wide.cells.front().boundary[index].z,
+        };
+        cylinder_projection_error = std::max(
+            cylinder_projection_error,
+            std::sqrt(
+                delta.x * delta.x + delta.y * delta.y + delta.z * delta.z));
+    }
+    CHECK(cylinder_projection_error < 1.0e-8);
 
     // Boundary clipping is component-local. A small disconnected shell close
     // to a larger shell must not cut a bite into the larger shell's Cell.
