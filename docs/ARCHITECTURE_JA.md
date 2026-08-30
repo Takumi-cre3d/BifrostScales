@@ -1,4 +1,4 @@
-# Bifrost Scales Architecture — Native-only 0.10.6
+# Bifrost Scales Architecture — Native-only 0.10.7
 
 ```text
 Maya Python Host
@@ -24,7 +24,13 @@ Maya Viewport 2.0 GPU display
 
 ## Guide更新境界
 
-0.10.3の局所Dirty Regionは撤回済みです。0.10.6は0.10.2と同じ全Orientation更新を行い、Distributionと正確なCell PartitionをStage Cacheで再利用します。Cell MISS時は共通Ray表、事前計算済みNormal／Component、Maskなし高速経路を使います。
+0.10.3の局所Dirty Regionは撤回済みです。0.10.7は0.10.2と同じ全Orientation更新を行い、Distributionと正確なCell PartitionをStage Cacheで再利用します。Cell MISS時は共通Ray表、事前計算済みNormal／Component、Maskなし高速経路を使います。
+
+## Cell曲面追従
+
+Cell段階は外周端点に加えて各Rayの中点と法線をTarget表面へ投影し、Cell Cacheへ保持します。Shape段階は中心・中点・外周の二次補間で内側リングを曲面へ沿わせます。相対サグ量が0.001を越えるか、Sample法線から約3度を越えて曲がるCellは、Width／Length／Forward等のShape変形後に内側リングと中心を接続局所表面へexact再投影します。
+
+GapとCollision Marginは従来どおりworld-spaceの共有幅ですが、強いDensity Guideで中心間隔より広くなる場合は、所有SeedをPartition外へ押し出さない最大値へpair単位で制限します。これによりCell Cacheや中心配置を変更せず、局所的な巨大fallback Cellだけを防ぎます。
 
 ## OpenCL GPU
 

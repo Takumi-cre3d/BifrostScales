@@ -588,9 +588,11 @@ int main(int argc, char** argv) {
                 decoded.payload.symmetry_planes,
                 orientation.report);
             generated = bifrost_scales::shape_cells(
+                mesh,
                 orientation.samples,
                 cells.cells,
                 settings,
+                mode,
                 guides);
             final_report = cells.report;
         } else {

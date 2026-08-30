@@ -243,7 +243,7 @@ class BifrostScalesCellPickerContextCommand(omui.MPxContextCommand):
 
 
 def initializePlugin(plugin):
-    fn = om.MFnPlugin(plugin, "Bifrost Scales", "0.10.6", "Any")
+    fn = om.MFnPlugin(plugin, "Bifrost Scales", "0.10.7", "Any")
     fn.registerContextCommand(
         COMMAND_NAME, BifrostScalesCellPickerContextCommand.creator
     )

@@ -9,7 +9,7 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 - Autodesk Maya 2026
 - Autodesk Bifrost for Maya 2026
 - Native source build時はMaya C++ toolchainとBifrost SDK
-- Runtime基準: 0.10.6
+- Runtime基準: 0.10.7
 - 開発状況: pre-1.0。一般配布用Packageは未公開
 
 ## 機能
@@ -22,6 +22,8 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 - 64-bit Stable Cell IDとメッシュ不要のPicker metadata
 - 決定的マルチコアCPU Distribution／Cells／Shape
 - 大きなCell半径やDensity差に対応するexact BVH Cell近傍探索
+- 強い局所Density GuideでもCell中心を越えないCollision Margin制約
+- 高曲率Cellの内側をターゲットへ追従させる選択的exact再投影
 - Open Boundary候補をexact BVHで検索し、境界のない閉メッシュでは走査を省略するCell高速経路
 - プロセス共有の上限付きStage Cache
 - 編集間で再利用するTarget Mesh topology／境界／Surface Guide高速化データ
@@ -42,6 +44,8 @@ Maya 2026用Native Packのビルド後に`python tools/build_one_click_installer
 5. Maya Sceneを保存すると、System、Guide、Guide Group、Scale Type、Native Graph接続がSceneへ保存されます。
 
 ## 実行モデル
+
+固定幅のGap／Collision Marginが局所的な中心間隔を越える場合は、所有Cell中心を除外しない上限へ制約を収め、高Density Guide内で一部Cellが巨大なfallback半径へ開くことを防ぎます。Shape段階では投影済み外周中点を使う軽量な曲面補間を基本とし、サグ量または法線変化が閾値を越える高曲率Cellだけ、変形後の内側リングと中心を接続されたTarget表面へexact再投影します。平面・緩曲面ではCell Cacheを使う軽量経路を維持します。
 
 Settled出力は表面接続Guide Fieldを訪問済み三角形の頂点でキャッシュし、三角形内を決定的に補間してルック開発時の再分布を高速化します。Orientationは各SampleのDirection Guide Fieldを1回だけ評価して初期方向と最終方向で再利用し、複数反復するSettled Direction Relaxは距離判定済み近傍だけを上限付きcompact CSR配列へ保持し、Distributionが同一のDirection-only編集では近傍Graphを再利用します。Native PerformanceログはOrientationをprepare／neighbors／relax／finalizeの4区間と`neighborCache`状態で表示します。Finalは従来の候補ごとの倍精度CPU exact評価を維持します。Interactive Distributionはcompact・決定的・prefix-stableなSurface Candidateを並列評価し、空間競合をOpenCLで裁定します。GPUを利用できない場合は同じ優先規則のCPU referenceへ自動fallbackします。CPUで生成するOpen Boundary／Guide Curve Anchor、Stable Cell ID、Maskのpost-Cell出力制御は維持されます。Direction異方性は中心点を追加・削除せず、隣接Cell間で対称な距離計量だけを変えます。全体効果の最大は上限付き2.25軸比で、Guideごとに効果を弱めるか無効化できます。
 GPU Crossover以上の複数反復Settled Previewでは、表面接続Guide評価をCPU exactのまま維持し、compact CSRを使うDirection RelaxだけをOpenCLで実行します。GPUが利用できない場合、近傍が高密度な場合、または実行に失敗した場合は既存CPU経路へ自動fallbackします。

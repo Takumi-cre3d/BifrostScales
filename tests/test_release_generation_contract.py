@@ -18,11 +18,29 @@ def _load_build_release():
 
 def test_release_versioned_names_share_one_current_prefix():
     module = _load_build_release()
-    assert module.VERSION == "0.10.6"
-    assert module.INSTALLER_NAME == "BifrostScales_0_10_6_Standalone_Installer.py"
-    assert module.SOURCE_ZIP_NAME == "BifrostScales_0_10_6.zip"
-    assert module._current_release_prefix() == "BifrostScales_0_10_6"
+    assert module.VERSION == "0.10.7"
+    assert module.INSTALLER_NAME == "BifrostScales_0_10_7_Standalone_Installer.py"
+    assert module.POST_CHECK_NAME == "BifrostScales_0_10_7_POST_INSTALL_CHECK.py"
+    assert module.SOURCE_ZIP_NAME == "BifrostScales_0_10_7.zip"
+    assert module._current_release_prefix() == "BifrostScales_0_10_7"
 
+
+def test_post_install_check_matches_current_native_contract():
+    module = _load_build_release()
+    source = module._post_install_check_source()
+    assert source.count(repr(module.VERSION)) >= 3
+    assert "payload_schema_contract_valid" in source
+    assert "native_behavior_contract_valid" in source
+    assert "native_profile_schema_contract_valid" in source
+    assert "high-curvature target" in source
+
+
+def test_release_archives_always_use_the_canonical_module_descriptor():
+    module = _load_build_release()
+    encoded = module._release_file_bytes(ROOT / "BifrostScales.mod")
+    assert encoded.decode("utf-8") == module.CANONICAL_MOD
+    assert "BifrostScales 0.10.7 BifrostScales" in module.CANONICAL_MOD
+    assert "D:/" not in module.CANONICAL_MOD
 
 def test_source_zip_filter_rejects_only_stale_top_level_release_artifacts():
     module = _load_build_release()
@@ -33,7 +51,7 @@ def test_source_zip_filter_rejects_only_stale_top_level_release_artifacts():
         ROOT / "BifrostScales_0_9_6_POST_INSTALL_CHECK.py"
     )
     assert not module._is_stale_top_level_release_artifact(
-        ROOT / "BifrostScales_0_10_6_Standalone_Installer.py"
+        ROOT / "BifrostScales_0_10_7_Standalone_Installer.py"
     )
     assert not module._is_stale_top_level_release_artifact(
         ROOT / "docs" / "MIGRATION_0_9_4_TO_0_9_5_JA.md"

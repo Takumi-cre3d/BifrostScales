@@ -178,7 +178,7 @@ class MayaCellMetadataProvider:
                 pass
         records = sorted(all_records.values(), key=lambda r: r.scale_index)
         if not records:
-            raise RuntimeError("The native graph returned no cell metadata. Rebuild the 0.10.6+ Native Pack and evaluate Settled Preview once.")
+            raise RuntimeError("The native graph returned no cell metadata. Rebuild the 0.10.7+ Native Pack and evaluate Settled Preview once.")
         return records, revision
 
     def screen_ray(self, x: int, y: int):

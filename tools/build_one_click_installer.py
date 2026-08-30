@@ -10,9 +10,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.10.6"
-PACK_NAME = "BifrostScalesCore-0.10.6"
-OUTPUT_NAME = "BifrostScales_0_10_6_OneClick_Installer.zip"
+VERSION = "0.10.7"
+PACK_NAME = "BifrostScalesCore-0.10.7"
+OUTPUT_NAME = "BifrostScales_0_10_7_OneClick_Installer.zip"
 FIXED_TIME = (2026, 8, 29, 0, 0, 0)
 
 _RETIRED_RUNTIME_MODULES = {
@@ -28,7 +28,7 @@ _RETIRED_RUNTIME_MODULES = {
     "surface_features.py",
 }
 
-_CANONICAL_MOD = """+ BifrostScales 0.10.6 BifrostScales
+_CANONICAL_MOD = """+ BifrostScales 0.10.7 BifrostScales
 PYTHONPATH +:= scripts
 PATH +:= bin
 plug-ins: plug-ins

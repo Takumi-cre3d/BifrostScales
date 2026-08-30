@@ -1,4 +1,4 @@
-# Bifrost Scales Roadmap — 0.10.6以降
+# Bifrost Scales Roadmap — 0.10.7以降
 
 ## 完了
 
