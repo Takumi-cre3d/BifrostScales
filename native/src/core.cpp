@@ -1567,6 +1567,13 @@ public:
         const Vec3& point,
         std::uint32_t triangle_index,
         std::uint32_t rings) const {
+        return project_sample_prepared(point, triangle_index, rings).point;
+    }
+
+    [[nodiscard]] SurfaceSampleProjection project_sample_prepared(
+        const Vec3& point,
+        std::uint32_t triangle_index,
+        std::uint32_t rings) const {
         const std::uint32_t source = clamped_triangle(triangle_index);
         const std::uint32_t ring_count = std::min<std::uint32_t>(rings, 16U);
         const std::uint64_t key =
@@ -1599,7 +1606,17 @@ public:
                 best_projection,
                 best_triangle);
         }
-        return best_projection.point;
+        const Triangle& triangle = mesh_.triangles[best_triangle];
+        const auto normal_area = normal_and_area(
+            mesh_.vertices[triangle.a],
+            mesh_.vertices[triangle.b],
+            mesh_.vertices[triangle.c]);
+        return {
+            best_projection.point,
+            normal_area.first,
+            best_triangle,
+            best_projection.barycentric,
+        };
     }
 
     [[nodiscard]] SurfaceSampleProjection project_sample_global(
@@ -1747,75 +1764,93 @@ private:
             return;
         }
 
-        std::array<std::size_t, 3> support_slots{};
-        std::size_t support_count = 0U;
-        for (std::size_t index = 0U;
-             index < best_projection.barycentric.size();
-             ++index) {
-            if (best_projection.barycentric[index] > 1.0e-10) {
-                support_slots[support_count++] = index;
-            }
-        }
-        if (support_count >= 3U || support_count == 0U) {
-            return;
-        }
+        const std::uint32_t component_id =
+            local_topology_->components[source_triangle];
+        std::vector<std::uint32_t> walked_candidates;
+        walked_candidates.reserve(64U);
+        constexpr std::uint32_t maximum_walk_steps = 32U;
 
-        const Triangle& hit_triangle = mesh_.triangles[best_triangle];
-        const std::array<std::uint32_t, 3> vertices{
-            hit_triangle.a,
-            hit_triangle.b,
-            hit_triangle.c,
-        };
-        const std::uint32_t component_id = local_topology_->components[source_triangle];
-        const auto consider = [&](std::uint32_t candidate) {
-            if (local_topology_->components[candidate] != component_id ||
-                std::binary_search(
-                    base_candidates.begin(),
-                    base_candidates.end(),
-                    candidate)) {
+        for (std::uint32_t step = 0U;
+             step < maximum_walk_steps && best_distance > 1.0e-20;
+             ++step) {
+            std::array<std::size_t, 3> support_slots{};
+            std::size_t support_count = 0U;
+            for (std::size_t index = 0U;
+                 index < best_projection.barycentric.size();
+                 ++index) {
+                if (best_projection.barycentric[index] > 1.0e-10) {
+                    support_slots[support_count++] = index;
+                }
+            }
+            if (support_count >= 3U || support_count == 0U) {
                 return;
             }
-            update_local_projection(
-                candidate,
-                point,
-                best_distance,
-                best_projection,
-                best_triangle);
-        };
 
-        const auto& first = local_topology_->vertex_stars[vertices[support_slots[0U]]];
-        if (support_count == 1U) {
-            for (const std::uint32_t candidate : first) {
-                consider(candidate);
-            }
-            return;
-        }
+            const Triangle& hit_triangle = mesh_.triangles[best_triangle];
+            const std::array<std::uint32_t, 3> vertices{
+                hit_triangle.a,
+                hit_triangle.b,
+                hit_triangle.c,
+            };
+            bool improved = false;
+            const auto consider = [&](std::uint32_t candidate) {
+                if (local_topology_->components[candidate] != component_id ||
+                    std::binary_search(
+                        base_candidates.begin(),
+                        base_candidates.end(),
+                        candidate) ||
+                    std::find(
+                        walked_candidates.begin(),
+                        walked_candidates.end(),
+                        candidate) != walked_candidates.end()) {
+                    return;
+                }
+                walked_candidates.push_back(candidate);
+                const double previous_distance = best_distance;
+                update_local_projection(
+                    candidate,
+                    point,
+                    best_distance,
+                    best_projection,
+                    best_triangle);
+                improved = improved || best_distance < previous_distance;
+            };
 
-        // Vertex stars are built in ascending triangle order. Merge the two
-        // hit-edge stars without allocating a temporary candidate vector;
-        // this preserves Python's sorted-set tie order while keeping the
-        // fallback cheap for large previews.
-        const auto& second = local_topology_->vertex_stars[vertices[support_slots[1U]]];
-        std::size_t first_index = 0U;
-        std::size_t second_index = 0U;
-        while (first_index < first.size() || second_index < second.size()) {
-            std::uint32_t candidate = 0U;
-            if (second_index >= second.size() ||
-                (first_index < first.size() &&
-                 first[first_index] < second[second_index])) {
-                candidate = first[first_index++];
-            } else if (first_index >= first.size() ||
-                       second[second_index] < first[first_index]) {
-                candidate = second[second_index++];
+            const auto& first =
+                local_topology_->vertex_stars[vertices[support_slots[0U]]];
+            if (support_count == 1U) {
+                for (const std::uint32_t candidate : first) {
+                    consider(candidate);
+                }
             } else {
-                candidate = first[first_index];
-                ++first_index;
-                ++second_index;
+                const auto& second =
+                    local_topology_->vertex_stars[vertices[support_slots[1U]]];
+                std::size_t first_index = 0U;
+                std::size_t second_index = 0U;
+                while (first_index < first.size() ||
+                       second_index < second.size()) {
+                    std::uint32_t candidate = 0U;
+                    if (second_index >= second.size() ||
+                        (first_index < first.size() &&
+                         first[first_index] < second[second_index])) {
+                        candidate = first[first_index++];
+                    } else if (
+                        first_index >= first.size() ||
+                        second[second_index] < first[first_index]) {
+                        candidate = second[second_index++];
+                    } else {
+                        candidate = first[first_index];
+                        ++first_index;
+                        ++second_index;
+                    }
+                    consider(candidate);
+                }
             }
-            consider(candidate);
+            if (!improved) {
+                return;
+            }
         }
     }
-
     [[nodiscard]] Bounds3 triangle_bounds(std::uint32_t triangle_index) const {
         Bounds3 bounds;
         const Triangle& triangle = mesh_.triangles[triangle_index];
@@ -3899,6 +3934,7 @@ CellResult build_cells_impl(
                 cell.neighbor_count = static_cast<std::uint32_t>(neighbors.size());
                 cell.pair_influence = 0.0;
                 cell.boundary.reserve(ray_count);
+                cell.boundary_normals.reserve(ray_count);
 
                 for (std::uint32_t ray_index = 0U;
                      ray_index < ray_count;
@@ -3962,14 +3998,22 @@ CellResult build_cells_impl(
                 if (settings.cell_project_to_surface) {
                     const auto projection_started = Clock::now();
                     for (Vec3& endpoint : cell.boundary) {
-                        endpoint = projector.project_prepared(
-                            endpoint,
-                            sample.triangle_index,
-                            projection_rings);
+                        const SurfaceSampleProjection projected =
+                            projector.project_sample_prepared(
+                                endpoint,
+                                sample.triangle_index,
+                                projection_rings);
+                        endpoint = projected.point;
+                        cell.boundary_normals.push_back(projected.normal);
                     }
                     local_stats.projection_ms +=
                         std::chrono::duration<double, std::milli>(
                             Clock::now() - projection_started).count();
+                }
+                if (cell.boundary_normals.size() != cell.boundary.size()) {
+                    cell.boundary_normals.assign(
+                        cell.boundary.size(),
+                        normalize(sample.normal));
                 }
                 local_stats.clipped_rays += cell.clipped_rays;
                 cells[sample_index] = std::move(cell);
@@ -6113,7 +6157,13 @@ GeneratedMesh build_cell_mesh_range(
                 const Vec3& boundary_point = source_boundary[point_index];
                 Vec3 point{};
                 if (ring_index == 0U) {
-                    point = add(boundary_point, mul(normal, settings.lift));
+                    const Vec3 boundary_normal =
+                        point_index < cell.boundary_normals.size()
+                        ? normalize(cell.boundary_normals[point_index], normal)
+                        : normal;
+                    point = add(
+                        boundary_point,
+                        mul(boundary_normal, settings.lift));
                 } else {
                     const Vec3 developed_boundary = blend_point(
                         boundary_point,
