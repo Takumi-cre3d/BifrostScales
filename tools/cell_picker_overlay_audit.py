@@ -84,14 +84,14 @@ def build_report() -> dict[str, object]:
                 "last_draw_error",
             )
         ),
-        "native_contract_declared": "0.10.7-surface-follow-contract" in (
+        "native_contract_declared": "0.10.8-surface-guide-cache-contract" in (
             ROOT / "BUILD_INFO.json"
         ).read_text(encoding="utf-8"),
     }
     passed = sum(bool(value) for value in checks.values())
     return {
         "schema": "bifrost-scales/cell-picker-overlay-audit/2",
-        "product_version": "0.10.7",
+        "product_version": "0.10.8",
         "success": passed == len(checks),
         "passed": passed,
         "total": len(checks),

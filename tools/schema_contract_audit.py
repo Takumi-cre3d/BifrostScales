@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_PRODUCT_VERSION = "0.10.7"
+EXPECTED_PRODUCT_VERSION = "0.10.8"
 EXPECTED_PAYLOAD_SCHEMA = "bifrost-scales/native-payload/10"
-EXPECTED_OPERATOR_CONTRACT = "bifrost-scales/operator-contract/18"
-EXPECTED_MINIMUM_PACK = "0.10.7"
-EXPECTED_NATIVE_BEHAVIOR_CONTRACT = "bifrost-scales/native-core/0.10.7-density-margin-curvature-surface-follow-1"
-EXPECTED_NATIVE_PROFILE_SCHEMA = "bifrost-scales/native-profile/9"
+EXPECTED_OPERATOR_CONTRACT = "bifrost-scales/operator-contract/19"
+EXPECTED_MINIMUM_PACK = "0.10.8"
+EXPECTED_NATIVE_BEHAVIOR_CONTRACT = "bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1"
+EXPECTED_NATIVE_PROFILE_SCHEMA = "bifrost-scales/native-profile/10"
 
 
 def _extract(pattern: str, text: str, label: str) -> str:

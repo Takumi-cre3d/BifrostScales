@@ -13,8 +13,8 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.10.7"
-PREFIX = "BifrostScales_0_10_7"
+VERSION = "0.10.8"
+PREFIX = "BifrostScales_0_10_8"
 INSTALLER_NAME = PREFIX + "_Standalone_Installer.py"
 POST_CHECK_NAME = PREFIX + "_POST_INSTALL_CHECK.py"
 SOURCE_ZIP_NAME = PREFIX + ".zip"

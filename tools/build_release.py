@@ -6,18 +6,19 @@ import base64
 import hashlib
 import json
 import os
+import subprocess
 import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.10.7"
-INSTALLER_NAME = "BifrostScales_0_10_7_Standalone_Installer.py"
-POST_CHECK_NAME = "BifrostScales_0_10_7_POST_INSTALL_CHECK.py"
-SOURCE_ZIP_NAME = "BifrostScales_0_10_7.zip"
+VERSION = "0.10.8"
+INSTALLER_NAME = "BifrostScales_0_10_8_Standalone_Installer.py"
+POST_CHECK_NAME = "BifrostScales_0_10_8_POST_INSTALL_CHECK.py"
+SOURCE_ZIP_NAME = "BifrostScales_0_10_8.zip"
 FIXED_TIME = (2026, 8, 21, 0, 0, 0)
 
 
-CANONICAL_MOD = """+ BifrostScales 0.10.7 BifrostScales
+CANONICAL_MOD = """+ BifrostScales 0.10.8 BifrostScales
 PYTHONPATH +:= scripts
 PATH +:= bin
 plug-ins: plug-ins
@@ -25,7 +26,40 @@ plug-ins: plug-ins
 
 
 def _release_file_bytes(path: Path) -> bytes:
-    return CANONICAL_MOD.encode("utf-8") if path == ROOT / "BifrostScales.mod" else path.read_bytes()
+    if path == ROOT / "BifrostScales.mod":
+        return CANONICAL_MOD.encode("utf-8")
+    data = path.read_bytes()
+    if b"\0" in data:
+        return data
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data
+    return text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+
+
+def _git_tracked_relative_paths() -> set[Path] | None:
+    """Return the index manifest, or None for an exported tree without Git."""
+
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(ROOT), "ls-files", "--cached", "-z"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {
+        Path(os.fsdecode(value))
+        for value in completed.stdout.split(b"\0")
+        if value
+    }
+
+
+def _is_tracked_release_input(path: Path, tracked: set[Path] | None) -> bool:
+    return tracked is None or path.relative_to(ROOT) in tracked
+
 
 def _zip_bytes(paths: list[tuple[Path, str]]) -> bytes:
     import io
@@ -75,15 +109,21 @@ print("\\nCell surface validation:")
 print("Open a high-curvature target and confirm inner Cell vertices remain outside the surface.")
 print("Under a strong Density guide, confirm Collision Margin does not create isolated oversized Cells.")
 print("GPU validation: Interactive may use gpu=True; Settled remains deterministic.")
+print("Cache validation: after the cold evaluation, guideSurface misses should reach 0; Interactive meshSample should report hit.")
 '''
 
 
 def _runtime_paths() -> list[tuple[Path, str]]:
-    result = [(ROOT / "BifrostScales.mod", "BifrostScales.mod")]
+    tracked = _git_tracked_relative_paths()
+    module_file = ROOT / "BifrostScales.mod"
+    if not _is_tracked_release_input(module_file, tracked):
+        raise RuntimeError("BifrostScales.mod is not tracked by the release index")
+    result = [(module_file, "BifrostScales.mod")]
     package = ROOT / "BifrostScales"
     for path in package.rglob("*"):
         if (
             not path.is_file()
+            or not _is_tracked_release_input(path, tracked)
             or "__pycache__" in path.parts
             or path.suffix == ".pyc"
             or "out" in path.parts
@@ -98,9 +138,13 @@ def _runtime_paths() -> list[tuple[Path, str]]:
     for path in native.rglob("*"):
         if (
             not path.is_file()
+            or not _is_tracked_release_input(path, tracked)
             or "__pycache__" in path.parts
             or path.suffix == ".pyc"
-            or any(part.startswith("build") or part == "out" for part in path.parts)
+            or any(
+                part.startswith("build") or part == "out"
+                for part in path.relative_to(native).parts
+            )
         ):
             continue
         archive_name = "BifrostScales/bifrost/native/{}".format(
@@ -561,12 +605,12 @@ def _manifest_profile_schema(manifest):
 
 
 def _operator_compatible_native_pack(pack_config):
-    """Return whether an existing 0.10.7 Native Pack satisfies this release.
+    """Return whether an existing 0.10.8 Native Pack satisfies this release.
 
-    Payload Schema 10 and Static Graph v4 remain stable, but the OpenCL GPU
-    execution layer, density-adaptive boundary placement, Operator Contract
-    16, Behavior Contract, and Profile Schema 8 must all match. Version alone
-    is insufficient because an older DLL cannot execute these boundaries.
+    Payload Schema 10 and Static Graph v4 remain stable, but Operator Contract
+    19, the Surface Guide cache Behavior Contract, and Profile Schema 10 must
+    all match. Version alone is insufficient because an older DLL cannot
+    execute these boundaries.
     """
 
     version = _native_pack_version(pack_config)
@@ -593,9 +637,9 @@ def _operator_compatible_native_pack(pack_config):
         and _manifest_payload_schema(manifest)
         == "bifrost-scales/native-payload/10"
         and _manifest_behavior_contract(manifest)
-        == "bifrost-scales/native-core/0.10.7-density-margin-curvature-surface-follow-1"
+        == "bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1"
         and _manifest_profile_schema(manifest)
-        == "bifrost-scales/native-profile/9"
+        == "bifrost-scales/native-profile/10"
     )
 
 
@@ -610,11 +654,11 @@ def _native_version_text(pack_config):
             if re.match(r"^\\d+\\.\\d+\\.\\d+", value):
                 return value
     version = _native_pack_version(pack_config)
-    return ".".join(str(part) for part in version) if version else "0.10.7"
+    return ".".join(str(part) for part in version) if version else "0.10.8"
 
 
 def _upgrade_native_pack_graph_contract(pack_config, package_root):
-    """Normalize a compatible 0.10.7+ pack to the graph-v4 scene-input contract."""
+    """Normalize a compatible 0.10.8+ pack to the graph-v4 scene-input contract."""
 
     if not _operator_compatible_native_pack(pack_config):
         return False
@@ -750,9 +794,9 @@ def _is_valid_native_pack_config(pack_config):
         return False
     if _manifest_payload_schema(manifest) != "bifrost-scales/native-payload/10":
         return False
-    if _manifest_behavior_contract(manifest) != "bifrost-scales/native-core/0.10.7-density-margin-curvature-surface-follow-1":
+    if _manifest_behavior_contract(manifest) != "bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1":
         return False
-    if _manifest_profile_schema(manifest) != "bifrost-scales/native-profile/9":
+    if _manifest_profile_schema(manifest) != "bifrost-scales/native-profile/10":
         return False
     try:
         data = json.loads(pack_config.read_text(encoding="utf-8-sig"))
@@ -838,7 +882,7 @@ def _installation_choice(cmds):
         title="Install Bifrost Scales",
         message=(
             "Bifrost Scales {VERSION}を独立製品としてインストールします。\\n"
-            "0.10.7は強いDensity Guideでの巨大Cellを防ぎ、高曲率Cellの内側をTarget表面へ追従させます。\\n"
+            "0.10.8はSurface Guide FieldとInteractive Mesh Samplingを編集間で再利用し、配置更新を高速化します。\\n"
             "互換Native Packがない場合のみ、同梱PowerShellでOperator PackをビルドしてMayaを再起動してください。\\n"
             "旧ツールを削除してもシーン内の制作データは削除しません。"
         ),
@@ -862,7 +906,7 @@ def install(show_tool=True, remove_legacy=None):
         if remove_legacy is None:
             return None
 
-    staging_root = Path(tempfile.mkdtemp(prefix="BifrostScales_0_10_7_"))
+    staging_root = Path(tempfile.mkdtemp(prefix="BifrostScales_0_10_8_"))
     modules_dir = Path(cmds.internalVar(userAppDir=True)) / "modules"
     destination_package = modules_dir / "BifrostScales"
     destination_mod = modules_dir / "BifrostScales.mod"
@@ -1052,12 +1096,12 @@ def install(show_tool=True, remove_legacy=None):
         )
         if preserved_native_pack:
             message += (
-                "\\n互換Native Core 0.10.7 Packを保持し、GraphとManifestを検証してBifrostScales.modへ再登録しました。"
+                "\\n互換Native Core 0.10.8 Packを保持し、GraphとManifestを検証してBifrostScales.modへ再登録しました。"
                 "\\n追加ビルドは不要ですが、BifrostがPackConfigを読み直すためMayaを完全に再起動してください。"
             )
         elif incompatible_native_pack_preserved:
             message += (
-                "\\n旧Native Packは診断用に保持しましたが、Payload Schema 10 / Operator Contract 18 / 0.10.7 Surface Follow Contractを満たさないため登録していません。"
+                "\\n旧Native Packは診断用に保持しましたが、Payload Schema 10 / Operator Contract 19 / 0.10.8 Surface Guide Cache Contractを満たさないため登録していません。"
                 "\\nMayaを完全に終了し、{VERSION}同梱のNative Build Scriptを-Cleanで実行してください。"
             )
         else:
@@ -1140,9 +1184,24 @@ def _is_self_referential_release_report(path: Path) -> bool:
     }
 
 
+def _release_source_inputs(*generated: Path) -> list[Path]:
+    tracked = _git_tracked_relative_paths()
+    if tracked is None:
+        paths = list(ROOT.rglob("*"))
+    else:
+        paths = [ROOT / relative for relative in sorted(tracked)]
+    paths.extend(generated)
+    return sorted(set(paths))
+
+
 def _source_paths(installer_path: Path) -> list[tuple[Path, str]]:
     result = []
-    for path in ROOT.rglob("*"):
+    generated = (
+        installer_path,
+        ROOT / POST_CHECK_NAME,
+        ROOT / "SHA256SUMS.txt",
+    )
+    for path in _release_source_inputs(*generated):
         if not path.is_file():
             continue
         if (
@@ -1166,7 +1225,8 @@ def _source_paths(installer_path: Path) -> list[tuple[Path, str]]:
 
 def _write_checksums() -> None:
     lines = []
-    for path in sorted(ROOT.rglob("*")):
+    generated = (ROOT / INSTALLER_NAME, ROOT / POST_CHECK_NAME)
+    for path in _release_source_inputs(*generated):
         if (
             not path.is_file()
             or "__pycache__" in path.parts
@@ -1193,8 +1253,8 @@ def build() -> dict[str, str]:
         "product": "Bifrost Scales",
         "version": VERSION,
         "schema": "bifrost-scales/5",
-        "source_development_state": "0.10.7-density-margin-curvature-surface-follow",
-        "milestone": "density-margin-curvature-surface-follow",
+        "source_development_state": "0.10.8-surface-guide-sampling-cache",
+        "milestone": "surface-guide-sampling-cache",
         "build_date": "2026-08-31",
         "runtime_payload_sha256": hashlib.sha256(payload).hexdigest(),
         "standalone": True,
@@ -1258,12 +1318,12 @@ def build() -> dict[str, str]:
         "create_transaction_rollback": True,
         "existing_system_missing_graph_policy": "explicit-rebuild-only",
         "final_and_bake_status": "not-exposed-until-native-final-contract",
-        "native_core_api": "0.10.7-surface-follow-contract",
-        "minimum_native_pack": "0.10.7",
+        "native_core_api": "0.10.8-surface-guide-cache-contract",
+        "minimum_native_pack": "0.10.8",
         "native_payload_schema": "bifrost-scales/native-payload/10",
-        "operator_contract": "bifrost-scales/operator-contract/18",
-        "native_behavior_contract": "bifrost-scales/native-core/0.10.7-density-margin-curvature-surface-follow-1",
-        "native_profile_schema": "bifrost-scales/native-profile/9",
+        "operator_contract": "bifrost-scales/operator-contract/19",
+        "native_behavior_contract": "bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1",
+        "native_profile_schema": "bifrost-scales/native-profile/10",
         "cell_pair_gap_feasibility": "owner-preserving-local-center-distance-cap",
         "cell_surface_follow": "cached-midpoint-quadratic-plus-selective-exact-shape-projection",
         "cell_exact_surface_projection_trigger": "relative-sag-0.001-or-normal-bend-over-3-degrees",
@@ -1272,6 +1332,11 @@ def build() -> dict[str, str]:
         "native_stage_cache": "process-shared-bounded-lru-exact-dual-hash",
         "native_stage_cache_default_entries_per_stage": 2,
         "native_stage_cache_environment_override": "BIFROST_SCALES_STAGE_CACHE_ENTRIES=1..8",
+        "surface_guide_field_cache": "process-shared-bounded-per-guide-immutable-lru",
+        "surface_guide_field_cache_capacity": 64,
+        "surface_guide_field_cache_invalidation": "target-geometry-or-guide-geometry-or-radius",
+        "interactive_surface_sampling_cache": "process-shared-bounded-target-area-normal-table",
+        "guide_surface_profile_breakdown": "time-plus-hit-miss-count-and-interactive-mesh-hit",
         "distribution_candidate_guide_index": "deterministic-authored-order-aabb-bvh",
         "distribution_neighbor_range": "exact-maximum-accepted-spacing-bound",
         "cell_hot_path": "single-site-precomputed-ray-table-normal-component",
@@ -1333,6 +1398,8 @@ def build() -> dict[str, str]:
         "one_click_integrity": "sha256-all-payload-files-before-and-after-copy",
         "one_click_transaction": "unique-backup-with-automatic-rollback",
         "source_zip_excludes_stale_top_level_release_artifacts": True,
+        "release_input_contract": "git-tracked-plus-current-generated-with-exported-tree-fallback",
+        "release_text_normalization": "utf8-line-endings-to-lf-binary-unchanged",
         "release_consistency_audit_schema": "bifrost-scales/release-consistency-audit/2",
         "native_only_runtime_audit_schema": "bifrost-scales/native-only-runtime-audit/1",
     }

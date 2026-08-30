@@ -50,10 +50,10 @@ def test_release_version_and_module_are_consistent():
     version_source = (PACKAGE / "version.py").read_text(encoding="utf-8")
     module_source = (ROOT / "BifrostScales.mod").read_text(encoding="utf-8")
     plugin_source = (ROOT / "BifrostScales/plug-ins/bifrostScalesCellPicker.py").read_text(encoding="utf-8")
-    assert 'VERSION = "0.10.7"' in version_source
+    assert 'VERSION = "0.10.8"' in version_source
     assert 'SCHEMA_VERSION = "bifrost-scales/5"' in version_source
-    assert module_source.startswith("+ BifrostScales 0.10.7 ")
-    assert 'MFnPlugin(plugin, "Bifrost Scales", "0.10.7", "Any")' in plugin_source
+    assert module_source.startswith("+ BifrostScales 0.10.8 ")
+    assert 'MFnPlugin(plugin, "Bifrost Scales", "0.10.8", "Any")' in plugin_source
 
 
 def test_ui_is_native_only_and_new_create_finishes_first_preview():
@@ -90,7 +90,7 @@ def test_native_operator_and_host_boundary_contracts_remain_immutable():
     contract = json.loads((ROOT / "native/bifrost/operator_contract.json").read_text(encoding="utf-8"))
     policy = contract["graph_policy"]
     performance = contract["performance_contract"]
-    assert contract["schema"] == "bifrost-scales/operator-contract/18"
+    assert contract["schema"] == "bifrost-scales/operator-contract/19"
     assert contract["published_graph"] == "Graphs::BifrostScales::native_scales_v4"
     assert policy["runtime_topology_mutation"] is False
     assert policy["python_vnn_commands"] is False
@@ -136,6 +136,12 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "BIFROST_SCALES_STAGE_CACHE_ENTRIES" in source
     assert "class DistributionGuideIndex" in source
     assert "class SettledDistributionFieldCache" in source
+    assert "struct SurfaceGuideFieldCache" in source
+    assert "guide_surface_cache_hits" in header
+    assert "guide_surface_cache_misses" in operator
+    assert "native_guide_surface_ms" in backend
+    assert "guideSurface=" in ui
+    assert "meshSample=" in ui
     assert "struct DirectionGuideContribution" in source
     assert "reuse_direction_neighbors" in source
     assert "struct DirectionNeighborGraph" in source
@@ -162,7 +168,7 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "cell_cache_reused_after_orientation_change" in source
     assert "bifrost-scales/cell-id/1" in source
     assert "bifrost-scales/cell-metadata/1" in operator
-    assert "bifrost-scales/native-profile/9" in operator
+    assert "bifrost-scales/native-profile/10" in operator
     assert "cell_boundary_query_ms" in operator
     assert "cell_boundary_rays_ms" in operator
     assert "cell_mean_neighbors" in operator
@@ -210,7 +216,7 @@ def test_guide_authoring_and_internal_cell_identity_foundation_remain_available(
 
 def test_build_info_records_the_native_only_boundary():
     info = json.loads((ROOT / "BUILD_INFO.json").read_text(encoding="utf-8"))
-    assert info["version"] == "0.10.7"
+    assert info["version"] == "0.10.8"
     assert info["runtime_engine"] == "native-bifrost-only"
     assert info["python_reference_runtime"] is False
     assert info["python_reference_preview"] is False
@@ -219,7 +225,7 @@ def test_build_info_records_the_native_only_boundary():
     assert info["create_button_contract"] == (
         "selected-mesh-to-system-native-graph-and-first-settled-preview"
     )
-    assert info["minimum_native_pack"] == "0.10.7"
+    assert info["minimum_native_pack"] == "0.10.8"
     assert info["cell_cache_key_basis"] == "distribution-or-guide-anisotropic"
     assert info["direction_edits_reuse_exact_cell_partition"] is False
     assert info["direction_strength_affects_orientation_only"] is True
@@ -310,6 +316,12 @@ def test_build_info_records_the_native_only_boundary():
     assert info["one_click_transaction"] == (
         "unique-backup-with-automatic-rollback"
     )
+    assert info["release_input_contract"] == (
+        "git-tracked-plus-current-generated-with-exported-tree-fallback"
+    )
+    assert info["release_text_normalization"] == (
+        "utf8-line-endings-to-lf-binary-unchanged"
+    )
 
 
 def test_interactive_distribution_uses_candidate_gpu_runtime_only():
@@ -325,6 +337,10 @@ def test_interactive_distribution_uses_candidate_gpu_runtime_only():
     assert '"interactive-distribution"' in core
     assert "mode != PreviewMode::Interactive" in core
     assert "Settled output never uses this API" in preview
+    assert "struct InteractiveSurfaceCache" in (
+        ROOT / "native/src/preview_distribution.cpp"
+    ).read_text(encoding="utf-8")
+    assert "surface_cache_hit" in preview
 
 
 def test_guide_falloff_is_a_normalized_width_inside_range():

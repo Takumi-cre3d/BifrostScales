@@ -1,5 +1,5 @@
 {
-  "schema": "bifrost-scales/operator-contract/18",
+  "schema": "bifrost-scales/operator-contract/19",
   "namespace": "BifrostScales",
   "operator": "BifrostScales::generate_scale_mesh_payload_arrays",
   "published_graph": "Graphs::BifrostScales::native_scales_v4",
@@ -219,7 +219,7 @@
     "interactive_gpu_changes_stable_cell_ids": false
   },
   "performance_contract": {
-    "profile_schema": "bifrost-scales/native-profile/9",
+    "profile_schema": "bifrost-scales/native-profile/10",
     "preview_auxiliary_arrays_emitted": false,
     "preview_topology_representation": "flat-face-offset-and-vertex-buffers",
     "reference_mesh_contract_preserved": true,
@@ -233,6 +233,16 @@
       "stage_cache_scope",
       "stage_cache_capacity",
       "stage_cache_evictions"
+    ],
+    "surface_guide_field_cache": "process-shared-bounded-per-guide-immutable-lru",
+    "surface_guide_field_cache_capacity": 64,
+    "surface_guide_field_cache_invalidation": "target-geometry-or-guide-geometry-or-radius",
+    "interactive_surface_sampling_cache": "process-shared-bounded-target-area-normal-table",
+    "surface_cache_profile_fields": [
+      "guide_surface_ms",
+      "guide_surface_cache_hits",
+      "guide_surface_cache_misses",
+      "interactive_surface_cache_hit"
     ],
     "distribution_candidate_guide_index": "deterministic-authored-order-aabb-bvh",
     "interactive_candidate_batch_runtime_enabled": true,

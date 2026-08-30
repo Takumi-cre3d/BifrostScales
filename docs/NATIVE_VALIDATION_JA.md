@@ -1,4 +1,4 @@
-# Native Runtime Validation — Bifrost Scales 0.10.7
+# Native Runtime Validation — Bifrost Scales 0.10.8
 
 ## 必須検証
 
@@ -25,6 +25,6 @@ Extracted-source再検証
 - Final: 環境変数`force`でも候補ごとのCPU exact
 - Settled CPU offとforce: 頂点、Face、Stable Cell IDが完全一致
 
-Profile 9はGPU request、availability、device、upload/kernel/readback時間、fallback reason、境界Density適応、プロセス共有Stage Cache状態を出力します。
+Profile 10はGPU request、availability、device、upload/kernel/readback時間、fallback reason、境界Density適応、プロセス共有Stage Cache状態に加え、`guideSurface=時間(hit/miss)`とInteractiveの`meshSample=hit|miss`を出力します。Settled／Finalの`meshSample`表示は`n/a`です。
 
 このLinux検証環境にはOpenCL GPU Platformがないため、GPU実行時間はMaya対象PCで測定します。CPU fallback、Settledの決定性、Final exactはホスト非依存テストで検証します。

@@ -18,11 +18,11 @@ def _load_build_release():
 
 def test_release_versioned_names_share_one_current_prefix():
     module = _load_build_release()
-    assert module.VERSION == "0.10.7"
-    assert module.INSTALLER_NAME == "BifrostScales_0_10_7_Standalone_Installer.py"
-    assert module.POST_CHECK_NAME == "BifrostScales_0_10_7_POST_INSTALL_CHECK.py"
-    assert module.SOURCE_ZIP_NAME == "BifrostScales_0_10_7.zip"
-    assert module._current_release_prefix() == "BifrostScales_0_10_7"
+    assert module.VERSION == "0.10.8"
+    assert module.INSTALLER_NAME == "BifrostScales_0_10_8_Standalone_Installer.py"
+    assert module.POST_CHECK_NAME == "BifrostScales_0_10_8_POST_INSTALL_CHECK.py"
+    assert module.SOURCE_ZIP_NAME == "BifrostScales_0_10_8.zip"
+    assert module._current_release_prefix() == "BifrostScales_0_10_8"
 
 
 def test_post_install_check_matches_current_native_contract():
@@ -39,8 +39,18 @@ def test_release_archives_always_use_the_canonical_module_descriptor():
     module = _load_build_release()
     encoded = module._release_file_bytes(ROOT / "BifrostScales.mod")
     assert encoded.decode("utf-8") == module.CANONICAL_MOD
-    assert "BifrostScales 0.10.7 BifrostScales" in module.CANONICAL_MOD
+    assert "BifrostScales 0.10.8 BifrostScales" in module.CANONICAL_MOD
     assert "D:/" not in module.CANONICAL_MOD
+
+
+def test_release_file_bytes_normalize_text_and_preserve_binary(tmp_path):
+    module = _load_build_release()
+    text = tmp_path / "source.cpp"
+    text.write_bytes(b"first\r\nsecond\rthird\n")
+    binary = tmp_path / "operator.dll"
+    binary.write_bytes(b"MZ\0\r\n")
+    assert module._release_file_bytes(text) == b"first\nsecond\nthird\n"
+    assert module._release_file_bytes(binary) == b"MZ\0\r\n"
 
 def test_source_zip_filter_rejects_only_stale_top_level_release_artifacts():
     module = _load_build_release()
@@ -51,8 +61,48 @@ def test_source_zip_filter_rejects_only_stale_top_level_release_artifacts():
         ROOT / "BifrostScales_0_9_6_POST_INSTALL_CHECK.py"
     )
     assert not module._is_stale_top_level_release_artifact(
-        ROOT / "BifrostScales_0_10_7_Standalone_Installer.py"
+        ROOT / "BifrostScales_0_10_8_Standalone_Installer.py"
     )
     assert not module._is_stale_top_level_release_artifact(
         ROOT / "docs" / "MIGRATION_0_9_4_TO_0_9_5_JA.md"
     )
+
+def test_release_inputs_follow_git_manifest_and_exclude_local_files(
+    tmp_path, monkeypatch
+):
+    module = _load_build_release()
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    tracked = {
+        Path("BifrostScales.mod"),
+        Path("BifrostScales/scripts/bifrost_scales/version.py"),
+        Path("native/src/core.cpp"),
+        Path("README.md"),
+    }
+    monkeypatch.setattr(module, "_git_tracked_relative_paths", lambda: tracked)
+    for relative in tracked:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("tracked\n", encoding="utf-8")
+    ignored = tmp_path / "BifrostScales/scripts/bifrost_scales/orientation.py"
+    ignored.write_text("legacy\n", encoding="utf-8")
+    installer = tmp_path / module.INSTALLER_NAME
+    installer.write_text("installer\n", encoding="utf-8")
+    (tmp_path / module.POST_CHECK_NAME).write_text("check\n", encoding="utf-8")
+    (tmp_path / "SHA256SUMS.txt").write_text("sums\n", encoding="utf-8")
+
+    runtime_names = {name for _path, name in module._runtime_paths()}
+    assert "BifrostScales/scripts/bifrost_scales/version.py" in runtime_names
+    assert "BifrostScales/bifrost/native/src/core.cpp" in runtime_names
+    assert "BifrostScales/scripts/bifrost_scales/orientation.py" not in runtime_names
+
+    source_names = {name for _path, name in module._source_paths(installer)}
+    assert "README.md" in source_names
+    assert module.INSTALLER_NAME in source_names
+    assert module.POST_CHECK_NAME in source_names
+    assert "SHA256SUMS.txt" in source_names
+    assert "BifrostScales/scripts/bifrost_scales/orientation.py" not in source_names
+
+    module._write_checksums()
+    checksums = (tmp_path / "SHA256SUMS.txt").read_text(encoding="utf-8")
+    assert "README.md" in checksums
+    assert "orientation.py" not in checksums
