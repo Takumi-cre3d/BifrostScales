@@ -19,17 +19,17 @@ PACK = offline_install.PACK_NAME
 def _write_bundle(root: Path) -> Path:
     payload = root / "payload"
     files = {
-        "BifrostScales.mod": b"+ BifrostScales 0.10.8 BifrostScales\n",
-        "BifrostScales/scripts/bifrost_scales/version.py": b'VERSION = "0.10.8"\n',
+        "BifrostScales.mod": b"+ BifrostScales 0.10.9 BifrostScales\n",
+        "BifrostScales/scripts/bifrost_scales/version.py": b'VERSION = "0.10.9"\n',
         "BifrostScales/scripts/bifrost_scales/ui.py": b"UI = True\n",
         "BifrostScales/bifrost/pack/{}/BifrostScalesPackConfig.json".format(PACK): b"{}\n",
         "BifrostScales/bifrost/pack/{}/lib/BifrostScalesOps.dll".format(PACK): b"native-dll",
         "BifrostScales/bifrost/pack/{}/metadata/manifest.bifrost-scales.json".format(PACK): (
             json.dumps(
                 {
-                    "version": "0.10.8",
+                    "version": "0.10.9",
                     "native_payload_schema": "bifrost-scales/native-payload/10",
-                    "native_profile_schema": "bifrost-scales/native-profile/10",
+                    "native_profile_schema": "bifrost-scales/native-profile/11",
                 }
             ).encode("utf-8")
         ),
@@ -40,7 +40,7 @@ def _write_bundle(root: Path) -> Path:
         path.write_bytes(data)
     manifest = {
         "schema": "bifrost-scales/one-click-payload/1",
-        "version": "0.10.8",
+        "version": "0.10.9",
         "files": {
             relative: hashlib.sha256(data).hexdigest()
             for relative, data in files.items()
@@ -155,7 +155,7 @@ def _write_builder_source(root: Path) -> None:
     package = root / "BifrostScales"
     (package / "scripts" / "bifrost_scales").mkdir(parents=True)
     (package / "scripts" / "bifrost_scales" / "version.py").write_text(
-        'VERSION = "0.10.8"\n', encoding="utf-8"
+        'VERSION = "0.10.9"\n', encoding="utf-8"
     )
     (package / "scripts" / "bifrost_scales" / "adaptive.py").write_text(
         "retired = True\n", encoding="utf-8"
@@ -168,9 +168,9 @@ def _write_builder_source(root: Path) -> None:
         "json/BifrostScales/graphs/BifrostScales_native_scales_v4_graph.json": b"{}\n",
         "metadata/manifest.bifrost-scales.json": json.dumps(
             {
-                "version": "0.10.8",
+                "version": "0.10.9",
                 "native_payload_schema": "bifrost-scales/native-payload/10",
-                "native_profile_schema": "bifrost-scales/native-profile/10",
+                "native_profile_schema": "bifrost-scales/native-profile/11",
             }
         ).encode("utf-8"),
     }

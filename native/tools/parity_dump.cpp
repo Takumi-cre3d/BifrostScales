@@ -2,6 +2,7 @@
 #include <array>
 #include <cctype>
 #include <cstdint>
+#include <chrono>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -291,6 +292,12 @@ void write_distribution_report(
            << ",\"open_boundary_edge_count\":" << report.open_boundary_edge_count
            << ",\"boundary_anchor_count\":" << report.boundary_anchor_count
            << ",\"relax_iterations\":" << report.relax_iterations
+           << ",\"distribution_bucket_queries\":"
+           << report.distribution_bucket_queries
+           << ",\"distribution_distance_tests\":"
+           << report.distribution_distance_tests
+           << ",\"distribution_grid_density_reference\":"
+           << report.distribution_grid_density_reference
            << ",\"moved_samples\":" << report.moved_samples
            << '}';
 }
@@ -508,6 +515,7 @@ struct Arguments {
     std::string payload_path;
     std::string output_path;
     std::string samples_path;
+    bool distribution_only{false};
 };
 
 Arguments parse_arguments(int argc, char** argv) {
@@ -518,8 +526,12 @@ Arguments parse_arguments(int argc, char** argv) {
             std::cout
                 << "Usage: bifrost_scales_parity_dump --mesh target.obj "
                    "--payload payload.json [--samples samples.tsv] "
-                   "[--output native.json]\n";
+                   "[--distribution-only] [--output native.json]\n";
             std::exit(0);
+        }
+        if (argument == "--distribution-only") {
+            result.distribution_only = true;
+            continue;
         }
         if (index + 1 >= argc) {
             throw std::runtime_error("missing value after argument: " + argument);
@@ -558,8 +570,39 @@ int main(int argc, char** argv) {
         const PreviewMode mode = decoded.payload.mode;
         const std::vector<Guide>& guides = decoded.payload.guides;
 
+        const auto distribution_begin = std::chrono::steady_clock::now();
         const bifrost_scales::DistributionResult distribution =
             bifrost_scales::distribute(mesh, settings, mode, guides);
+        const double distribution_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - distribution_begin).count();
+        std::cerr << "distribution_ms=" << std::fixed << std::setprecision(3)
+                  << distribution_ms << '\n';
+        if (arguments.distribution_only) {
+            std::ostringstream json;
+            json << "{\"schema\":\"bifrost-scales/distribution-dump/1\",";
+            json << "\"source\":\"native-cpp\",";
+            json << "\"mode\":" << escaped(mode_name(mode)) << ',';
+            json << "\"input\":{\"vertex_count\":" << mesh.vertices.size()
+                 << ",\"triangle_count\":" << mesh.triangles.size() << "},";
+            json << "\"distribution\":";
+            write_distribution(json, distribution.samples, distribution.report);
+            json << '}';
+            if (arguments.output_path.empty()) {
+                std::cout << json.str() << '\n';
+            } else {
+                std::ofstream output(arguments.output_path, std::ios::binary);
+                if (!output) {
+                    throw std::runtime_error(
+                        "cannot open output file: " + arguments.output_path);
+                }
+                output << json.str() << '\n';
+                if (!output) {
+                    throw std::runtime_error(
+                        "cannot write output file: " + arguments.output_path);
+                }
+            }
+            return 0;
+        }
         const std::vector<Sample> replay_samples = arguments.samples_path.empty()
             ? std::vector<Sample>{}
             : load_samples(arguments.samples_path, mesh);

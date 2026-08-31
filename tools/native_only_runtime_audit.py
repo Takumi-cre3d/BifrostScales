@@ -103,7 +103,7 @@ def audit(root: Path = ROOT) -> dict[str, object]:
     }
     return {
         "schema": SCHEMA,
-        "product_version": "0.10.8",
+        "product_version": "0.10.9",
         "removed_modules": list(REMOVED_MODULES),
         "imported_removed_modules": imported_removed,
         "checks": checks,

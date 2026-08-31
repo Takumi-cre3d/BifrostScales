@@ -189,11 +189,11 @@ if ($Clean -and (Test-Path $installRoot)) {
     if ($installRootFull.Equals($packContainerFull, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to clean the shared pack container itself: $installRootFull"
     }
-    if ($installLeaf -ne "BifrostScalesCore-0.10.8") {
+    if ($installLeaf -ne "BifrostScalesCore-0.10.9") {
         throw "Refusing to clean an unexpected install root: $installRootFull"
     }
     Remove-Item -Path $installRootFull -Recurse -Force
-    Write-Host "Removed previous 0.10.8 install root: $installRootFull"
+    Write-Host "Removed previous 0.10.9 install root: $installRootFull"
 }
 
 & cmake --build $buildRoot --config $Configuration --target install
@@ -229,7 +229,7 @@ if (-not (Select-String -Path $nodeDefinition -Pattern "generate_scale_mesh_payl
 if (Select-String -Path $nodeDefinition -Pattern "BifrostScales::BifrostScales" -Quiet) {
     throw (
         "Generated node definition contains the invalid doubled namespace " +
-        "BifrostScales::BifrostScales. Verify the 0.10.8 header source and rebuild with -Clean."
+        "BifrostScales::BifrostScales. Verify the 0.10.9 header source and rebuild with -Clean."
     )
 }
 try {
@@ -270,7 +270,7 @@ foreach ($requiredTopologyPortName in $requiredTopologyPortTypes.Keys) {
             "Generated operator port '$requiredTopologyPortName' has type " +
             "'$actualTopologyPortType'; expected '$expectedTopologyPortType'. " +
             "Geometry::Mesh::construct_mesh requires array<uint> topology. " +
-            "Verify the 0.10.8 Native source and rebuild with -Clean."
+            "Verify the 0.10.9 Native source and rebuild with -Clean."
         )
     }
 }
@@ -393,14 +393,14 @@ try {
 if ([string]$metadataManifestData.native_payload_schema -ne 'bifrost-scales/native-payload/10') {
     throw "Native metadata manifest payload schema must be bifrost-scales/native-payload/10."
 }
-if ([string]$metadataManifestData.native_behavior_contract -ne 'bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1') {
+if ([string]$metadataManifestData.native_behavior_contract -ne 'bifrost-scales/native-core/0.10.9-settled-proposal-index-1') {
     throw (
         "Native metadata manifest behavior contract must be " +
-        "bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1."
+        "bifrost-scales/native-core/0.10.9-settled-proposal-index-1."
     )
 }
-if ([string]$metadataManifestData.native_profile_schema -ne 'bifrost-scales/native-profile/10') {
-    throw "Native metadata manifest profile schema must be bifrost-scales/native-profile/10."
+if ([string]$metadataManifestData.native_profile_schema -ne 'bifrost-scales/native-profile/11') {
+    throw "Native metadata manifest profile schema must be bifrost-scales/native-profile/11."
 }
 if (-not (Test-Path $parityDump)) {
     throw "Host-independent parity dump executable was not installed at: $parityDump"
@@ -476,7 +476,7 @@ foreach ($unexpected in @(
 $modulePathText = $moduleRoot.Replace('\', '/')
 $packConfigText = $packConfig.Replace('\', '/')
 $moduleText = @"
-+ BifrostScales 0.10.8 $modulePathText
++ BifrostScales 0.10.9 $modulePathText
 PYTHONPATH +:= scripts
 BIFROST_LIB_CONFIG_FILES += $packConfigText
 "@
@@ -497,5 +497,5 @@ Write-Host "Cache Bench: $stageCacheBenchmark"
 Write-Host "Distribution Bench: $distributionBenchmark"
 Write-Host "Module    : $modFile"
 Write-Host ""
-Write-Host "Bifrost Scales 0.10.8 uses Payload Schema 10 / Operator Contract 19 / Profile Schema 10, per-guide Surface Field reuse, Interactive Mesh Sampling reuse, deterministic Settled output, and OpenCL GPU Preview; do not reuse a pre-0.10.8 DLL." -ForegroundColor Yellow
+Write-Host "Bifrost Scales 0.10.9 uses Payload Schema 10 / Operator Contract 20 / Profile Schema 11, per-guide Surface Field reuse, Interactive Mesh Sampling reuse, deterministic Settled output, and OpenCL GPU Preview; do not reuse a pre-0.10.9 DLL." -ForegroundColor Yellow
 Write-Host "Completely restart Maya before running the native smoke test." -ForegroundColor Yellow

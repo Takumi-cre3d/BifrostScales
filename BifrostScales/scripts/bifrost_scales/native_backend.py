@@ -29,10 +29,10 @@ GRAPH_ASSET_NAME = "BifrostScales_native_scales_v4_graph.json"
 GRAPH_CONTRACT = "bifrost-scales/native-graph/4-dgmesh-1"
 PACK_CONFIG_NAME = "BifrostScalesPackConfig.json"
 MANIFEST_NAME = "manifest.bifrost-scales.json"
-MINIMUM_NATIVE_PACK_VERSION = (0, 10, 6)
-MINIMUM_NATIVE_PACK_VERSION_TEXT = "0.10.8"
-NATIVE_BEHAVIOR_CONTRACT = "bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1"
-NATIVE_PROFILE_SCHEMA = "bifrost-scales/native-profile/10"
+MINIMUM_NATIVE_PACK_VERSION = (0, 10, 9)
+MINIMUM_NATIVE_PACK_VERSION_TEXT = "0.10.9"
+NATIVE_BEHAVIOR_CONTRACT = "bifrost-scales/native-core/0.10.9-settled-proposal-index-1"
+NATIVE_PROFILE_SCHEMA = "bifrost-scales/native-profile/11"
 
 NATIVE_GRAPH_PATH_ATTR = "bsNativeGraphPath"
 NATIVE_GRAPH_UUID_ATTR = "bsNativeGraphUuid"
@@ -895,7 +895,7 @@ def probe_native_backend(
         rebuild_required = True
         reasons.append(
             "Native Pack {} is older than the required {} behavior contract. "
-            "Rebuild the 0.10.8 Native Pack with -Clean and completely restart Maya.".format(
+            "Rebuild the 0.10.9 Native Pack with -Clean and completely restart Maya.".format(
                 pack_version, MINIMUM_NATIVE_PACK_VERSION_TEXT
             )
         )
@@ -903,9 +903,9 @@ def probe_native_backend(
         rebuild_required = True
         reasons.append(
             "Native Pack behavior contract is {} but Python requires {}. "
-            "Payload Schema 8 / Operator Contract 10 alone cannot prove the Coverage / Boundary / Stage Cache "
-            "behavior (flat Preview output, deterministic spatial Direction Relax, profiling); "
-            "rebuild the 0.10.8 Native Pack with -Clean and "
+            "Payload Schema 10 / Operator Contract 20 alone cannot prove the 0.10.9 distribution and cache "
+            "behavior; "
+            "rebuild the 0.10.9 Native Pack with -Clean and "
             "completely restart Maya.".format(
                 pack_native_behavior_contract or "missing",
                 NATIVE_BEHAVIOR_CONTRACT,
@@ -934,13 +934,13 @@ def probe_native_backend(
             "Native Operator mesh topology ports are incompatible with "
             "Geometry::Mesh::construct_mesh. source_face_offset, "
             "source_face_vertex, face_offset, and face_vertex must all be "
-            "array<uint>. Rebuild the 0.10.8 Native Pack with -Clean."
+            "array<uint>. Rebuild the 0.10.9 Native Pack with -Clean."
         )
     elif not profile_output_contract_valid:
         rebuild_required = True
         reasons.append(
-            "Native Operator Contract 10 requires a string profile_json output. "
-            "Rebuild the 0.10.8 Native Pack with -Clean."
+            "Native Operator Contract 20 requires a string profile_json output. "
+            "Rebuild the 0.10.9 Native Pack with -Clean."
         )
     if pack_graph is None:
         reasons.append("static graph definition is missing from the native pack")
@@ -953,15 +953,15 @@ def probe_native_backend(
         rebuild_required = True
         reasons.append(
             "Native Pack graph does not expose the required top-level Object "
-            "source_mesh input wired to get_mesh_structure. Reinstall Bifrost Scales 0.10.8 or "
-            "rebuild the compatible 0.10.8 Native Core Pack."
+            "source_mesh input wired to get_mesh_structure. Reinstall Bifrost Scales 0.10.9 or "
+            "rebuild the compatible 0.10.9 Native Core Pack."
         )
     elif pack_graph_payload_schema != NATIVE_PAYLOAD_SCHEMA:
         rebuild_required = True
         reasons.append(
             "Native Pack graph payload schema is {} but Python requires {}. "
-            "Reinstall Bifrost Scales 0.10.8; if the mismatch remains, rebuild the "
-            "0.10.8 Native Pack with -Clean and restart Maya.".format(
+            "Reinstall Bifrost Scales 0.10.9; if the mismatch remains, rebuild the "
+            "0.10.9 Native Pack with -Clean and restart Maya.".format(
                 pack_graph_payload_schema or "missing",
                 NATIVE_PAYLOAD_SCHEMA,
             )
@@ -979,7 +979,7 @@ def probe_native_backend(
         rebuild_required = True
         reasons.append(
             "Native Pack manifest profile schema is {} but Python requires {}. "
-            "Rebuild the 0.10.8 Native Pack with -Clean.".format(
+            "Rebuild the 0.10.9 Native Pack with -Clean.".format(
                 pack_manifest_profile_schema or "missing",
                 NATIVE_PROFILE_SCHEMA,
             )
@@ -999,7 +999,7 @@ def probe_native_backend(
             restart_required = True
             reasons.append(
                 "The loaded operator uses the invalid doubled namespace {}. "
-                "Reinstall Bifrost Scales 0.10.8, rebuild the Native Pack with -Clean, then "
+                "Reinstall Bifrost Scales 0.10.9, rebuild the Native Pack with -Clean, then "
                 "completely restart Maya.".format(resolved_operator_definition)
             )
         elif not operator_definition_available:
@@ -1007,7 +1007,7 @@ def probe_native_backend(
             detail = " ({})".format(catalog_error) if catalog_error else ""
             reasons.append(
                 "Native Pack is active but Bifrost's current node catalog does not "
-                "contain the exact definition {}{}. Rebuild the compatible 0.10.8 core pack, then "
+                "contain the exact definition {}{}. Rebuild the compatible 0.10.9 core pack, then "
                 "completely restart Maya.".format(OPERATOR_DEFINITION, detail)
             )
 
@@ -1386,7 +1386,7 @@ class NativeGraphController:
         ):
             raise RuntimeError(
                 "This Native Graph uses an obsolete operator namespace or graph "
-                "contract. Delete the Native Graph and create a new one with Bifrost Scales 0.10.8."
+                "contract. Delete the Native Graph and create a new one with Bifrost Scales 0.10.9."
             )
 
     def _discover_graph(self, system_id: str) -> str:
@@ -1938,7 +1938,7 @@ class NativeGraphController:
         ):
             raise RuntimeError(
                 "Native Graph has no verified Maya worldMesh DG binding. "
-                "Delete the Native Graph and create it again with Bifrost Scales 0.10.8."
+                "Delete the Native Graph and create it again with Bifrost Scales 0.10.9."
             )
         if stored_uuid and current_uuid and stored_uuid != current_uuid:
             raise RuntimeError(

@@ -1759,6 +1759,73 @@ int main() {
     CHECK(sparse_boundary_distribution.samples.size() >=
           sparse_boundary_distribution.report.boundary_anchor_count);
 
+    // Density acceptance must use the same upper bound as the evaluated
+    // field. Two full-effect multipliers saturate the field at 16, so every
+    // candidate passes the density gate instead of being divided by 256.
+    Guide saturated_density_a;
+    saturated_density_a.id = "saturated-density-a";
+    saturated_density_a.kind = GuideKind::DensityPoint;
+    saturated_density_a.points = {{0.0, 0.0, 0.0}};
+    saturated_density_a.radius = 1000.0;
+    saturated_density_a.falloff = 0.0;
+    saturated_density_a.density_multiplier = 16.0;
+    saturated_density_a.use_density = true;
+    saturated_density_a.use_size = false;
+    saturated_density_a.use_direction = false;
+    Guide saturated_density_b = saturated_density_a;
+    saturated_density_b.id = "saturated-density-b";
+    saturated_density_b.points = {{0.0, 0.08, 0.0}};
+    const Mesh saturated_density_mesh = close_disconnected_planes_mesh();
+    const auto saturated_density_distribution = bifrost_scales::distribute(
+        saturated_density_mesh,
+        coverage_settings,
+        PreviewMode::Settled,
+        {saturated_density_a, saturated_density_b});
+    CHECK(saturated_density_distribution.report.attempts > 0U);
+    CHECK(
+        saturated_density_distribution.report.distribution_density_rejected ==
+        0U);
+
+    // A localized high-density guide raises the authored maximum while most
+    // of the surface remains neutral. This reproduces the low density-gate
+    // survival and late-pass spatial saturation seen in production scenes.
+    Settings saturation_settings = coverage_settings;
+    saturation_settings.target_count = 4096U;
+    saturation_settings.settled_budget = 4096U;
+    saturation_settings.seed = 814U;
+    Guide localized_high_density = saturated_density_a;
+    localized_high_density.id = "localized-high-density";
+    localized_high_density.radius = 0.05;
+    localized_high_density.falloff = 1.0;
+    const auto saturation_distribution = bifrost_scales::distribute(
+        saturated_density_mesh,
+        saturation_settings,
+        PreviewMode::Settled,
+        {localized_high_density});
+    CHECK(saturation_distribution.report.accepted_count >= 3500U);
+    CHECK(saturation_distribution.report.attempts < 4096ULL * 48ULL * 2ULL);
+    CHECK(saturation_distribution.report.distribution_density_rejected == 0U);
+    CHECK(saturation_distribution.report.distribution_bucket_queries > 0U);
+    CHECK(saturation_distribution.report.distribution_distance_tests > 0U);
+    CHECK(saturation_distribution.report.distribution_grid_density_reference >=
+          0.08);
+    const auto repeated_saturation_distribution = bifrost_scales::distribute(
+        saturated_density_mesh,
+        saturation_settings,
+        PreviewMode::Settled,
+        {localized_high_density});
+    CHECK(repeated_saturation_distribution.report.attempts ==
+          saturation_distribution.report.attempts);
+    CHECK(repeated_saturation_distribution.samples.size() ==
+          saturation_distribution.samples.size());
+    for (std::size_t index = 0U;
+         index < saturation_distribution.samples.size();
+         ++index) {
+        CHECK(repeated_saturation_distribution.samples[index].position ==
+              saturation_distribution.samples[index].position);
+        CHECK(repeated_saturation_distribution.samples[index].stable_id ==
+              saturation_distribution.samples[index].stable_id);
+    }
     Guide mask_guide;
     mask_guide.id = "mask";
     mask_guide.kind = GuideKind::DensityPoint;
@@ -2430,6 +2497,50 @@ int main() {
     CHECK(settled_gpu_force.mesh.faces == settled_gpu_off.mesh.faces);
     CHECK(settled_gpu_force.mesh.cell_ids == settled_gpu_off.mesh.cell_ids);
     set_gpu_override("auto");
+
+    // A Distribution miss may change the seed while keeping the same target
+    // geometry. Reuse the exact global projection BVH in that common edit path.
+    const Mesh projection_cache_mesh = fan_mesh(5000U);
+    Settings projection_cache_settings = coverage_settings;
+    projection_cache_settings.target_count = 512U;
+    projection_cache_settings.interactive_budget = 512U;
+    projection_cache_settings.cell_mode = GeometryMode::Cards;
+    Guide projection_cache_curve;
+    projection_cache_curve.id = "projection-cache-curve";
+    projection_cache_curve.kind = GuideKind::DirectionCurve;
+    projection_cache_curve.points = {{-20.0, 0.5, 0.0}, {20.0, 0.5, 0.0}};
+    projection_cache_curve.radius = 2.0;
+    projection_cache_curve.center_alignment = 1.0;
+    projection_cache_curve.use_density = false;
+    projection_cache_curve.use_size = false;
+    projection_cache_curve.use_direction = true;
+    bifrost_scales::clear_native_stage_cache();
+    const GenerationResult projection_cache_cold = bifrost_scales::generate(
+        projection_cache_mesh,
+        projection_cache_settings,
+        PreviewMode::Interactive,
+        {projection_cache_curve});
+    projection_cache_settings.seed += 1U;
+    const GenerationResult projection_cache_reused = bifrost_scales::generate(
+        projection_cache_mesh,
+        projection_cache_settings,
+        PreviewMode::Interactive,
+        {projection_cache_curve});
+    CHECK(!projection_cache_cold.profile.distribution_cache_hit);
+    CHECK(!projection_cache_reused.profile.distribution_cache_hit);
+    CHECK(projection_cache_reused.profile.global_projection_cache_hit);
+    bifrost_scales::clear_native_stage_cache();
+    const GenerationResult projection_cache_rebuilt = bifrost_scales::generate(
+        projection_cache_mesh,
+        projection_cache_settings,
+        PreviewMode::Interactive,
+        {projection_cache_curve});
+    CHECK(projection_cache_rebuilt.mesh.vertices ==
+          projection_cache_reused.mesh.vertices);
+    CHECK(projection_cache_rebuilt.mesh.faces ==
+          projection_cache_reused.mesh.faces);
+    CHECK(projection_cache_rebuilt.mesh.cell_ids ==
+          projection_cache_reused.mesh.cell_ids);
 
     // Interactive Candidate Batch is the counter-based production Preview
     // foundation. It must remain deterministic, prefix-stable, compact, and

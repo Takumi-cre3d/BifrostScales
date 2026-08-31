@@ -307,7 +307,7 @@ std::string make_profile_json(
     stream.imbue(std::locale::classic());
     stream << std::fixed << std::setprecision(6);
     stream
-        << "{\"schema\":\"bifrost-scales/native-profile/10\""
+        << "{\"schema\":\"bifrost-scales/native-profile/11\""
         << ",\"compute_backend\":";
     append_json_string(stream, generation.gpu_compute_backend);
     stream
@@ -338,7 +338,20 @@ std::string make_profile_json(
         << generation.guide_surface_cache_misses
         << ",\"interactive_surface_cache_hit\":"
         << (generation.interactive_surface_cache_hit ? "true" : "false")
+        << ",\"global_projection_cache_hit\":"
+        << (generation.global_projection_cache_hit ? "true" : "false")
         << ",\"distribution_ms\":" << generation.distribution_ms
+        << ",\"distribution_attempts\":" << report.attempts
+        << ",\"distribution_density_rejected\":"
+        << report.distribution_density_rejected
+        << ",\"distribution_conflict_rejected\":"
+        << report.distribution_conflict_rejected
+        << ",\"distribution_bucket_queries\":"
+        << report.distribution_bucket_queries
+        << ",\"distribution_distance_tests\":"
+        << report.distribution_distance_tests
+        << ",\"distribution_grid_density_reference\":"
+        << report.distribution_grid_density_reference
         << ",\"orientation_ms\":" << generation.orientation_ms
         << ",\"orientation_prepare_ms\":"
         << generation.orientation_prepare_ms

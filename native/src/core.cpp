@@ -543,7 +543,6 @@ GridCell cell_for(const Vec3& position, double cell_size) {
         static_cast<std::int64_t>(std::floor(position.z * inverse)),
     };
 }
-
 std::uint32_t effective_count(const Settings& settings, PreviewMode mode) {
     switch (mode) {
         case PreviewMode::Interactive:
@@ -1058,7 +1057,7 @@ double maximum_density_factor(const PreparedGuides& guides) {
                 clamp(source.density_multiplier, 0.0, 16.0));
         }
     }
-    return clamp(maximum, 1.0, 256.0);
+    return clamp(maximum, 1.0, 16.0);
 }
 
 double minimum_density_factor(const PreparedGuides& guides) {
@@ -1444,18 +1443,29 @@ public:
     explicit SurfaceProjector(
         const Mesh& mesh,
         bool build_local_projection = true,
-        bool build_global_projection = false)
+        bool build_global_projection = false,
+        bool* global_projection_cache_hit = nullptr)
         : mesh_(mesh) {
         if (build_local_projection) {
             local_topology_ = shared_local_topology(mesh);
         }
         if (build_global_projection) {
-            build_global_bvh();
+            global_projection_ = shared_global_projection(
+                mesh,
+                global_projection_cache_hit);
+        } else if (global_projection_cache_hit != nullptr) {
+            *global_projection_cache_hit = false;
         }
     }
 
     static void clear_shared_local_topology_cache() {
         LocalTopologyCache& cache = local_topology_cache();
+        std::lock_guard<std::mutex> lock(cache.mutex);
+        cache.entries.clear();
+    }
+
+    static void clear_shared_global_projection_cache() {
+        GlobalProjectionCache& cache = global_projection_cache();
         std::lock_guard<std::mutex> lock(cache.mutex);
         cache.entries.clear();
     }
@@ -1644,7 +1654,8 @@ public:
         double best_distance = std::numeric_limits<double>::infinity();
         Projection best_projection{point, {1.0, 0.0, 0.0}};
         std::uint32_t best_triangle = std::numeric_limits<std::uint32_t>::max();
-        if (!bvh_nodes_.empty()) {
+        if (global_projection_ != nullptr &&
+            !global_projection_->nodes.empty()) {
             search_global_bvh(
                 0U,
                 point,
@@ -1711,14 +1722,35 @@ private:
         std::vector<LocalTopologyCacheEntry> entries;
     };
 
+    struct GlobalProjectionData {
+        std::vector<std::uint32_t> triangles;
+        std::vector<BvhNode> nodes;
+    };
+
+    struct GlobalProjectionCacheEntry {
+        std::uint64_t geometry_hash{0U};
+        std::size_t vertex_count{0U};
+        std::size_t triangle_count{0U};
+        std::shared_ptr<const GlobalProjectionData> data;
+    };
+
+    struct GlobalProjectionCache {
+        std::mutex mutex;
+        std::vector<GlobalProjectionCacheEntry> entries;
+    };
+
     const Mesh& mesh_;
     std::shared_ptr<const LocalTopology> local_topology_;
     std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> candidate_cache_;
-    std::vector<std::uint32_t> bvh_triangles_;
-    std::vector<BvhNode> bvh_nodes_;
+    std::shared_ptr<const GlobalProjectionData> global_projection_;
 
     static LocalTopologyCache& local_topology_cache() {
         static LocalTopologyCache cache;
+        return cache;
+    }
+
+    static GlobalProjectionCache& global_projection_cache() {
+        static GlobalProjectionCache cache;
         return cache;
     }
 
@@ -1750,6 +1782,63 @@ private:
             topology,
         });
         return topology;
+    }
+
+    static std::shared_ptr<const GlobalProjectionData>
+    shared_global_projection(const Mesh& mesh, bool* cache_hit) {
+        GlobalProjectionCache& cache = global_projection_cache();
+        const std::uint64_t geometry_hash = mesh_geometry_hash(mesh);
+        {
+            std::lock_guard<std::mutex> lock(cache.mutex);
+            for (const GlobalProjectionCacheEntry& entry : cache.entries) {
+                if (entry.geometry_hash == geometry_hash &&
+                    entry.vertex_count == mesh.vertices.size() &&
+                    entry.triangle_count == mesh.triangles.size()) {
+                    if (cache_hit != nullptr) {
+                        *cache_hit = true;
+                    }
+                    return entry.data;
+                }
+            }
+        }
+
+        auto data = std::make_shared<GlobalProjectionData>();
+        data->triangles.resize(mesh.triangles.size());
+        std::iota(data->triangles.begin(), data->triangles.end(), 0U);
+        data->nodes.reserve(mesh.triangles.size() * 2U);
+        if (!data->triangles.empty()) {
+            build_global_bvh_node(
+                mesh,
+                *data,
+                0U,
+                static_cast<std::uint32_t>(data->triangles.size()));
+        }
+
+        std::lock_guard<std::mutex> lock(cache.mutex);
+        for (const GlobalProjectionCacheEntry& entry : cache.entries) {
+            if (entry.geometry_hash == geometry_hash &&
+                entry.vertex_count == mesh.vertices.size() &&
+                entry.triangle_count == mesh.triangles.size()) {
+                if (cache_hit != nullptr) {
+                    *cache_hit = true;
+                }
+                return entry.data;
+            }
+        }
+        constexpr std::size_t capacity = 2U;
+        if (cache.entries.size() >= capacity) {
+            cache.entries.erase(cache.entries.begin());
+        }
+        cache.entries.push_back({
+            geometry_hash,
+            mesh.vertices.size(),
+            mesh.triangles.size(),
+            data,
+        });
+        if (cache_hit != nullptr) {
+            *cache_hit = false;
+        }
+        return data;
     }
 
     void update_local_projection(
@@ -1871,38 +1960,31 @@ private:
             }
         }
     }
-    [[nodiscard]] Bounds3 triangle_bounds(std::uint32_t triangle_index) const {
+    [[nodiscard]] static Bounds3 triangle_bounds(
+        const Mesh& mesh,
+        std::uint32_t triangle_index) {
         Bounds3 bounds;
-        const Triangle& triangle = mesh_.triangles[triangle_index];
-        expand_bounds(bounds, mesh_.vertices[triangle.a]);
-        expand_bounds(bounds, mesh_.vertices[triangle.b]);
-        expand_bounds(bounds, mesh_.vertices[triangle.c]);
+        const Triangle& triangle = mesh.triangles[triangle_index];
+        expand_bounds(bounds, mesh.vertices[triangle.a]);
+        expand_bounds(bounds, mesh.vertices[triangle.b]);
+        expand_bounds(bounds, mesh.vertices[triangle.c]);
         return bounds;
     }
 
-    [[nodiscard]] Vec3 triangle_centroid(std::uint32_t triangle_index) const {
-        const Triangle& triangle = mesh_.triangles[triangle_index];
+    [[nodiscard]] static Vec3 triangle_centroid(
+        const Mesh& mesh,
+        std::uint32_t triangle_index) {
+        const Triangle& triangle = mesh.triangles[triangle_index];
         return mul(
             add(
-                add(mesh_.vertices[triangle.a], mesh_.vertices[triangle.b]),
-                mesh_.vertices[triangle.c]),
+                add(mesh.vertices[triangle.a], mesh.vertices[triangle.b]),
+                mesh.vertices[triangle.c]),
             1.0 / 3.0);
     }
 
-    void build_global_bvh() {
-        bvh_triangles_.resize(mesh_.triangles.size());
-        for (std::uint32_t index = 0U; index < mesh_.triangles.size(); ++index) {
-            bvh_triangles_[index] = index;
-        }
-        bvh_nodes_.reserve(mesh_.triangles.size() * 2U);
-        if (!bvh_triangles_.empty()) {
-            build_global_bvh_node(
-                0U,
-                static_cast<std::uint32_t>(bvh_triangles_.size()));
-        }
-    }
-
-    std::uint32_t build_global_bvh_node(
+    static std::uint32_t build_global_bvh_node(
+        const Mesh& mesh,
+        GlobalProjectionData& data,
         std::uint32_t begin,
         std::uint32_t end) {
         BvhNode node;
@@ -1910,16 +1992,18 @@ private:
         node.end = end;
         Bounds3 centroid_bounds;
         for (std::uint32_t offset = begin; offset < end; ++offset) {
-            const std::uint32_t triangle_index = bvh_triangles_[offset];
-            expand_bounds(node.bounds, triangle_bounds(triangle_index));
-            expand_bounds(centroid_bounds, triangle_centroid(triangle_index));
+            const std::uint32_t triangle_index = data.triangles[offset];
+            expand_bounds(node.bounds, triangle_bounds(mesh, triangle_index));
+            expand_bounds(
+                centroid_bounds,
+                triangle_centroid(mesh, triangle_index));
             node.minimum_triangle = std::min(
                 node.minimum_triangle,
                 triangle_index);
         }
         const std::uint32_t node_index = static_cast<std::uint32_t>(
-            bvh_nodes_.size());
-        bvh_nodes_.push_back(node);
+            data.nodes.size());
+        data.nodes.push_back(node);
         if (end - begin <= 8U) {
             return node_index;
         }
@@ -1931,13 +2015,13 @@ private:
         } else if (extent.z > extent.x && extent.z > extent.y) {
             axis = 2;
         }
-        auto axis_value = [this, axis](std::uint32_t triangle_index) {
-            const Vec3 center = triangle_centroid(triangle_index);
+        auto axis_value = [&mesh, axis](std::uint32_t triangle_index) {
+            const Vec3 center = triangle_centroid(mesh, triangle_index);
             return axis == 0 ? center.x : axis == 1 ? center.y : center.z;
         };
         std::sort(
-            bvh_triangles_.begin() + begin,
-            bvh_triangles_.begin() + end,
+            data.triangles.begin() + begin,
+            data.triangles.begin() + end,
             [&axis_value](std::uint32_t left, std::uint32_t right) {
                 const double left_value = axis_value(left);
                 const double right_value = axis_value(right);
@@ -1947,10 +2031,12 @@ private:
                 return left < right;
             });
         const std::uint32_t middle = begin + (end - begin) / 2U;
-        const std::uint32_t left = build_global_bvh_node(begin, middle);
-        const std::uint32_t right = build_global_bvh_node(middle, end);
-        bvh_nodes_[node_index].left = left;
-        bvh_nodes_[node_index].right = right;
+        const std::uint32_t left = build_global_bvh_node(
+            mesh, data, begin, middle);
+        const std::uint32_t right = build_global_bvh_node(
+            mesh, data, middle, end);
+        data.nodes[node_index].left = left;
+        data.nodes[node_index].right = right;
         return node_index;
     }
 
@@ -1981,14 +2067,15 @@ private:
         double& best_distance,
         Projection& best_projection,
         std::uint32_t& best_triangle) const {
-        const BvhNode& node = bvh_nodes_[node_index];
+        const GlobalProjectionData& data = *global_projection_;
+        const BvhNode& node = data.nodes[node_index];
         if (bounds_distance_squared(node.bounds, point) > best_distance) {
             return;
         }
         if (node.leaf()) {
             for (std::uint32_t offset = node.begin; offset < node.end; ++offset) {
                 update_global_projection(
-                    bvh_triangles_[offset],
+                    data.triangles[offset],
                     point,
                     best_distance,
                     best_projection,
@@ -1997,8 +2084,8 @@ private:
             return;
         }
 
-        const BvhNode& left = bvh_nodes_[node.left];
-        const BvhNode& right = bvh_nodes_[node.right];
+        const BvhNode& left = data.nodes[node.left];
+        const BvhNode& right = data.nodes[node.right];
         const double left_distance = bounds_distance_squared(left.bounds, point);
         const double right_distance = bounds_distance_squared(right.bounds, point);
         const bool left_first = left_distance < right_distance ||
@@ -2697,21 +2784,7 @@ public:
             triangle_index >= mesh_.triangles.size()) {
             return {};
         }
-        if (initialized_[triangle_index] == 0U) {
-            const Triangle& triangle = mesh_.triangles[triangle_index];
-            const std::array<std::uint32_t, 3> vertices{
-                triangle.a,
-                triangle.b,
-                triangle.c,
-            };
-            for (std::size_t corner = 0U; corner < vertices.size(); ++corner) {
-                triangle_fields_[triangle_index][corner] = guide_index_.evaluate(
-                    mesh_.vertices[vertices[corner]],
-                    triangle_index,
-                    scratch);
-            }
-            initialized_[triangle_index] = 1U;
-        }
+        initialize_triangle(triangle_index, scratch);
         const auto& fields = triangle_fields_[triangle_index];
         double density = 0.0;
         double size = 0.0;
@@ -2725,7 +2798,47 @@ public:
         };
     }
 
+    double maximum_density(
+        std::uint32_t triangle_index,
+        std::vector<std::uint32_t>& scratch) {
+        if (initialized_.empty() ||
+            triangle_index >= mesh_.triangles.size()) {
+            return 1.0;
+        }
+        initialize_triangle(triangle_index, scratch);
+        const auto& fields = triangle_fields_[triangle_index];
+        return clamp(
+            std::max({
+                fields[0].density,
+                fields[1].density,
+                fields[2].density,
+            }),
+            0.02,
+            16.0);
+    }
+
 private:
+    void initialize_triangle(
+        std::uint32_t triangle_index,
+        std::vector<std::uint32_t>& scratch) {
+        if (initialized_[triangle_index] != 0U) {
+            return;
+        }
+        const Triangle& triangle = mesh_.triangles[triangle_index];
+        const std::array<std::uint32_t, 3> vertices{
+            triangle.a,
+            triangle.b,
+            triangle.c,
+        };
+        for (std::size_t corner = 0U; corner < vertices.size(); ++corner) {
+            triangle_fields_[triangle_index][corner] = guide_index_.evaluate(
+                mesh_.vertices[vertices[corner]],
+                triangle_index,
+                scratch);
+        }
+        initialized_[triangle_index] = 1U;
+    }
+
     const Mesh& mesh_;
     const DistributionGuideIndex& guide_index_;
     std::vector<std::array<DistributionGuideField, 3>> triangle_fields_;
@@ -4460,12 +4573,8 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
     const double initial_spacing = std::max(
         1.0e-12,
         nominal_spacing * clamp(settings.spacing_factor, 0.15, 2.5));
-    // Size the spatial grid for the largest possible local spacing. This
-    // keeps exact neighbor rejection within the adjacent 27 buckets even
-    // when low-density guides enlarge spacing far beyond the base value.
+
     const double minimum_density = minimum_density_factor(guides);
-    const double cell_size = initial_spacing /
-        std::sqrt(std::max(0.02, minimum_density));
     const double maximum_density = maximum_density_factor(guides);
     const DistributionGuideIndex distribution_guide_index(guides);
     SettledDistributionFieldCache settled_distribution_fields(
@@ -4474,14 +4583,69 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
         mode == PreviewMode::Settled);
     std::vector<std::uint32_t> distribution_guide_scratch;
     distribution_guide_scratch.reserve(guides.size());
+    const bool settled_density_weighted_sampling =
+        mode == PreviewMode::Settled && !distribution_guide_index.empty();
+    std::vector<double> settled_cumulative_density_areas;
+    std::vector<double> settled_triangle_density_bounds;
+    double settled_total_density_area = 0.0;
+    if (settled_density_weighted_sampling) {
+        settled_cumulative_density_areas.reserve(triangle_indices.size());
+        settled_triangle_density_bounds.reserve(triangle_indices.size());
+        double previous_area = 0.0;
+        for (std::size_t lookup = 0U; lookup < triangle_indices.size(); ++lookup) {
+            const double area = cumulative_areas[lookup] - previous_area;
+            previous_area = cumulative_areas[lookup];
+            const double density_bound = settled_distribution_fields.maximum_density(
+                triangle_indices[lookup],
+                distribution_guide_scratch);
+            settled_total_density_area += area * density_bound;
+            settled_cumulative_density_areas.push_back(settled_total_density_area);
+            settled_triangle_density_bounds.push_back(density_bound);
+        }
+    }
+    const std::vector<double>& proposal_cumulative =
+        settled_density_weighted_sampling
+        ? settled_cumulative_density_areas
+        : cumulative_areas;
+    const double proposal_total = settled_density_weighted_sampling
+        ? settled_total_density_area
+        : total_area;
+    const std::size_t proposal_bin_count = std::min<std::size_t>(
+        65536U,
+        proposal_cumulative.size());
+    std::vector<std::size_t> proposal_bin_offsets(proposal_bin_count + 1U);
+    for (std::size_t bin = 0U; bin <= proposal_bin_count; ++bin) {
+        const double boundary = proposal_total *
+            (static_cast<double>(bin) /
+             static_cast<double>(proposal_bin_count));
+        proposal_bin_offsets[bin] = static_cast<std::size_t>(
+            std::lower_bound(
+                proposal_cumulative.begin(),
+                proposal_cumulative.end(),
+                boundary) - proposal_cumulative.begin());
+    }
+    // A modest Settled floor avoids oversized buckets when a localized
+    // low-Density guide drives the global minimum to 0.02. The exact dynamic
+    // neighbor range still covers every pairwise spacing threshold.
+    const double grid_density_reference = mode == PreviewMode::Settled
+        ? std::max(minimum_density, 0.08)
+        : minimum_density;
+    const double cell_size = initial_spacing /
+        std::sqrt(clamp(grid_density_reference, 0.02, 16.0));
 
     PythonRandom rng(settings.seed);
     std::vector<Sample> samples;
     std::unordered_map<GridCell, std::vector<std::uint32_t>, GridCellHash> grid;
     grid.reserve(static_cast<std::size_t>(count) * 2U);
     std::uint64_t attempts = 0;
+    std::uint64_t density_rejected = 0;
+    std::uint64_t conflict_rejected = 0;
+    std::uint64_t bucket_queries = 0;
+    std::uint64_t distance_tests = 0;
     double final_spacing = initial_spacing;
     const std::uint64_t per_pass_limit = std::max<std::uint64_t>(count * 48ULL, 128ULL);
+    const std::uint64_t settled_conflict_stall_limit =
+        std::max<std::uint64_t>(1024ULL, static_cast<std::uint64_t>(count) / 64ULL);
 
     const auto boundary_topology = shared_boundary_topology(mesh);
     // Cell Gap belongs to the Cell stage. Boundary center placement remains
@@ -4524,10 +4688,15 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
         static_cast<std::uint64_t>(mesh.triangles.size());
     // Distribution projects boundary anchors only onto their source triangle
     // and curve anchors globally. Neither path needs local triangle adjacency.
+    bool global_projection_cache_hit = false;
     SurfaceProjector projector(
         mesh,
         false,
-        global_projection_work >= global_projection_bvh_work_threshold);
+        global_projection_work >= global_projection_bvh_work_threshold,
+        &global_projection_cache_hit);
+    if (profile != nullptr) {
+        profile->global_projection_cache_hit = global_projection_cache_hit;
+    }
 
     std::vector<Sample> anchor_samples;
     anchor_samples.reserve(boundary_anchors.size() + authored_anchors.size());
@@ -4726,6 +4895,9 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
             conflict_execution,
             "interactive-distribution");
         attempts += conflict.considered_count;
+        density_rejected += conflict.rejected_density;
+        conflict_rejected += conflict.rejected_conflict;
+        conflict_rejected += conflict.rejected_mask;
         if (conflict.default_spacing > 0.0F) {
             final_spacing = static_cast<double>(conflict.default_spacing);
         }
@@ -4781,6 +4953,7 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                 }
             }
             if (too_close) {
+                ++conflict_rejected;
                 continue;
             }
 
@@ -4831,14 +5004,48 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
         const double spacing = initial_spacing * factor;
         final_spacing = spacing;
         std::uint64_t pass_attempts = 0;
+        std::uint64_t consecutive_conflict_rejections = 0;
         while (samples.size() < count && pass_attempts < per_pass_limit) {
             ++pass_attempts;
             ++attempts;
-            const double weighted = rng.random() * total_area;
-            const auto iterator = std::lower_bound(
-                cumulative_areas.begin(), cumulative_areas.end(), weighted);
-            const std::size_t lookup = std::min<std::size_t>(
-                static_cast<std::size_t>(iterator - cumulative_areas.begin()),
+            const double weighted = rng.random() * proposal_total;
+            const std::size_t proposal_bin = std::min<std::size_t>(
+                static_cast<std::size_t>(
+                    weighted / proposal_total *
+                    static_cast<double>(proposal_bin_count)),
+                proposal_bin_count - 1U);
+            const std::size_t search_bin_begin = proposal_bin > 0U
+                ? proposal_bin - 1U
+                : 0U;
+            const std::size_t search_bin_end = std::min<std::size_t>(
+                proposal_bin + 2U,
+                proposal_bin_count);
+            auto iterator = std::lower_bound(
+                proposal_cumulative.begin() +
+                    static_cast<std::ptrdiff_t>(
+                        proposal_bin_offsets[search_bin_begin]),
+                proposal_cumulative.begin() +
+                    static_cast<std::ptrdiff_t>(std::min<std::size_t>(
+                        proposal_cumulative.size(),
+                        proposal_bin_offsets[search_bin_end] + 1U)),
+                weighted);
+            std::size_t lookup = static_cast<std::size_t>(
+                iterator - proposal_cumulative.begin());
+            const bool exact_lower_bound =
+                lookup < proposal_cumulative.size() &&
+                proposal_cumulative[lookup] >= weighted &&
+                (lookup == 0U ||
+                 proposal_cumulative[lookup - 1U] < weighted);
+            if (!exact_lower_bound) {
+                iterator = std::lower_bound(
+                    proposal_cumulative.begin(),
+                    proposal_cumulative.end(),
+                    weighted);
+                lookup = static_cast<std::size_t>(
+                    iterator - proposal_cumulative.begin());
+            }
+            lookup = std::min<std::size_t>(
+                lookup,
                 triangle_indices.size() - 1U);
             std::uint32_t triangle_index = triangle_indices[lookup];
             const Triangle& triangle = mesh.triangles[triangle_index];
@@ -4864,36 +5071,79 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                       distribution_guide_scratch);
             const double density_multiplier = field.density;
             const double size_multiplier = field.size;
+            const double density_proposal_bound = settled_density_weighted_sampling
+                ? settled_triangle_density_bounds[lookup]
+                : maximum_density;
             const double acceptance = clamp(
-                density_multiplier / maximum_density,
+                density_multiplier / density_proposal_bound,
                 0.002,
                 1.0);
             if (rng.random() > acceptance) {
+                ++density_rejected;
                 continue;
             }
             const Vec3 normal = normals[triangle_index];
             const double local_spacing = spacing /
                 std::sqrt(std::max(0.02, density_multiplier));
             const GridCell cell = cell_for(position, cell_size);
-            const double maximum_neighbor_threshold = 0.5 *
-                (local_spacing + largest_accepted_spacing);
-            const int neighbor_range = std::max(
-                1,
-                static_cast<int>(std::ceil(
-                    maximum_neighbor_threshold / cell_size)));
             bool too_close = false;
-            for (int x = -neighbor_range; x <= neighbor_range && !too_close; ++x) {
-                for (int y = -neighbor_range; y <= neighbor_range && !too_close; ++y) {
-                    for (int z = -neighbor_range; z <= neighbor_range && !too_close; ++z) {
-                        const auto found = grid.find({cell.x + x, cell.y + y, cell.z + z});
-                        if (found == grid.end()) {
-                            continue;
-                        }
-                        for (const std::uint32_t sample_index : found->second) {
-                            const Sample& other = samples[sample_index];
-                            const double threshold = 0.5 *
-                                (local_spacing + std::max(1.0e-12, other.local_spacing));
-                            if (length_squared(sub(position, other.position)) < threshold * threshold) {
+            const double maximum_neighbor_threshold =
+                0.5 * (local_spacing + largest_accepted_spacing);
+            const int neighbor_range =
+                std::max(1, static_cast<int>(std::ceil(maximum_neighbor_threshold / cell_size)));
+            ++bucket_queries;
+            const auto center = grid.find(cell);
+            if (center != grid.end()) {
+                for (const std::uint32_t sample_index : center->second) {
+                    ++distance_tests;
+                    const Sample& other = samples[sample_index];
+                    const double threshold =
+                        0.5 * (local_spacing + std::max(1.0e-12, other.local_spacing));
+                    if (length_squared(sub(position, other.position)) < threshold * threshold) {
+                        too_close = true;
+                        break;
+                    }
+                }
+            }
+            const auto conflicts_in_cell = [&](int x, int y, int z) {
+                ++bucket_queries;
+                const auto found = grid.find({cell.x + x, cell.y + y, cell.z + z});
+                if (found == grid.end()) {
+                    return false;
+                }
+                for (const std::uint32_t sample_index : found->second) {
+                    ++distance_tests;
+                    const Sample& other = samples[sample_index];
+                    const double threshold =
+                        0.5 * (local_spacing + std::max(1.0e-12, other.local_spacing));
+                    if (length_squared(sub(position, other.position)) < threshold * threshold) {
+                        return true;
+                    }
+                }
+                return false;            };
+            if (!too_close && neighbor_range == 1) {
+                static constexpr std::array<std::array<int, 3>, 26> offsets{{
+                    {{-1, 0, 0}},  {{1, 0, 0}},   {{0, -1, 0}},  {{0, 1, 0}},    {{0, 0, -1}},
+                    {{0, 0, 1}},   {{-1, -1, 0}}, {{-1, 1, 0}},  {{1, -1, 0}},   {{1, 1, 0}},
+                    {{-1, 0, -1}}, {{-1, 0, 1}},  {{1, 0, -1}},  {{1, 0, 1}},    {{0, -1, -1}},
+                    {{0, -1, 1}},  {{0, 1, -1}},  {{0, 1, 1}},   {{-1, -1, -1}}, {{-1, -1, 1}},
+                    {{-1, 1, -1}}, {{-1, 1, 1}},  {{1, -1, -1}}, {{1, -1, 1}},   {{1, 1, -1}},
+                    {{1, 1, 1}},
+                }};
+                for (const auto& offset : offsets) {
+                    if (conflicts_in_cell(offset[0], offset[1], offset[2])) {
+                        too_close = true;
+                        break;
+                    }
+                }
+            } else if (!too_close) {
+                for (int x = -neighbor_range; x <= neighbor_range && !too_close; ++x) {
+                    for (int y = -neighbor_range; y <= neighbor_range && !too_close; ++y) {
+                        for (int z = -neighbor_range; z <= neighbor_range; ++z) {
+                            if (x == 0 && y == 0 && z == 0) {
+                                continue;
+                            }
+                            if (conflicts_in_cell(x, y, z)) {
                                 too_close = true;
                                 break;
                             }
@@ -4902,8 +5152,16 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                 }
             }
             if (too_close) {
+                ++conflict_rejected;
+                ++consecutive_conflict_rejections;
+                if (mode == PreviewMode::Settled &&
+                    consecutive_conflict_rejections >=
+                        settled_conflict_stall_limit) {
+                    break;
+                }
                 continue;
             }
+            consecutive_conflict_rejections = 0;
             const std::uint32_t sample_index = static_cast<std::uint32_t>(samples.size());
             samples.push_back({
                 position,
@@ -4917,16 +5175,12 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                 density_multiplier,
                 size_multiplier,
                 local_spacing,
-                sample_stable_id(
-                    topology_hash,
-                    settings.seed,
-                    kRoleSurfaceCandidate,
-                    {pass_index, attempts}),
+                sample_stable_id(topology_hash, settings.seed, kRoleSurfaceCandidate,
+                                 {pass_index, attempts}),
             });
             grid[cell].push_back(sample_index);
-            largest_accepted_spacing = std::max(
-                largest_accepted_spacing,
-                local_spacing);
+
+            largest_accepted_spacing = std::max(largest_accepted_spacing, local_spacing);
         }
     }
     }
@@ -4952,6 +5206,11 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
     report.requested_count = count;
     report.accepted_count = static_cast<std::uint32_t>(samples.size());
     report.attempts = attempts;
+    report.distribution_density_rejected = density_rejected;
+    report.distribution_conflict_rejected = conflict_rejected;
+    report.distribution_bucket_queries = bucket_queries;
+    report.distribution_distance_tests = distance_tests;
+    report.distribution_grid_density_reference = grid_density_reference;
     report.surface_area = total_area;
     report.initial_spacing = initial_spacing;
     report.final_spacing = final_spacing;
@@ -7421,6 +7680,7 @@ ProcessStageCache& native_stage_cache() {
 void clear_native_stage_cache() {
     native_stage_cache().clear();
     SurfaceProjector::clear_shared_local_topology_cache();
+    SurfaceProjector::clear_shared_global_projection_cache();
     clear_shared_boundary_topology_cache();
     clear_shared_surface_guide_topology_cache();
     clear_shared_surface_guide_field_cache();

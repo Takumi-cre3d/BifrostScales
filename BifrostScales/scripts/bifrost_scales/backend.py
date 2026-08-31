@@ -63,7 +63,14 @@ class BackendApplyReport:
     native_guide_surface_cache_hits: int = 0
     native_guide_surface_cache_misses: int = 0
     native_interactive_surface_cache_hit: bool = False
+    native_global_projection_cache_hit: bool = False
     native_distribution_ms: float = 0.0
+    native_distribution_attempts: int = 0
+    native_distribution_density_rejected: int = 0
+    native_distribution_conflict_rejected: int = 0
+    native_distribution_bucket_queries: int = 0
+    native_distribution_distance_tests: int = 0
+    native_distribution_grid_density_reference: float = 0.0
     native_orientation_ms: float = 0.0
     native_orientation_prepare_ms: float = 0.0
     native_direction_neighbors_ms: float = 0.0
@@ -742,7 +749,28 @@ class NativeMayaBackend:
             native_interactive_surface_cache_hit=bool(
                 profile.get("interactive_surface_cache_hit", False)
             ),
+            native_global_projection_cache_hit=bool(
+                profile.get("global_projection_cache_hit", False)
+            ),
             native_distribution_ms=profile_ms("distribution_ms"),
+            native_distribution_attempts=int(
+                profile.get("distribution_attempts", 0) or 0
+            ),
+            native_distribution_density_rejected=int(
+                profile.get("distribution_density_rejected", 0) or 0
+            ),
+            native_distribution_conflict_rejected=int(
+                profile.get("distribution_conflict_rejected", 0) or 0
+            ),
+            native_distribution_bucket_queries=int(
+                profile.get("distribution_bucket_queries", 0) or 0
+            ),
+            native_distribution_distance_tests=int(
+                profile.get("distribution_distance_tests", 0) or 0
+            ),
+            native_distribution_grid_density_reference=profile_ms(
+                "distribution_grid_density_reference"
+            ),
             native_orientation_ms=profile_ms("orientation_ms"),
             native_orientation_prepare_ms=profile_ms(
                 "orientation_prepare_ms"

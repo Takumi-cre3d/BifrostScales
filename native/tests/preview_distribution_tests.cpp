@@ -212,6 +212,20 @@ int main() {
     CHECK(gpu_off_info.backend == "cpu-conflict-reference");
     CHECK(!gpu_off_info.fallback_reason.empty());
 
+    set_gpu_override("auto");
+    bifrost_scales::gpu::ExecutionInfo gpu_auto_info;
+    const auto gpu_auto_result =
+        bifrost_scales::arbitrate_interactive_candidates_accelerated(
+            large,
+            settings,
+            256U,
+            gpu_auto_info);
+    CHECK(same_conflict_result(gpu_auto_result, reference));
+    CHECK(gpu_auto_info.requested);
+    CHECK(!gpu_auto_info.used);
+    CHECK(gpu_auto_info.fallback_reason ==
+          "candidate count is below the GPU crossover threshold");
+
     set_gpu_override("force");
     bifrost_scales::gpu::ExecutionInfo gpu_force_info;
     const auto gpu_force_result =

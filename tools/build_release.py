@@ -11,14 +11,14 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.10.8"
-INSTALLER_NAME = "BifrostScales_0_10_8_Standalone_Installer.py"
-POST_CHECK_NAME = "BifrostScales_0_10_8_POST_INSTALL_CHECK.py"
-SOURCE_ZIP_NAME = "BifrostScales_0_10_8.zip"
+VERSION = "0.10.9"
+INSTALLER_NAME = "BifrostScales_0_10_9_Standalone_Installer.py"
+POST_CHECK_NAME = "BifrostScales_0_10_9_POST_INSTALL_CHECK.py"
+SOURCE_ZIP_NAME = "BifrostScales_0_10_9.zip"
 FIXED_TIME = (2026, 8, 21, 0, 0, 0)
 
 
-CANONICAL_MOD = """+ BifrostScales 0.10.8 BifrostScales
+CANONICAL_MOD = """+ BifrostScales 0.10.9 BifrostScales
 PYTHONPATH +:= scripts
 PATH +:= bin
 plug-ins: plug-ins
@@ -605,10 +605,10 @@ def _manifest_profile_schema(manifest):
 
 
 def _operator_compatible_native_pack(pack_config):
-    """Return whether an existing 0.10.8 Native Pack satisfies this release.
+    """Return whether an existing 0.10.9 Native Pack satisfies this release.
 
     Payload Schema 10 and Static Graph v4 remain stable, but Operator Contract
-    19, the Surface Guide cache Behavior Contract, and Profile Schema 10 must
+    20, the Settled Proposal Index Behavior Contract, and Profile Schema 11 must
     all match. Version alone is insufficient because an older DLL cannot
     execute these boundaries.
     """
@@ -637,9 +637,9 @@ def _operator_compatible_native_pack(pack_config):
         and _manifest_payload_schema(manifest)
         == "bifrost-scales/native-payload/10"
         and _manifest_behavior_contract(manifest)
-        == "bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1"
+        == "bifrost-scales/native-core/0.10.9-settled-proposal-index-1"
         and _manifest_profile_schema(manifest)
-        == "bifrost-scales/native-profile/10"
+        == "bifrost-scales/native-profile/11"
     )
 
 
@@ -654,11 +654,11 @@ def _native_version_text(pack_config):
             if re.match(r"^\\d+\\.\\d+\\.\\d+", value):
                 return value
     version = _native_pack_version(pack_config)
-    return ".".join(str(part) for part in version) if version else "0.10.8"
+    return ".".join(str(part) for part in version) if version else "0.10.9"
 
 
 def _upgrade_native_pack_graph_contract(pack_config, package_root):
-    """Normalize a compatible 0.10.8+ pack to the graph-v4 scene-input contract."""
+    """Normalize a compatible 0.10.9+ pack to the graph-v4 scene-input contract."""
 
     if not _operator_compatible_native_pack(pack_config):
         return False
@@ -794,9 +794,9 @@ def _is_valid_native_pack_config(pack_config):
         return False
     if _manifest_payload_schema(manifest) != "bifrost-scales/native-payload/10":
         return False
-    if _manifest_behavior_contract(manifest) != "bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1":
+    if _manifest_behavior_contract(manifest) != "bifrost-scales/native-core/0.10.9-settled-proposal-index-1":
         return False
-    if _manifest_profile_schema(manifest) != "bifrost-scales/native-profile/10":
+    if _manifest_profile_schema(manifest) != "bifrost-scales/native-profile/11":
         return False
     try:
         data = json.loads(pack_config.read_text(encoding="utf-8-sig"))
@@ -882,7 +882,7 @@ def _installation_choice(cmds):
         title="Install Bifrost Scales",
         message=(
             "Bifrost Scales {VERSION}を独立製品としてインストールします。\\n"
-            "0.10.8はSurface Guide FieldとInteractive Mesh Samplingを編集間で再利用し、配置更新を高速化します。\\n"
+            "0.10.9は投影BVHを編集間で再利用し、Settled配置候補の探索を高速化します。\\n"
             "互換Native Packがない場合のみ、同梱PowerShellでOperator PackをビルドしてMayaを再起動してください。\\n"
             "旧ツールを削除してもシーン内の制作データは削除しません。"
         ),
@@ -906,7 +906,7 @@ def install(show_tool=True, remove_legacy=None):
         if remove_legacy is None:
             return None
 
-    staging_root = Path(tempfile.mkdtemp(prefix="BifrostScales_0_10_8_"))
+    staging_root = Path(tempfile.mkdtemp(prefix="BifrostScales_0_10_9_"))
     modules_dir = Path(cmds.internalVar(userAppDir=True)) / "modules"
     destination_package = modules_dir / "BifrostScales"
     destination_mod = modules_dir / "BifrostScales.mod"
@@ -1096,12 +1096,12 @@ def install(show_tool=True, remove_legacy=None):
         )
         if preserved_native_pack:
             message += (
-                "\\n互換Native Core 0.10.8 Packを保持し、GraphとManifestを検証してBifrostScales.modへ再登録しました。"
+                "\\n互換Native Core 0.10.9 Packを保持し、GraphとManifestを検証してBifrostScales.modへ再登録しました。"
                 "\\n追加ビルドは不要ですが、BifrostがPackConfigを読み直すためMayaを完全に再起動してください。"
             )
         elif incompatible_native_pack_preserved:
             message += (
-                "\\n旧Native Packは診断用に保持しましたが、Payload Schema 10 / Operator Contract 19 / 0.10.8 Surface Guide Cache Contractを満たさないため登録していません。"
+                "\\n旧Native Packは診断用に保持しましたが、Payload Schema 10 / Operator Contract 20 / 0.10.9 Settled Proposal Index Contractを満たさないため登録していません。"
                 "\\nMayaを完全に終了し、{VERSION}同梱のNative Build Scriptを-Cleanで実行してください。"
             )
         else:
@@ -1253,8 +1253,8 @@ def build() -> dict[str, str]:
         "product": "Bifrost Scales",
         "version": VERSION,
         "schema": "bifrost-scales/5",
-        "source_development_state": "0.10.8-surface-guide-sampling-cache",
-        "milestone": "surface-guide-sampling-cache",
+        "source_development_state": "0.10.9-settled-proposal-index",
+        "milestone": "settled-proposal-index",
         "build_date": "2026-08-31",
         "runtime_payload_sha256": hashlib.sha256(payload).hexdigest(),
         "standalone": True,
@@ -1274,11 +1274,12 @@ def build() -> dict[str, str]:
         "interactive_conflict_gpu_schema": "bifrost-scales/interactive-conflict-gpu/1",
         "interactive_conflict_gpu_runtime_enabled": True,
         "interactive_conflict_gpu_algorithm": "parallel-lexicographic-mis-exact-priority",
-        "interactive_conflict_gpu_default_crossover_candidates": 8192,
+        "interactive_conflict_gpu_default_crossover_candidates": 65536,
         "interactive_conflict_gpu_environment_override": "BIFROST_SCALES_GPU_MIN_CANDIDATES",
         "interactive_conflict_gpu_failure_policy": "automatic-cpu-reference-fallback",
         "interactive_distribution_candidate_multiplier": 4,
         "interactive_distribution_preserves_cpu_anchors": True,
+        "global_projection_bvh_cache": "process-shared-bounded/2-geometry-hash",
         "interactive_distribution_mask_stage": "post-cell-shape-only",
         "settled_distribution_unchanged": False,
         "settled_distribution_field": "triangle-corner-cached-barycentric",
@@ -1318,12 +1319,12 @@ def build() -> dict[str, str]:
         "create_transaction_rollback": True,
         "existing_system_missing_graph_policy": "explicit-rebuild-only",
         "final_and_bake_status": "not-exposed-until-native-final-contract",
-        "native_core_api": "0.10.8-surface-guide-cache-contract",
-        "minimum_native_pack": "0.10.8",
+        "native_core_api": "0.10.9-settled-proposal-index-contract",
+        "minimum_native_pack": "0.10.9",
         "native_payload_schema": "bifrost-scales/native-payload/10",
-        "operator_contract": "bifrost-scales/operator-contract/19",
-        "native_behavior_contract": "bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1",
-        "native_profile_schema": "bifrost-scales/native-profile/10",
+        "operator_contract": "bifrost-scales/operator-contract/20",
+        "native_behavior_contract": "bifrost-scales/native-core/0.10.9-settled-proposal-index-1",
+        "native_profile_schema": "bifrost-scales/native-profile/11",
         "cell_pair_gap_feasibility": "owner-preserving-local-center-distance-cap",
         "cell_surface_follow": "cached-midpoint-quadratic-plus-selective-exact-shape-projection",
         "cell_exact_surface_projection_trigger": "relative-sag-0.001-or-normal-bend-over-3-degrees",
@@ -1339,6 +1340,16 @@ def build() -> dict[str, str]:
         "guide_surface_profile_breakdown": "time-plus-hit-miss-count-and-interactive-mesh-hit",
         "distribution_candidate_guide_index": "deterministic-authored-order-aabb-bvh",
         "distribution_neighbor_range": "exact-maximum-accepted-spacing-bound",
+        "distribution_neighbor_scan_order": "center-face-edge-corner-result-invariant",
+        "distribution_density_acceptance_upper_bound": "matches-evaluated-density-field-16",
+        "settled_distribution_candidate_sampling": "triangle-area-times-corner-density-upper-bound",
+        "settled_distribution_density_acceptance": "candidate-density-over-triangle-upper-bound",
+        "settled_distribution_stall_policy": "next-spacing-after-max-1024-target-over-64-consecutive-conflicts",
+        "settled_distribution_grid_density_reference": "minimum-density-with-settled-floor-0.08",
+        "settled_distribution_triangle_lookup": "validated-cumulative-bin-index-65536",
+        "settled_distribution_conflict_diagnostics": (
+            "bucket-queries-distance-tests-grid-density-reference"
+        ),
         "cell_hot_path": "single-site-precomputed-ray-table-normal-component",
         "cell_ray_trigonometry": "shared-precomputed-table",
         "cell_neighbor_normalization": "precomputed",

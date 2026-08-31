@@ -1,5 +1,5 @@
 {
-  "schema": "bifrost-scales/operator-contract/19",
+  "schema": "bifrost-scales/operator-contract/20",
   "namespace": "BifrostScales",
   "operator": "BifrostScales::generate_scale_mesh_payload_arrays",
   "published_graph": "Graphs::BifrostScales::native_scales_v4",
@@ -219,7 +219,7 @@
     "interactive_gpu_changes_stable_cell_ids": false
   },
   "performance_contract": {
-    "profile_schema": "bifrost-scales/native-profile/10",
+    "profile_schema": "bifrost-scales/native-profile/11",
     "preview_auxiliary_arrays_emitted": false,
     "preview_topology_representation": "flat-face-offset-and-vertex-buffers",
     "reference_mesh_contract_preserved": true,
@@ -244,6 +244,15 @@
       "guide_surface_cache_misses",
       "interactive_surface_cache_hit"
     ],
+    "distribution_profile_fields": [
+      "distribution_ms",
+      "distribution_attempts",
+      "distribution_density_rejected",
+      "distribution_conflict_rejected",
+      "distribution_bucket_queries",
+      "distribution_distance_tests",
+      "distribution_grid_density_reference"
+    ],
     "distribution_candidate_guide_index": "deterministic-authored-order-aabb-bvh",
     "interactive_candidate_batch_runtime_enabled": true,
     "interactive_conflict_gpu_runtime_enabled": true,
@@ -255,6 +264,14 @@
     "settled_distribution_deterministic": true,
     "final_distribution_field": "exact-per-candidate-surface-connected",
     "distribution_neighbor_range": "exact-maximum-accepted-spacing-bound",
+    "distribution_neighbor_scan_order": "center-face-edge-corner-result-invariant",
+    "distribution_density_acceptance_upper_bound": "matches-evaluated-density-field-16",
+    "settled_distribution_candidate_sampling": "triangle-area-times-corner-density-upper-bound",
+    "settled_distribution_density_acceptance": "candidate-density-over-triangle-upper-bound",
+    "settled_distribution_stall_policy": "next-spacing-after-max-1024-target-over-64-consecutive-conflicts",
+    "settled_distribution_grid_density_reference": "minimum-density-with-settled-floor-0.08",
+    "settled_distribution_triangle_lookup": "validated-cumulative-bin-index-65536",
+    "settled_distribution_conflict_diagnostics": "bucket-queries-distance-tests-grid-density-reference",
     "cell_hot_path": "exact-single-site-precomputed-rays-neighbor-metadata",
     "cell_surface_projection": "cached-midpoint-interpolation-plus-selective-exact-shape-stage",
     "cell_surface_projection_parallelism": "per-shape-worker-local-projector",

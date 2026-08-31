@@ -108,6 +108,7 @@ Measurement measure(
 struct Row {
     std::uint32_t requested{0U};
     std::uint32_t accepted{0U};
+    std::uint64_t attempts{0U};
     std::size_t points{0U};
     std::size_t faces{0U};
     double cold_distribution_ms{0.0};
@@ -320,6 +321,7 @@ Row run_case(
     return {
         count,
         latest.report.accepted_count,
+        latest.report.attempts,
         latest.mesh.vertices.size(),
         latest.mesh.face_count(),
         median(cold_distribution),
@@ -486,7 +488,7 @@ int main(int argc, char** argv) {
         output->imbue(std::locale::classic());
         *output << std::fixed << std::setprecision(3);
         *output
-            << "requested_count,accepted_count,point_count,face_count,"
+            << "requested_count,accepted_count,attempts,point_count,face_count,"
                "cold_distribution_ms,cold_orientation_ms,cold_cells_ms,"
                "cold_shape_ms,cold_core_total_ms,cold_wall_ms,"
                "shape_warm_shape_ms,shape_warm_wall_ms,"
@@ -503,6 +505,7 @@ int main(int argc, char** argv) {
             *output
                 << row.requested << ','
                 << row.accepted << ','
+                << row.attempts << ','
                 << row.points << ','
                 << row.faces << ','
                 << row.cold_distribution_ms << ','
