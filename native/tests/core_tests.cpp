@@ -1738,7 +1738,7 @@ int main() {
     low_boundary_density.points = {{0.0, 0.0, 0.0}};
     low_boundary_density.radius = 1000.0;
     low_boundary_density.falloff = 1.0;
-    low_boundary_density.density_multiplier = 0.25;
+    low_boundary_density.density_multiplier = 0.02;
     low_boundary_density.use_density = true;
     low_boundary_density.use_size = false;
     low_boundary_density.use_direction = false;
@@ -1758,6 +1758,9 @@ int main() {
           neutral_boundary_distribution.report.boundary_anchor_count * 60U);
     CHECK(sparse_boundary_distribution.samples.size() >=
           sparse_boundary_distribution.report.boundary_anchor_count);
+    CHECK(std::abs(
+              sparse_boundary_distribution.report.distribution_grid_density_reference -
+              0.04) < 1.0e-12);
 
     // Density acceptance must use the same upper bound as the evaluated
     // field. Two full-effect multipliers saturate the field at 16, so every

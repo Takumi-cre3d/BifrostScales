@@ -1252,6 +1252,7 @@ def build() -> dict[str, str]:
     build_info = {
         "product": "Bifrost Scales",
         "version": VERSION,
+        "release_channel": "beta",
         "schema": "bifrost-scales/5",
         "source_development_state": "0.10.9-settled-proposal-index",
         "milestone": "settled-proposal-index",
@@ -1345,7 +1346,7 @@ def build() -> dict[str, str]:
         "settled_distribution_candidate_sampling": "triangle-area-times-corner-density-upper-bound",
         "settled_distribution_density_acceptance": "candidate-density-over-triangle-upper-bound",
         "settled_distribution_stall_policy": "next-spacing-after-max-1024-target-over-64-consecutive-conflicts",
-        "settled_distribution_grid_density_reference": "minimum-density-with-settled-floor-0.08",
+        "settled_distribution_grid_density_reference": "minimum-density-with-settled-floor-0.04",
         "settled_distribution_triangle_lookup": "validated-cumulative-bin-index-65536",
         "settled_distribution_conflict_diagnostics": (
             "bucket-queries-distance-tests-grid-density-reference"

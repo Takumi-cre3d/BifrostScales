@@ -1,5 +1,7 @@
 # Bifrost Scales Roadmap — 0.10.9以降
 
+現在のNative生成機能を0.10.9 Public Betaとして固定し、製品版UI/UXは`UI_UX_PRODUCT_HANDOFF_JA.md`の別開発へ移します。
+
 ## 完了
 
 - Native-only Runtime
@@ -15,6 +17,9 @@
 - GPU Candidate Conflict Arbitration
 - CPU／GPU受理Index・Candidate Key完全一致
 - 65,536候補の自動GPU CrossoverとCPU fallback
+- `dragon.mb` Native parity入力の決定的export
+- Settled Grid密度下限0.04（同一Sampleを維持し、Bifrost v142中央値を1,390.947 msから1,261.128 msへ短縮）
+- Maya操作ログでDistribution中央値を442.07 msから416.71 ms、最大値を674.43 msから455.48 msへ短縮
 
 ## Interactive Distribution基盤
 
@@ -35,7 +40,7 @@
 ### P0: リリース阻害要因
 
 1. 同一入力でInteractive／SettledのStable ID、枚数、画面差分を継続測定する
-2. 高密度Settledの遅い外れ値を再現し、Bucket Query／Distance Testから原因を限定する
+2. 今回のInteractive／Settled操作ログを製品版性能基準として保存し、以後は同条件で回帰比較する
 3. Maya 2026／Bifrost 2.15の実環境で新規、更新、再起動、アンインストールを検証する
 4. クリーンなソースからNative Packとワンクリックインストーラーを再現生成する
 5. 旧版成果物と開発者ローカル資産を公開物へ混入させない

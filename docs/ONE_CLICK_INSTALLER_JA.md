@@ -1,4 +1,4 @@
-# ワンクリックインストーラー
+# Public Beta ワンクリックインストーラー／アンインストーラー
 
 `tools/build_one_click_installer.py`は、Maya 2026／Bifrost 2.15向けにビルド済みのNative Packと製品Runtimeを、Windows用の配布ZIPへまとめます。
 
@@ -12,8 +12,8 @@ python tools/build_one_click_installer.py
 
 生成物:
 
-- `dist/BifrostScales_0_10_9_OneClick_Installer.zip`
-- `dist/BifrostScales_0_10_9_OneClick_Installer.zip.sha256`
+- `dist/BifrostScales_0_10_9_Beta_OneClick_Installer.zip`
+- `dist/BifrostScales_0_10_9_Beta_OneClick_Installer.zip.sha256`
 
 ローカル固有の`BifrostScales.mod`は配布物へ使用しません。Module定義は正規化され、インストール時に対象PCのPackConfig絶対パスを登録します。
 
@@ -23,6 +23,14 @@ python tools/build_one_click_installer.py
 2. Mayaを完全に終了します。
 3. `Install_BifrostScales.cmd`をダブルクリックします。
 4. 完了後にMaya 2026を起動します。
+
+## アンインストール
+
+1. Mayaを完全に終了します。
+2. 展開済みBundleの`Uninstall_BifrostScales.cmd`をダブルクリックします。
+3. Active Packageと`BifrostScales.mod`が消えたことを確認します。
+
+UninstallerはActiveファイルを日時付きRecoveryへ移動します。Mayaシーン、制作データ、既存の更新Backupは削除しません。Recoveryが不要になった場合だけ、ユーザーが内容を確認して手動削除します。
 
 インストーラーはMaya 2026付属の`mayapy.exe`を優先使用し、Windows x64、Maya 2026、Maya 2026用Bifrostを確認します。Payload全ファイルをSHA-256検証してから既存版を日時付きフォルダへ移動し、新版のコピー後にも再検証します。失敗時は以前のPackageとModule定義を復元します。
 

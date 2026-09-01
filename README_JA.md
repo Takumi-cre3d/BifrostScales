@@ -10,7 +10,7 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 - Autodesk Bifrost for Maya 2026
 - Native source build時はMaya C++ toolchainとBifrost SDK
 - Runtime基準: 0.10.9
-- 開発状況: pre-1.0。一般配布用Packageは未公開
+- リリース状況: 0.10.9 Public Beta。製品版UI/UXは別開発として継続
 
 ## 機能
 

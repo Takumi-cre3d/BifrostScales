@@ -44,6 +44,13 @@ def _default_modules_dir() -> Path:
     return Path.home() / "Documents" / "maya" / "modules"
 
 
+def _validated_modules_dir(modules_dir: Path | None) -> Path:
+    result = (modules_dir or _default_modules_dir()).expanduser().resolve()
+    if result.name.lower() != "modules":
+        raise InstallError("インストール先はMayaのmodulesフォルダである必要があります。")
+    return result
+
+
 def _maya_running() -> bool:
     if os.name != "nt":
         return False
@@ -241,9 +248,7 @@ def install(
 
     bundle_root = (bundle_root or _bundle_root()).resolve()
     payload_root, manifest = _verify_payload(bundle_root)
-    modules_dir = (modules_dir or _default_modules_dir()).expanduser().resolve()
-    if modules_dir.name.lower() != "modules":
-        raise InstallError("インストール先はMayaのmodulesフォルダである必要があります。")
+    modules_dir = _validated_modules_dir(modules_dir)
     modules_dir.mkdir(parents=True, exist_ok=True)
     destination_package = modules_dir / "BifrostScales"
     destination_mod = modules_dir / "BifrostScales.mod"
@@ -318,31 +323,115 @@ def install(
     }
 
 
+def uninstall(
+    modules_dir: Path | None = None,
+    *,
+    skip_host_checks: bool = False,
+) -> dict:
+    if not skip_host_checks:
+        if os.name != "nt" or platform.machine().lower() not in {
+            "amd64",
+            "x86_64",
+        }:
+            raise InstallError("このアンインストーラーはWindows x64専用です。")
+        if _maya_running():
+            raise InstallError(
+                "Mayaが起動しています。完全に終了してから再実行してください。"
+            )
+
+    modules_dir = _validated_modules_dir(modules_dir)
+    destination_package = modules_dir / "BifrostScales"
+    destination_mod = modules_dir / "BifrostScales.mod"
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    suffix = uuid.uuid4().hex[:8]
+    recovery_package = modules_dir / "_BifrostScales_uninstalled_{}_{}".format(
+        stamp, suffix
+    )
+    recovery_mod = modules_dir / "_BifrostScales_mod_uninstalled_{}_{}.mod".format(
+        stamp, suffix
+    )
+    package_moved = False
+    mod_moved = False
+    try:
+        if destination_package.exists():
+            destination_package.rename(recovery_package)
+            package_moved = True
+        if destination_mod.exists():
+            destination_mod.rename(recovery_mod)
+            mod_moved = True
+    except Exception as exc:
+        rollback_errors = []
+        try:
+            if mod_moved and not destination_mod.exists():
+                recovery_mod.rename(destination_mod)
+        except Exception as rollback_error:  # pragma: no cover
+            rollback_errors.append("module: {}".format(rollback_error))
+        try:
+            if package_moved and not destination_package.exists():
+                recovery_package.rename(destination_package)
+        except Exception as rollback_error:  # pragma: no cover
+            rollback_errors.append("package: {}".format(rollback_error))
+        if rollback_errors:
+            raise InstallError(
+                "アンインストールとロールバックに失敗しました: {}".format(
+                    " | ".join(rollback_errors)
+                )
+            ) from exc
+        raise InstallError(
+            "アンインストールに失敗し、以前の状態へ戻しました: {}".format(exc)
+        ) from exc
+
+    return {
+        "version": VERSION,
+        "modules_dir": str(modules_dir),
+        "removed": package_moved or mod_moved,
+        "recovery_package": str(recovery_package) if package_moved else "",
+        "recovery_module": str(recovery_mod) if mod_moved else "",
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Install Bifrost Scales for Maya 2026."
+        description="Install or uninstall Bifrost Scales for Maya 2026."
     )
     parser.add_argument("--modules-dir", type=Path)
     parser.add_argument("--bundle-root", type=Path)
+    parser.add_argument("--uninstall", action="store_true")
     parser.add_argument(
         "--skip-host-checks", action="store_true", help=argparse.SUPPRESS
     )
     arguments = parser.parse_args(argv)
     try:
-        report = install(
-            arguments.modules_dir,
-            skip_host_checks=arguments.skip_host_checks,
-            bundle_root=arguments.bundle_root,
-        )
+        if arguments.uninstall:
+            report = uninstall(
+                arguments.modules_dir,
+                skip_host_checks=arguments.skip_host_checks,
+            )
+        else:
+            report = install(
+                arguments.modules_dir,
+                skip_host_checks=arguments.skip_host_checks,
+                bundle_root=arguments.bundle_root,
+            )
     except InstallError as exc:
         print("ERROR: {}".format(exc), file=sys.stderr)
         return 1
-    print("Bifrost Scales {} installation complete.".format(report["version"]))
-    print("Module: {}".format(report["module_file"]))
-    print("Verified files: {}".format(report["verified_files"]))
-    if report["backup_package"]:
-        print("Backup: {}".format(report["backup_package"]))
-    print("Maya 2026を起動し、Bifrost Scalesを開いて動作確認してください。")
+    if arguments.uninstall:
+        print("Bifrost Scales {} uninstallation complete.".format(report["version"]))
+        if report["removed"]:
+            if report["recovery_package"]:
+                print("Package recovery: {}".format(report["recovery_package"]))
+            if report["recovery_module"]:
+                print("Module recovery: {}".format(report["recovery_module"]))
+        else:
+            print("Bifrost Scalesは既にアンインストールされています。")
+    else:
+        print("Bifrost Scales {} installation complete.".format(report["version"]))
+        print("Module: {}".format(report["module_file"]))
+        print("Verified files: {}".format(report["verified_files"]))
+        if report["backup_package"]:
+            print("Backup: {}".format(report["backup_package"]))
+        print("Maya 2026を起動し、Bifrost Scalesを開いて動作確認してください。")
     return 0
 
 

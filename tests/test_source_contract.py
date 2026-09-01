@@ -118,7 +118,7 @@ def test_native_operator_and_host_boundary_contracts_remain_immutable():
         "next-spacing-after-max-1024-target-over-64-consecutive-conflicts"
     )
     assert performance["settled_distribution_grid_density_reference"] == (
-        "minimum-density-with-settled-floor-0.08"
+        "minimum-density-with-settled-floor-0.04"
     )
     assert performance["settled_distribution_triangle_lookup"] == (
         "validated-cumulative-bin-index-65536"
@@ -256,6 +256,7 @@ def test_guide_authoring_and_internal_cell_identity_foundation_remain_available(
 def test_build_info_records_the_native_only_boundary():
     info = json.loads((ROOT / "BUILD_INFO.json").read_text(encoding="utf-8"))
     assert info["version"] == "0.10.9"
+    assert info["release_channel"] == "beta"
     assert info["runtime_engine"] == "native-bifrost-only"
     assert info["python_reference_runtime"] is False
     assert info["python_reference_preview"] is False
@@ -340,7 +341,7 @@ def test_build_info_records_the_native_only_boundary():
         "next-spacing-after-max-1024-target-over-64-consecutive-conflicts"
     )
     assert info["settled_distribution_grid_density_reference"] == (
-        "minimum-density-with-settled-floor-0.08"
+        "minimum-density-with-settled-floor-0.04"
     )
     assert info["settled_distribution_triangle_lookup"] == (
         "validated-cumulative-bin-index-65536"

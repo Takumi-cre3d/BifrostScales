@@ -4624,11 +4624,10 @@ std::pair<std::vector<Sample>, GenerationReport> sample_surface(
                 proposal_cumulative.end(),
                 boundary) - proposal_cumulative.begin());
     }
-    // A modest Settled floor avoids oversized buckets when a localized
-    // low-Density guide drives the global minimum to 0.02. The exact dynamic
-    // neighbor range still covers every pairwise spacing threshold.
+    // Keep low-Density spacing near the immediate neighbor range without
+    // making buckets large enough to collect most normal-Density samples.
     const double grid_density_reference = mode == PreviewMode::Settled
-        ? std::max(minimum_density, 0.08)
+        ? std::max(minimum_density, 0.04)
         : minimum_density;
     const double cell_size = initial_spacing /
         std::sqrt(clamp(grid_density_reference, 0.02, 16.0));
