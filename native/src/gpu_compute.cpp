@@ -1723,12 +1723,12 @@ std::uint32_t minimum_candidate_count() {
     const char* value = std::getenv(
         "BIFROST_SCALES_GPU_MIN_CANDIDATES");
     if (value == nullptr || value[0] == '\0') {
-        return 8192U;
+        return 65536U;
     }
     char* end = nullptr;
     const unsigned long parsed = std::strtoul(value, &end, 10);
     if (end == value || *end != '\0') {
-        return 8192U;
+        return 65536U;
     }
     return static_cast<std::uint32_t>(std::min<unsigned long>(
         parsed,

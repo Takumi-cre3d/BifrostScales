@@ -9,8 +9,8 @@ Bifrost Scalesは、Autodesk Maya 2026／Bifrost向けのプロシージャル�
 - Autodesk Maya 2026
 - Autodesk Bifrost for Maya 2026
 - Native source build時はMaya C++ toolchainとBifrost SDK
-- Runtime基準: 0.10.8
-- 開発状況: pre-1.0。一般配布用Packageは未公開
+- Runtime基準: 0.10.9
+- リリース状況: 0.10.9 Public Beta。製品版UI/UXは別開発として継続
 
 ## 機能
 
@@ -56,7 +56,7 @@ GPU転送準備は典型的な8k～15k Settled Sample向けのcompactな直列�
 - `bifrost-scales/interactive-conflict-reference/1`: 決定的CPU fallback
 - `bifrost-scales/interactive-conflict-gpu/1`: CPUと同じ優先規則を保つ並列OpenCL裁定
 
-GPU Conflictの自動Crossoverは既定8,192候補で、`BIFROST_SCALES_GPU_MIN_CANDIDATES`から上書きできます。
+GPU Conflictの自動Crossoverは既定65,536候補で、`BIFROST_SCALES_GPU_MIN_CANDIDATES`から上書きできます。
 
 ## 現在の制限
 

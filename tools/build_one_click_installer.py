@@ -10,9 +10,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.10.8"
-PACK_NAME = "BifrostScalesCore-0.10.8"
-OUTPUT_NAME = "BifrostScales_0_10_8_OneClick_Installer.zip"
+VERSION = "0.10.9"
+PACK_NAME = "BifrostScalesCore-0.10.9"
+OUTPUT_NAME = "BifrostScales_0_10_9_Beta_OneClick_Installer.zip"
 FIXED_TIME = (2026, 8, 29, 0, 0, 0)
 
 _RETIRED_RUNTIME_MODULES = {
@@ -28,7 +28,7 @@ _RETIRED_RUNTIME_MODULES = {
     "surface_features.py",
 }
 
-_CANONICAL_MOD = """+ BifrostScales 0.10.8 BifrostScales
+_CANONICAL_MOD = """+ BifrostScales 0.10.9 BifrostScales
 PYTHONPATH +:= scripts
 PATH +:= bin
 plug-ins: plug-ins
@@ -65,7 +65,7 @@ def _runtime_files(source_root: Path) -> list[tuple[Path, str]]:
         raise RuntimeError("Native Pack version does not match the installer version")
     if str(manifest.get("native_payload_schema", "")) != "bifrost-scales/native-payload/10":
         raise RuntimeError("Native Pack payload schema is incompatible")
-    if str(manifest.get("native_profile_schema", "")) != "bifrost-scales/native-profile/10":
+    if str(manifest.get("native_profile_schema", "")) != "bifrost-scales/native-profile/11":
         raise RuntimeError("Native Pack profile schema is incompatible")
 
     result: list[tuple[Path, str]] = []
@@ -121,6 +121,7 @@ def build_one_click_bundle(
         "schema": "bifrost-scales/one-click-payload/1",
         "product": "Bifrost Scales",
         "version": VERSION,
+        "release_channel": "beta",
         "platform": "windows-x64",
         "maya_version": 2026,
         "pack": PACK_NAME,
@@ -128,9 +129,10 @@ def build_one_click_bundle(
     }
 
     launcher = source_root / "installer" / "Install_BifrostScales.cmd"
+    uninstaller = source_root / "installer" / "Uninstall_BifrostScales.cmd"
     installer = source_root / "installer" / "offline_install.py"
     readme = source_root / "installer" / "README_JA.txt"
-    for required in (launcher, installer, readme):
+    for required in (launcher, uninstaller, installer, readme):
         if not required.is_file():
             raise RuntimeError("One-click installer source is missing: {}".format(required))
 
@@ -145,6 +147,11 @@ def build_one_click_bundle(
             archive,
             "Install_BifrostScales.cmd",
             launcher.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8"),
+        )
+        _write_entry(
+            archive,
+            "Uninstall_BifrostScales.cmd",
+            uninstaller.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8"),
         )
         _write_entry(archive, "README_JA.txt", readme.read_bytes())
         _write_entry(archive, "installer/offline_install.py", installer.read_bytes())

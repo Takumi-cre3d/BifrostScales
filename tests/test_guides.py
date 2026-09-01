@@ -85,6 +85,15 @@ def test_density_and_direction_fields_are_local():
     assert far == (0.0, 0.0, 1.0)
 
 
+def test_density_acceptance_uses_evaluated_field_upper_bound():
+    density_a = _density(multiplier=16.0)
+    density_b = replace(density_a, guide_id="density_b", name="Density B")
+    guides = GuideSet.from_iterable((density_a, density_b))
+    assert guides.density_factors((0.0, 0.0, 0.0))[0] == 16.0
+    assert guides.maximum_density_factor() == 16.0
+    assert guides.density_acceptance_probability((0.0, 0.0, 0.0)) == 1.0
+
+
 def test_direction_point_aims_toward_its_position_from_both_sides():
     guides = GuideSet.from_iterable((_direction(position=(0.0, 0.0, 0.0)),))
     normal = (0.0, 1.0, 0.0)

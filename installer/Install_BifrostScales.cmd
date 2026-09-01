@@ -1,7 +1,13 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
-title Bifrost Scales Installer
+set "ACTION_ARG="
+set "ACTION_NAME=インストール"
+if /I "%~1"=="--uninstall" (
+    set "ACTION_ARG=--uninstall"
+    set "ACTION_NAME=アンインストール"
+)
+title Bifrost Scales !ACTION_NAME!
 
 tasklist /FI "IMAGENAME eq maya.exe" 2>nul | find /I "maya.exe" >nul
 if not errorlevel 1 (
@@ -30,14 +36,14 @@ if exist "%MAYAPY%" goto run_installer
 
 where py >nul 2>nul
 if not errorlevel 1 (
-    py -3 "%INSTALL_SCRIPT%"
+    py -3 "%INSTALL_SCRIPT%" !ACTION_ARG!
     set "INSTALL_RESULT=!ERRORLEVEL!"
     goto finish
 )
 
 where python >nul 2>nul
 if not errorlevel 1 (
-    python "%INSTALL_SCRIPT%"
+    python "%INSTALL_SCRIPT%" !ACTION_ARG!
     set "INSTALL_RESULT=!ERRORLEVEL!"
     goto finish
 )
@@ -48,15 +54,15 @@ set "INSTALL_RESULT=4"
 goto finish
 
 :run_installer
-"%MAYAPY%" "%INSTALL_SCRIPT%"
+"%MAYAPY%" "%INSTALL_SCRIPT%" !ACTION_ARG!
 set "INSTALL_RESULT=!ERRORLEVEL!"
 
 :finish
 echo.
 if "!INSTALL_RESULT!"=="0" (
-    echo インストールが完了しました。Maya 2026を起動して動作確認してください。
+    echo !ACTION_NAME!が完了しました。
 ) else (
-    echo インストールに失敗しました。上に表示された内容を確認してください。
+    echo !ACTION_NAME!に失敗しました。上に表示された内容を確認してください。
 )
 echo.
 if defined BIFROST_SCALES_INSTALLER_NO_PAUSE goto installer_done

@@ -50,10 +50,10 @@ def test_release_version_and_module_are_consistent():
     version_source = (PACKAGE / "version.py").read_text(encoding="utf-8")
     module_source = (ROOT / "BifrostScales.mod").read_text(encoding="utf-8")
     plugin_source = (ROOT / "BifrostScales/plug-ins/bifrostScalesCellPicker.py").read_text(encoding="utf-8")
-    assert 'VERSION = "0.10.8"' in version_source
+    assert 'VERSION = "0.10.9"' in version_source
     assert 'SCHEMA_VERSION = "bifrost-scales/5"' in version_source
-    assert module_source.startswith("+ BifrostScales 0.10.8 ")
-    assert 'MFnPlugin(plugin, "Bifrost Scales", "0.10.8", "Any")' in plugin_source
+    assert module_source.startswith("+ BifrostScales 0.10.9 ")
+    assert 'MFnPlugin(plugin, "Bifrost Scales", "0.10.9", "Any")' in plugin_source
 
 
 def test_ui_is_native_only_and_new_create_finishes_first_preview():
@@ -90,7 +90,7 @@ def test_native_operator_and_host_boundary_contracts_remain_immutable():
     contract = json.loads((ROOT / "native/bifrost/operator_contract.json").read_text(encoding="utf-8"))
     policy = contract["graph_policy"]
     performance = contract["performance_contract"]
-    assert contract["schema"] == "bifrost-scales/operator-contract/19"
+    assert contract["schema"] == "bifrost-scales/operator-contract/20"
     assert contract["published_graph"] == "Graphs::BifrostScales::native_scales_v4"
     assert policy["runtime_topology_mutation"] is False
     assert policy["python_vnn_commands"] is False
@@ -105,6 +105,27 @@ def test_native_operator_and_host_boundary_contracts_remain_immutable():
         "triangle-corner-cached-barycentric"
     )
     assert performance["settled_distribution_deterministic"] is True
+    assert performance["distribution_density_acceptance_upper_bound"] == (
+        "matches-evaluated-density-field-16"
+    )
+    assert performance["settled_distribution_candidate_sampling"] == (
+        "triangle-area-times-corner-density-upper-bound"
+    )
+    assert performance["settled_distribution_density_acceptance"] == (
+        "candidate-density-over-triangle-upper-bound"
+    )
+    assert performance["settled_distribution_stall_policy"] == (
+        "next-spacing-after-max-1024-target-over-64-consecutive-conflicts"
+    )
+    assert performance["settled_distribution_grid_density_reference"] == (
+        "minimum-density-with-settled-floor-0.04"
+    )
+    assert performance["settled_distribution_triangle_lookup"] == (
+        "validated-cumulative-bin-index-65536"
+    )
+    assert performance["settled_distribution_conflict_diagnostics"] == (
+        "bucket-queries-distance-tests-grid-density-reference"
+    )
     assert performance["final_distribution_field"] == (
         "exact-per-candidate-surface-connected"
     )
@@ -142,6 +163,8 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "native_guide_surface_ms" in backend
     assert "guideSurface=" in ui
     assert "meshSample=" in ui
+    assert "native_global_projection_cache_hit" in backend
+    assert "projectorCache=" in ui
     assert "struct DirectionGuideContribution" in source
     assert "reuse_direction_neighbors" in source
     assert "struct DirectionNeighborGraph" in source
@@ -164,11 +187,27 @@ def test_native_core_performance_and_stable_cell_contracts_remain_present():
     assert "__kernel void direction_relax" in gpu
     assert "mode == PreviewMode::Settled" in source
     assert "maximum_neighbor_threshold" in source
+    assert "settled_density_weighted_sampling" in source
+    assert "settled_triangle_density_bounds" in source
+    assert "settled_conflict_stall_limit" in source
+    assert "grid_density_reference" in source
+    assert "proposal_bin_offsets" in source
+    assert "65536U" in source
+    assert "exact_lower_bound" in source
     assert "hasher.key(distribution)" in source
     assert "cell_cache_reused_after_orientation_change" in source
     assert "bifrost-scales/cell-id/1" in source
     assert "bifrost-scales/cell-metadata/1" in operator
-    assert "bifrost-scales/native-profile/10" in operator
+    assert "bifrost-scales/native-profile/11" in operator
+    assert "distribution_density_rejected" in header
+    assert "distribution_density_rejected" in operator
+    assert "native_distribution_conflict_rejected" in backend
+    assert "native_distribution_bucket_queries" in backend
+    assert "native_distribution_distance_tests" in backend
+    assert "native_distribution_grid_density_reference" in backend
+    assert "--distribution-only" in (
+        ROOT / "native/tools/parity_dump.cpp"
+    ).read_text(encoding="utf-8")
     assert "cell_boundary_query_ms" in operator
     assert "cell_boundary_rays_ms" in operator
     assert "cell_mean_neighbors" in operator
@@ -216,7 +255,8 @@ def test_guide_authoring_and_internal_cell_identity_foundation_remain_available(
 
 def test_build_info_records_the_native_only_boundary():
     info = json.loads((ROOT / "BUILD_INFO.json").read_text(encoding="utf-8"))
-    assert info["version"] == "0.10.8"
+    assert info["version"] == "0.10.9"
+    assert info["release_channel"] == "beta"
     assert info["runtime_engine"] == "native-bifrost-only"
     assert info["python_reference_runtime"] is False
     assert info["python_reference_preview"] is False
@@ -225,7 +265,7 @@ def test_build_info_records_the_native_only_boundary():
     assert info["create_button_contract"] == (
         "selected-mesh-to-system-native-graph-and-first-settled-preview"
     )
-    assert info["minimum_native_pack"] == "0.10.8"
+    assert info["minimum_native_pack"] == "0.10.9"
     assert info["cell_cache_key_basis"] == "distribution-or-guide-anisotropic"
     assert info["direction_edits_reuse_exact_cell_partition"] is False
     assert info["direction_strength_affects_orientation_only"] is True
@@ -244,8 +284,12 @@ def test_build_info_records_the_native_only_boundary():
     assert info["interactive_candidate_batch_runtime_enabled"] is True
     assert info["interactive_conflict_reference_runtime_enabled"] is True
     assert info["interactive_conflict_gpu_runtime_enabled"] is True
+    assert info["interactive_conflict_gpu_default_crossover_candidates"] == 65536
     assert info["interactive_distribution_candidate_multiplier"] == 4
     assert info["interactive_distribution_preserves_cpu_anchors"] is True
+    assert info["global_projection_bvh_cache"] == (
+        "process-shared-bounded/2-geometry-hash"
+    )
     assert info["interactive_distribution_mask_stage"] == "post-cell-shape-only"
     assert info["settled_distribution_unchanged"] is False
     assert info["settled_distribution_field"] == (
@@ -283,6 +327,27 @@ def test_build_info_records_the_native_only_boundary():
     )
     assert info["distribution_candidate_guide_index"] == (
         "deterministic-authored-order-aabb-bvh"
+    )
+    assert info["distribution_density_acceptance_upper_bound"] == (
+        "matches-evaluated-density-field-16"
+    )
+    assert info["settled_distribution_candidate_sampling"] == (
+        "triangle-area-times-corner-density-upper-bound"
+    )
+    assert info["settled_distribution_density_acceptance"] == (
+        "candidate-density-over-triangle-upper-bound"
+    )
+    assert info["settled_distribution_stall_policy"] == (
+        "next-spacing-after-max-1024-target-over-64-consecutive-conflicts"
+    )
+    assert info["settled_distribution_grid_density_reference"] == (
+        "minimum-density-with-settled-floor-0.04"
+    )
+    assert info["settled_distribution_triangle_lookup"] == (
+        "validated-cumulative-bin-index-65536"
+    )
+    assert info["settled_distribution_conflict_diagnostics"] == (
+        "bucket-queries-distance-tests-grid-density-reference"
     )
     assert info["cell_hot_path"] == (
         "single-site-precomputed-ray-table-normal-component"

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from installer import offline_install
-from tools.build_one_click_installer import build_one_click_bundle
+from tools.build_one_click_installer import OUTPUT_NAME, build_one_click_bundle
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,17 +19,17 @@ PACK = offline_install.PACK_NAME
 def _write_bundle(root: Path) -> Path:
     payload = root / "payload"
     files = {
-        "BifrostScales.mod": b"+ BifrostScales 0.10.8 BifrostScales\n",
-        "BifrostScales/scripts/bifrost_scales/version.py": b'VERSION = "0.10.8"\n',
+        "BifrostScales.mod": b"+ BifrostScales 0.10.9 BifrostScales\n",
+        "BifrostScales/scripts/bifrost_scales/version.py": b'VERSION = "0.10.9"\n',
         "BifrostScales/scripts/bifrost_scales/ui.py": b"UI = True\n",
         "BifrostScales/bifrost/pack/{}/BifrostScalesPackConfig.json".format(PACK): b"{}\n",
         "BifrostScales/bifrost/pack/{}/lib/BifrostScalesOps.dll".format(PACK): b"native-dll",
         "BifrostScales/bifrost/pack/{}/metadata/manifest.bifrost-scales.json".format(PACK): (
             json.dumps(
                 {
-                    "version": "0.10.8",
+                    "version": "0.10.9",
                     "native_payload_schema": "bifrost-scales/native-payload/10",
-                    "native_profile_schema": "bifrost-scales/native-profile/10",
+                    "native_profile_schema": "bifrost-scales/native-profile/11",
                 }
             ).encode("utf-8")
         ),
@@ -40,7 +40,7 @@ def _write_bundle(root: Path) -> Path:
         path.write_bytes(data)
     manifest = {
         "schema": "bifrost-scales/one-click-payload/1",
-        "version": "0.10.8",
+        "version": "0.10.9",
         "files": {
             relative: hashlib.sha256(data).hexdigest()
             for relative, data in files.items()
@@ -142,11 +142,31 @@ def test_offline_install_rolls_back_when_post_copy_verification_fails(
     assert module_file.read_text(encoding="utf-8") == "keep module"
 
 
+def test_offline_uninstall_is_recoverable_and_idempotent(tmp_path):
+    modules = tmp_path / "maya" / "modules"
+    package = modules / "BifrostScales"
+    package.mkdir(parents=True)
+    (package / "keep.txt").write_text("installed", encoding="utf-8")
+    module_file = modules / "BifrostScales.mod"
+    module_file.write_text("installed module", encoding="utf-8")
+
+    first = offline_install.uninstall(modules, skip_host_checks=True)
+    assert first["removed"] is True
+    assert not package.exists()
+    assert not module_file.exists()
+    assert Path(first["recovery_package"]).joinpath("keep.txt").read_text() == "installed"
+    assert Path(first["recovery_module"]).read_text() == "installed module"
+
+    second = offline_install.uninstall(modules, skip_host_checks=True)
+    assert second["removed"] is False
+
+
 def _write_builder_source(root: Path) -> None:
     installer_root = root / "installer"
     installer_root.mkdir(parents=True)
     for name in (
         "Install_BifrostScales.cmd",
+        "Uninstall_BifrostScales.cmd",
         "offline_install.py",
         "README_JA.txt",
     ):
@@ -155,7 +175,7 @@ def _write_builder_source(root: Path) -> None:
     package = root / "BifrostScales"
     (package / "scripts" / "bifrost_scales").mkdir(parents=True)
     (package / "scripts" / "bifrost_scales" / "version.py").write_text(
-        'VERSION = "0.10.8"\n', encoding="utf-8"
+        'VERSION = "0.10.9"\n', encoding="utf-8"
     )
     (package / "scripts" / "bifrost_scales" / "adaptive.py").write_text(
         "retired = True\n", encoding="utf-8"
@@ -168,9 +188,9 @@ def _write_builder_source(root: Path) -> None:
         "json/BifrostScales/graphs/BifrostScales_native_scales_v4_graph.json": b"{}\n",
         "metadata/manifest.bifrost-scales.json": json.dumps(
             {
-                "version": "0.10.8",
+                "version": "0.10.9",
                 "native_payload_schema": "bifrost-scales/native-payload/10",
-                "native_profile_schema": "bifrost-scales/native-profile/10",
+                "native_profile_schema": "bifrost-scales/native-profile/11",
             }
         ).encode("utf-8"),
     }
@@ -189,16 +209,21 @@ def test_bundle_builder_is_deterministic_native_and_machine_independent(tmp_path
     build_one_click_bundle(source, second)
 
     assert first.read_bytes() == second.read_bytes()
+    assert OUTPUT_NAME == (
+        "BifrostScales_0_10_9_Beta_OneClick_Installer.zip"
+    )
     assert report["sha256"] == hashlib.sha256(first.read_bytes()).hexdigest()
     with zipfile.ZipFile(first, "r") as archive:
         names = set(archive.namelist())
         assert "Install_BifrostScales.cmd" in names
+        assert "Uninstall_BifrostScales.cmd" in names
         assert "installer/offline_install.py" in names
         assert "payload/BifrostScales/bifrost/pack/{}/lib/BifrostScalesOps.dll".format(PACK) in names
         assert "payload/BifrostScales/scripts/bifrost_scales/adaptive.py" not in names
         module_text = archive.read("payload/BifrostScales.mod").decode("utf-8")
         assert "D:/" not in module_text
         manifest = json.loads(archive.read("payload_manifest.json"))
+        assert manifest["release_channel"] == "beta"
         dll_name = "BifrostScales/bifrost/pack/{}/lib/BifrostScalesOps.dll".format(PACK)
         assert manifest["files"][dll_name] == hashlib.sha256(b"native-dll").hexdigest()
 
@@ -214,3 +239,9 @@ def test_launcher_uses_mayapy_and_blocks_running_maya():
     assert "BIFROST_SCALES_INSTALLER_NO_PAUSE" in launcher
     assert 'tasklist /FI "IMAGENAME eq maya.exe"' in launcher
     assert "offline_install.py" in launcher
+    assert "--uninstall" in launcher
+    uninstaller = (ROOT / "installer" / "Uninstall_BifrostScales.cmd").read_text(
+        encoding="utf-8"
+    )
+    assert "Install_BifrostScales.cmd" in uninstaller
+    assert "--uninstall" in uninstaller

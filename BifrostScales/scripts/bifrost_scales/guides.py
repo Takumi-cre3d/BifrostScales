@@ -865,7 +865,7 @@ class GuideSet:
         for guide in self.density:
             if guide.affects_density:
                 maximum *= max(1.0, guide.density_multiplier)
-        return max(1.0, min(256.0, maximum))
+        return max(1.0, min(16.0, maximum))
 
     def maximum_density_factor(self) -> float:
         return self._maximum_density_factor

@@ -272,6 +272,7 @@ struct GenerationProfile {
     std::uint32_t guide_surface_cache_hits{0};
     std::uint32_t guide_surface_cache_misses{0};
     bool interactive_surface_cache_hit{false};
+    bool global_projection_cache_hit{false};
     double distribution_ms{0.0};
     double orientation_ms{0.0};
     double orientation_prepare_ms{0.0};
@@ -319,6 +320,11 @@ struct GenerationReport {
     std::uint32_t requested_count{0};
     std::uint32_t accepted_count{0};
     std::uint64_t attempts{0};
+    std::uint64_t distribution_density_rejected{0};
+    std::uint64_t distribution_conflict_rejected{0};
+    std::uint64_t distribution_bucket_queries{0};
+    std::uint64_t distribution_distance_tests{0};
+    double distribution_grid_density_reference{0.0};
     double surface_area{0.0};
     double initial_spacing{0.0};
     double final_spacing{0.0};

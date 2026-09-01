@@ -1,6 +1,6 @@
-# Bifrost Scales Native Core 0.10.8
+# Bifrost Scales Native Core 0.10.9
 
-## 0.10.8 Surface Guide／Sampling Cache
+## 0.10.9 Surface Guide／Sampling Cache
 
 Interactive DistributionはTarget Meshの三角形面積累積表と法線をプロセス共有Cacheで再利用します。Surface Guide FieldはTarget topologyとGuide geometry／radiusで個別にkey化し、Guideを1本編集した場合はそのFieldだけを再構築します。全Fieldがhitする評価では全Guide共通の投影BVH構築も省略します。Profileは`guide_surface_ms`、Guide別hit／miss数、`interactive_surface_cache_hit`を出力します。決定的な配置結果、Finalの候補ごとのCPU exact評価、Stable Cell ID契約は維持します。
 
@@ -18,11 +18,11 @@ GPU転送前後のcompact変換は8k～15k Sampleでの一時スレッド起動�
 開放エッジ境界アンカーは局所Densityの平方根で重み付けしたArc Lengthへ配置します。neutral Densityは0.10.2互換です。
 
 ```text
-Core version        0.10.8
+Core version        0.10.9
 Payload             bifrost-scales/native-payload/10
-Operator            bifrost-scales/operator-contract/19
-Behavior            bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1
-Profile             bifrost-scales/native-profile/10
+Operator            bifrost-scales/operator-contract/20
+Behavior            bifrost-scales/native-core/0.10.9-settled-proposal-index-1
+Profile             bifrost-scales/native-profile/11
 GPU Buffer          bifrost-scales/compact-orientation-buffer/2
 ```
 

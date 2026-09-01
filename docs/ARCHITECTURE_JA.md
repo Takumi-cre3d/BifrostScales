@@ -1,4 +1,4 @@
-# Bifrost Scales Architecture — Native-only 0.10.8
+# Bifrost Scales Architecture — Native-only 0.10.9
 
 ```text
 Maya Python Host
@@ -24,7 +24,7 @@ Maya Viewport 2.0 GPU display
 
 ## Guide更新境界
 
-0.10.3の局所Dirty Regionは撤回済みです。0.10.8は全Orientation更新を行い、Distributionと正確なCell PartitionをStage Cacheで再利用します。Surface Guide FieldはTarget geometryとGuide geometry／radiusでGuide別にkey化した上限付きCacheへ保存し、Guideを1本編集した場合はそのFieldだけを再構築します。全Fieldがhitする評価ではGuide投影用の全体BVH構築を省略します。Interactive DistributionはTarget geometryでkey化した三角形面積累積表と法線を再利用します。Cell MISS時は共通Ray表、事前計算済みNormal／Component、Maskなし高速経路を使います。
+0.10.3の局所Dirty Regionは撤回済みです。0.10.9は全Orientation更新を行い、Distributionと正確なCell PartitionをStage Cacheで再利用します。Surface Guide FieldはTarget geometryとGuide geometry／radiusでGuide別にkey化した上限付きCacheへ保存し、Guideを1本編集した場合はそのFieldだけを再構築します。全Fieldがhitする評価ではGuide投影用の全体BVH構築を省略します。Interactive DistributionはTarget geometryでkey化した三角形面積累積表と法線を再利用します。Cell MISS時は共通Ray表、事前計算済みNormal／Component、Maskなし高速経路を使います。
 
 ## Cell曲面追従
 

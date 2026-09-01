@@ -57,7 +57,7 @@ class FakeNativeCmds:
                 face_count=224,
                 profile_json=json.dumps(
                     {
-                        "schema": "bifrost-scales/native-profile/10",
+                        "schema": "bifrost-scales/native-profile/11",
                         "distribution_ms": 3.0,
                         "guide_surface_ms": 0.25,
                         "guide_surface_cache_hits": 3,
@@ -365,8 +365,8 @@ def _ready_status():
         restart_required=False,
         ready=True,
         reasons=(),
-        pack_version="0.10.8",
-        minimum_pack_version="0.10.8",
+        pack_version="0.10.9",
+        minimum_pack_version="0.10.9",
         payload_schema_expected="bifrost-scales/native-payload/10",
         module_graph_payload_schema="bifrost-scales/native-payload/10",
         module_manifest_payload_schema="bifrost-scales/native-payload/10",
@@ -374,9 +374,9 @@ def _ready_status():
         pack_manifest_payload_schema="bifrost-scales/native-payload/10",
         payload_schema_contract_valid=True,
         native_behavior_contract_valid=True,
-        native_profile_schema_expected="bifrost-scales/native-profile/10",
-        module_manifest_profile_schema="bifrost-scales/native-profile/10",
-        pack_manifest_profile_schema="bifrost-scales/native-profile/10",
+        native_profile_schema_expected="bifrost-scales/native-profile/11",
+        module_manifest_profile_schema="bifrost-scales/native-profile/11",
+        pack_manifest_profile_schema="bifrost-scales/native-profile/11",
         native_profile_schema_contract_valid=True,
         profile_output_contract_valid=True,
     )
@@ -391,7 +391,7 @@ def test_probe_is_read_only_and_reports_unbuilt_pack_in_source_tree():
 
 
 
-def _write_nested_native_pack(module_root: Path, version: str = "0.10.8") -> Path:
+def _write_nested_native_pack(module_root: Path, version: str = "0.10.9") -> Path:
     graph_source = (
         module_root
         / "bifrost"
@@ -412,8 +412,8 @@ def _write_nested_native_pack(module_root: Path, version: str = "0.10.8") -> Pat
         json.dumps(
             {
                 "native_payload_schema": "bifrost-scales/native-payload/10",
-                "native_behavior_contract": "bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1",
-                "native_profile_schema": "bifrost-scales/native-profile/10",
+                "native_behavior_contract": "bifrost-scales/native-core/0.10.9-settled-proposal-index-1",
+                "native_profile_schema": "bifrost-scales/native-profile/11",
             }
         ),
         encoding="utf-8",
@@ -479,8 +479,8 @@ def _write_nested_native_pack(module_root: Path, version: str = "0.10.8") -> Pat
         json.dumps(
             {
                 "native_payload_schema": "bifrost-scales/native-payload/10",
-                "native_behavior_contract": "bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1",
-                "native_profile_schema": "bifrost-scales/native-profile/10",
+                "native_behavior_contract": "bifrost-scales/native-core/0.10.9-settled-proposal-index-1",
+                "native_profile_schema": "bifrost-scales/native-profile/11",
             }
         ),
         encoding="utf-8",
@@ -514,10 +514,10 @@ def test_probe_resolves_versioned_bifrost_215_install_prefix(tmp_path, monkeypat
     assert status.graph_library_registered is True
     assert status.pack_resources_isolated is True
     assert status.mesh_topology_contract_valid is True
-    assert status.pack_version == "0.10.8"
-    assert status.minimum_pack_version == "0.10.8"
+    assert status.pack_version == "0.10.9"
+    assert status.minimum_pack_version == "0.10.9"
     assert status.native_behavior_contract_valid is True
-    assert status.native_behavior_contract_expected == "bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1"
+    assert status.native_behavior_contract_expected == "bifrost-scales/native-core/0.10.9-settled-proposal-index-1"
     assert status.module_native_behavior_contract == status.native_behavior_contract_expected
     assert status.pack_native_behavior_contract == status.native_behavior_contract_expected
     assert status.payload_schema_contract_valid is True
@@ -552,10 +552,10 @@ def test_probe_rejects_pre_090_native_behavior_contract(tmp_path, monkeypatch):
 
     assert status.ready is False
     assert status.pack_version == "0.8.3"
-    assert status.minimum_pack_version == "0.10.8"
+    assert status.minimum_pack_version == "0.10.9"
     assert status.native_behavior_contract_valid is False
     assert status.rebuild_required is True
-    assert any("older than the required 0.10.8" in reason for reason in status.reasons)
+    assert any("older than the required 0.10.9" in reason for reason in status.reasons)
 
 
 def test_probe_rejects_long_mesh_topology_port_contract(tmp_path, monkeypatch):
@@ -832,7 +832,7 @@ def test_native_graph_is_imported_and_world_mesh_connected_once_then_updates_pay
     assert first.success is True
     assert first.payload_changed is True
     assert first.scale_count == 32
-    assert first.profile["schema"] == "bifrost-scales/native-profile/10"
+    assert first.profile["schema"] == "bifrost-scales/native-profile/11"
     assert first.profile["guide_surface_ms"] == 0.25
     assert first.profile["guide_surface_cache_hits"] == 3
     assert first.profile["guide_surface_cache_misses"] == 1
@@ -1168,7 +1168,7 @@ def test_probe_rejects_payload_schema_mismatch_even_when_pack_version_is_new_eno
 ):
     modules = tmp_path / "modules"
     module_root = modules / "BifrostScales"
-    pack_config = _write_nested_native_pack(module_root, version="0.10.8")
+    pack_config = _write_nested_native_pack(module_root, version="0.10.9")
     pack_root = pack_config.parent
     graph = (
         pack_root
@@ -1193,7 +1193,7 @@ def test_probe_rejects_payload_schema_mismatch_even_when_pack_version_is_new_eno
     graph.write_text(json.dumps(graph_data), encoding="utf-8")
     manifest = pack_root / "metadata" / "manifest.bifrost-scales.json"
     manifest.write_text(
-        json.dumps({"native_payload_schema": "bifrost-scales/native-payload/6", "native_behavior_contract": "bifrost-scales/native-core/0.10.8-surface-guide-sampling-cache-1"}),
+        json.dumps({"native_payload_schema": "bifrost-scales/native-payload/6", "native_behavior_contract": "bifrost-scales/native-core/0.10.9-settled-proposal-index-1"}),
         encoding="utf-8",
     )
     (modules / "BifrostScales.mod").write_text(
@@ -1210,7 +1210,7 @@ def test_probe_rejects_payload_schema_mismatch_even_when_pack_version_is_new_eno
 
     status = native_backend.probe_native_backend(cmds_module=FakeCatalogCmds())
 
-    assert status.pack_version == "0.10.8"
+    assert status.pack_version == "0.10.9"
     assert status.native_behavior_contract_valid is True
     assert status.payload_schema_contract_valid is False
     assert status.pack_graph_payload_schema == "bifrost-scales/native-payload/6"
@@ -1224,7 +1224,7 @@ def test_native_profile_parser_rejects_invalid_or_unknown_payloads():
     assert native_backend._parse_native_profile(
         json.dumps(
             {
-                "schema": "bifrost-scales/native-profile/10",
+                "schema": "bifrost-scales/native-profile/11",
                 "distribution_ms": 1.25,
                 "cell_boundary_query_ms": 0.125,
                 "cell_mean_neighbors": 63.5,
@@ -1234,7 +1234,7 @@ def test_native_profile_parser_rejects_invalid_or_unknown_payloads():
     parsed = native_backend._parse_native_profile(
         json.dumps(
             {
-                "schema": "bifrost-scales/native-profile/10",
+                "schema": "bifrost-scales/native-profile/11",
                 "cell_boundary_query_ms": 0.125,
                 "cell_mean_neighbors": 63.5,
             }
@@ -1244,5 +1244,5 @@ def test_native_profile_parser_rejects_invalid_or_unknown_payloads():
     assert parsed["cell_mean_neighbors"] == 63.5
     assert native_backend._parse_native_profile("not-json") == {}
     assert native_backend._parse_native_profile(
-        json.dumps({"schema": "bifrost-scales/native-profile/1099"})
+        json.dumps({"schema": "bifrost-scales/native-profile/1199"})
     ) == {}

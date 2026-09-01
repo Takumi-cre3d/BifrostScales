@@ -18,7 +18,7 @@
 ## GPU Policy
 
 - `BIFROST_SCALES_GPU=off`: CPU referenceを使用
-- `BIFROST_SCALES_GPU=auto`: 既定8,192候補以上でGPUを試行
+- `BIFROST_SCALES_GPU=auto`: 既定65,536候補以上でGPUを試行
 - `BIFROST_SCALES_GPU=force`: 候補数に関係なくGPUを試行
 - `BIFROST_SCALES_GPU_MIN_CANDIDATES`: Auto Crossoverを上書き
 
