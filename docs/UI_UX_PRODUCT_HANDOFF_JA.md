@@ -15,13 +15,13 @@
 ## Betaリリース基準
 
 - 配布物: `dist/BifrostScales_0_10_9_Beta_OneClick_Installer.zip`
-- ZIP SHA-256: `0d75b843ba394e744f60213e77a6ed603750446be4c3cfd3eb6b42a22bc8089a`
+- ZIP SHA-256: `1d40dcef31079297955f206c57dbbb1fcc3034f466527bc515fdcca8c943ee9d`
 - Native DLL SHA-256: `c9714eb6fd97a6448f8f4aecaf58f4f4285d5e1dbad7f4d223d46a1a463155fe`
-- Native CTest `2 / 2`、Python `153`件、Schema `50 / 50`、Native-only `12 / 12`、Picker `18 / 18`、Release `16 / 16`を通過
+- Native CTest `2 / 2`、クリーンCI Python `155`件、Schema `50 / 50`、Native-only `12 / 12`、Picker `18 / 18`、Release `16 / 16`を通過
 - Public Bundleで新規導入、更新Backup、復旧可能なアンインストール、二重アンインストール、再導入を検証済み
 - Maya 2026で`bifrostGraph`を明示ロードし、実ユーザーmodulesから`ready=True`と全Native契約を確認済み
 
-Python全体テストの件数には、配布用Packを構築済みのソースツリーでは成立しない「Pack未構築」テストと、保護対象のローカル`BifrostScales.mod`を正規配布Moduleと仮定するテストを含めません。製品不具合ではなく開発PC固有の2件です。
+開発PCでは配布用Packをソースツリー内に構築済みのため、「Pack未構築」を前提とする1件だけを除外し、Python `154`件が通過します。クリーンCIでは全`155`件が通過することをリリース条件にします。
 
 ## 現在の問題
 
