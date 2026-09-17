@@ -393,10 +393,10 @@ try {
 if ([string]$metadataManifestData.native_payload_schema -ne 'bifrost-scales/native-payload/10') {
     throw "Native metadata manifest payload schema must be bifrost-scales/native-payload/10."
 }
-if ([string]$metadataManifestData.native_behavior_contract -ne 'bifrost-scales/native-core/0.10.9-settled-proposal-index-1') {
+if ([string]$metadataManifestData.native_behavior_contract -ne 'bifrost-scales/native-core/0.10.9-vector-surface-6') {
     throw (
         "Native metadata manifest behavior contract must be " +
-        "bifrost-scales/native-core/0.10.9-settled-proposal-index-1."
+        "bifrost-scales/native-core/0.10.9-vector-surface-6."
     )
 }
 if ([string]$metadataManifestData.native_profile_schema -ne 'bifrost-scales/native-profile/11') {

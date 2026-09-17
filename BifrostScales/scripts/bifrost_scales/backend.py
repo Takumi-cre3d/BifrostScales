@@ -19,6 +19,24 @@ from .scheduler import ChangeCategory, PreviewMode, PreviewRequest
 from .settings import ScaleSettings
 from .stable_ids import parse_cell_id
 
+
+def _next_interactive_budget(
+    settings: ScaleSettings,
+    mode: str,
+    elapsed_ms: float,
+) -> int:
+    """Choose the next interaction's budget without changing Settled output."""
+    current = max(8, min(settings.interactive_budget, settings.target_count))
+    maximum = max(8, min(50000, settings.target_count))
+    if mode != PreviewMode.INTERACTIVE.value:
+        return current
+    if elapsed_ms > 120.0:
+        return max(8, current // 2)
+    if elapsed_ms < 60.0:
+        return min(maximum, current * 2)
+    return current
+
+
 @dataclass(frozen=True)
 class BackendApplyReport:
     revision: int
@@ -152,8 +170,56 @@ class NativeMayaBackend:
     def read_guide_group(self, node: str):
         return self.scene.read_guide_group(node)
 
+    def guide_group_layout_state(self) -> dict[str, tuple[str, bool]]:
+        return self.scene.guide_group_layout_state(
+            self._require_binding().settings_node
+        )
+
+    def guide_item_presentation_state(self) -> dict[str, tuple[bool, bool]]:
+        return self.scene.guide_item_presentation_state(
+            self._require_binding().settings_node
+        )
+
+    def guide_group_parent(self, node: str) -> str:
+        return self.scene.guide_group_parent(
+            self._require_binding().settings_node,
+            node,
+        )
+
+    def guide_group_collapsed(self, node: str) -> bool:
+        return self.scene.guide_group_collapsed(node)
+
+    def set_guide_group_collapsed(self, node: str, collapsed: bool) -> None:
+        self.scene.set_guide_group_collapsed(node, collapsed)
+        self._guide_management_cache = self.scene.guide_management_fingerprint(
+            self._require_binding().settings_node
+        )
+
+    def set_guide_item_visible(self, node: str, visible: bool) -> None:
+        binding = self._require_binding()
+        self.scene.set_guide_item_visible(binding.settings_node, node, visible)
+        self._guide_management_cache = self.scene.guide_management_fingerprint(
+            binding.settings_node
+        )
+
+    def set_guide_item_locked(self, node: str, locked: bool) -> None:
+        binding = self._require_binding()
+        self.scene.set_guide_item_locked(binding.settings_node, node, locked)
+        self._guide_management_cache = self.scene.guide_management_fingerprint(
+            binding.settings_node
+        )
     def selected_guide_item(self) -> str:
         return self.scene.selected_guide_item(
+            self._require_binding().settings_node
+        )
+
+    def selected_guide_items(self) -> list[str]:
+        return self.scene.selected_guide_items(
+            self._require_binding().settings_node
+        )
+
+    def guide_grouping_selection(self) -> tuple[list[str], bool, bool]:
+        return self.scene.guide_grouping_selection(
             self._require_binding().settings_node
         )
 
@@ -250,10 +316,15 @@ class NativeMayaBackend:
         self.refresh_guide_cache()
         return node
 
-    def create_guide_group(self, name: str = "") -> str:
+    def create_guide_group(
+        self,
+        name: str = "",
+        guide_nodes: list[str] | tuple[str, ...] = (),
+    ) -> str:
         node = self.scene.create_guide_group(
             self._require_binding().settings_node,
             name=name,
+            guide_nodes=guide_nodes,
         )
         self.refresh_guide_cache()
         return node
@@ -289,12 +360,14 @@ class NativeMayaBackend:
         self,
         ordered_groups: list[str],
         guides_by_group: dict[str, list[str]],
+        group_parents: dict[str, str] | None = None,
     ) -> ChangeCategory:
         previous = self.read_guides(force=True)
         self.scene.apply_guide_tree_layout(
             self._require_binding().settings_node,
             ordered_groups,
             guides_by_group,
+            group_parents,
         )
         current = self.refresh_guide_cache()
         return self._guide_change_category(previous, current)
@@ -347,6 +420,9 @@ class NativeMayaBackend:
     def select_guide_item(self, node: str) -> None:
         self.scene.select_guide_item(node)
 
+    def select_guide_items(self, nodes: list[str] | tuple[str, ...]) -> None:
+        self.scene.select_guide_items(nodes)
+
     def selected_guides(
         self,
         guide_nodes: list[str] | tuple[str, ...] | None = None,
@@ -398,6 +474,18 @@ class NativeMayaBackend:
         return "native"
 
     def _require_native_ready(self) -> None:
+        cmds = self.scene.cmds
+        if (
+            hasattr(cmds, "loadPlugin")
+            and (not hasattr(cmds, "bifrostGraph") or not hasattr(cmds, "vnn"))
+        ):
+            try:
+                cmds.loadPlugin("bifrostGraph", quiet=True)
+            except Exception as exc:
+                raise RuntimeError(
+                    "Native Bifrost backend is not ready: "
+                    "failed to load Maya bifrostGraph plugin: {}".format(exc)
+                ) from exc
         status = self.native.probe()
         if not status.ready:
             raise RuntimeError(
@@ -554,6 +642,48 @@ class NativeMayaBackend:
     def read_settings(self) -> ScaleSettings:
         return self.scene.read_settings(self._require_binding().settings_node)
 
+    def create_maya_mesh(self) -> str:
+        """Snapshot the current graph output without changing or deleting its graph."""
+        self._require_binding()
+        cmds = self.scene.cmds
+        graph = self.native_graph()
+        if not graph or not cmds.objExists(graph + ".out_mesh"):
+            raise RuntimeError("No Bifrost mesh output is available")
+        temporary = []
+        result = None
+        selection = cmds.ls(selection=True, long=True) or []
+        with self.scene.user_undo_chunk("Bifrost Scales Create Mesh"):
+            try:
+                converter = cmds.createNode("bifrostGeoToMaya", name="bsMeshConversion#")
+                temporary.append(converter)
+                transform = cmds.createNode("transform", name="bsMeshSnapshot#")
+                temporary.append(transform)
+                shape = cmds.createNode("mesh", parent=transform)
+                source = converter + ".bifrostGeo"
+                if cmds.attributeQuery("bifrostGeo", node=converter, multi=True):
+                    source += "[0]"
+                cmds.connectAttr(graph + ".out_mesh", source)
+                cmds.connectAttr(converter + ".mayaMesh[0]", shape + ".inMesh")
+                if not cmds.polyEvaluate(shape, face=True):
+                    raise RuntimeError("The current Bifrost output contains no mesh faces")
+                # Duplicate evaluated geometry, never delete history on a graph connection.
+                result = cmds.duplicate(transform, name="BifrostScalesMesh#", returnRootsOnly=True)[0]
+                exported_shape = cmds.listRelatives(result, shapes=True, fullPath=True)[0]
+                if cmds.listConnections(exported_shape + ".inMesh", source=True, destination=False):
+                    raise RuntimeError("Mesh snapshot unexpectedly retained a live input")
+                cmds.sets(result, edit=True, forceElement="initialShadingGroup")
+                cmds.select(result, replace=True)
+                return str(result)
+            except Exception:
+                if result and cmds.objExists(result):
+                    cmds.delete(result)
+                cmds.select(selection, replace=True) if selection else cmds.select(clear=True)
+                raise
+            finally:
+                for node in reversed(temporary):
+                    if cmds.objExists(node):
+                        cmds.delete(node)
+
     def persist_settings(
         self,
         settings: ScaleSettings | Mapping[str, object],
@@ -656,7 +786,7 @@ class NativeMayaBackend:
         binding = self._require_binding()
         settings = ScaleSettings.from_mapping(request.snapshot)
         self.scene.write_settings(binding.settings_node, settings)
-        guides = self.read_guides(force=True)
+        guides = self.read_guides()
         display_only = request.scope is ChangeCategory.DISPLAY
         evaluation = self.native.evaluate(
             binding,
@@ -708,7 +838,11 @@ class NativeMayaBackend:
                 else "native-cache"
             ),
             effective_budget=effective_budget,
-            next_interactive_budget=effective_budget,
+            next_interactive_budget=_next_interactive_budget(
+                settings,
+                request.mode.value,
+                evaluation.total_ms,
+            ),
             generation_ms=evaluation.generation_ms,
             viewport_ms=evaluation.viewport_ms,
             total_ms=evaluation.total_ms,

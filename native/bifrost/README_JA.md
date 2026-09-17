@@ -4,7 +4,7 @@ Static Graph v4からSource Mesh配列とPayload 10を受け取り、Native Core
 
 ```text
 Contract        bifrost-scales/operator-contract/20
-Behavior        bifrost-scales/native-core/0.10.9-settled-proposal-index-1
+Behavior        bifrost-scales/native-core/0.10.9-vector-surface-6
 Profile output  bifrost-scales/native-profile/11
 ```
 

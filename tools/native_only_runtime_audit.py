@@ -69,7 +69,7 @@ def audit(root: Path = ROOT) -> dict[str, object]:
             and "self.delete_system()" in backend
         ),
         "create_button_calls_native_transaction": (
-            "選択メッシュから新規作成（Bifrost Previewまで）" in ui
+            'self.create_system_button = QtWidgets.QPushButton("New System")' in ui
             and "create_system_with_preview" in ui
         ),
         "backend_selector_removed": all(

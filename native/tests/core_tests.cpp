@@ -10,6 +10,7 @@
 #include <string>
 #include <numeric>
 #include <set>
+#include <map>
 #include <thread>
 #include <vector>
 
@@ -285,6 +286,67 @@ int main() {
     CHECK(decoded_payload.payload.resolve_cell_ids[0] == 1U);
     CHECK(decoded_payload.payload.resolve_cell_ids[1] == 2U);
     CHECK(!bifrost_scales::decode_native_payload("{}").success);
+
+    const auto legacy_shape_payload = bifrost_scales::decode_native_payload(R"json(
+        {"schema":"bifrost-scales/native-payload/10","mode":"settled","settings":{
+          "size":1.0,"lift":0.0,"curvature":0.5,"random_size":0.0,
+          "random_rotation_degrees":0.0,"cell_mode":"cards",
+          "scale_types":[{"type_id":"classic","enabled":true}]
+        }}
+    )json");
+    const auto neutral_curve_payload = bifrost_scales::decode_native_payload(R"json(
+        {"schema":"bifrost-scales/native-payload/10","mode":"settled","settings":{
+          "size":1.0,"lift":0.0,"curvature":0.5,"random_size":0.0,
+          "random_rotation_degrees":0.0,"cell_mode":"cards",
+          "width_curve":[[0.0,1.0],[0.5,1.0],[1.0,1.0]],
+          "profile_curve":[[0.0,1.0],[0.5,1.0],[1.0,1.0]],
+          "scale_types":[{"type_id":"classic","enabled":true}]
+        }}
+    )json");
+    CHECK(legacy_shape_payload.success);
+    CHECK(neutral_curve_payload.success);
+    Sample curve_sample;
+    curve_sample.position = {0.0, 0.0, 0.0};
+    curve_sample.normal = {0.0, 1.0, 0.0};
+    curve_sample.random_size = 0.5;
+    curve_sample.random_rotation = 0.5;
+    curve_sample.random_type = 0.5;
+    const OrientedSample curve_oriented{
+        curve_sample,
+        {0.0, 0.0, 1.0},
+        {0.0, 0.0, 1.0},
+        0.0,
+    };
+    const auto legacy_shape = bifrost_scales::shape_samples(
+        {curve_oriented},
+        legacy_shape_payload.payload.settings,
+        PreviewMode::Settled);
+    const auto neutral_curve_shape = bifrost_scales::shape_samples(
+        {curve_oriented},
+        neutral_curve_payload.payload.settings,
+        PreviewMode::Settled);
+    CHECK(legacy_shape.vertices == neutral_curve_shape.vertices);
+    CHECK(legacy_shape.faces == neutral_curve_shape.faces);
+
+    const auto edited_curve_payload = bifrost_scales::decode_native_payload(R"json(
+        {"schema":"bifrost-scales/native-payload/10","mode":"settled","settings":{
+          "size":1.0,"lift":0.0,"curvature":0.5,"random_size":0.0,
+          "random_rotation_degrees":0.0,"cell_mode":"cards",
+          "width_curve":[[0.0,1.0],[1.0,0.5]],
+          "profile_curve":[[0.0,1.0],[1.0,2.0]],
+          "scale_types":[{"type_id":"classic","enabled":true}]
+        }}
+    )json");
+    CHECK(edited_curve_payload.success);
+    const auto edited_curve_shape = bifrost_scales::shape_samples(
+        {curve_oriented},
+        edited_curve_payload.payload.settings,
+        PreviewMode::Settled);
+    CHECK(edited_curve_shape.faces == legacy_shape.faces);
+    CHECK(std::abs(edited_curve_shape.vertices[0].x - legacy_shape.vertices[0].x) < 1.0e-12);
+    CHECK(std::abs(edited_curve_shape.vertices[1].x) < std::abs(legacy_shape.vertices[1].x));
+    CHECK(std::abs(
+        edited_curve_shape.vertices[2].y - 2.0 * legacy_shape.vertices[2].y) < 1.0e-12);
 
     Settings group_link_settings;
     group_link_settings.size = 1.0;
@@ -933,7 +995,113 @@ int main() {
         CHECK(changed.vertices != hda_cell_shape.vertices);
     }
 
+    Settings curve_cell = hda_cell_base;
+    curve_cell.width_curve = {{0.0, 0.5}, {1.0, 1.8}};
+    curve_cell.profile_curve = {{0.0, 0.5}, {1.0, 2.0}};
+    const auto curved_cells = bifrost_scales::shape_cells(
+        orientation.samples,
+        cells.cells,
+        curve_cell,
+        guides);
+    CHECK(curved_cells.vertices != hda_cell_shape.vertices);
+    CHECK(curved_cells.faces == hda_cell_shape.faces);
+    for (std::size_t scale_index = 0U; scale_index < cells.cells.size(); ++scale_index) {
+        for (std::size_t ray_index = 0U; ray_index < ring_size; ++ray_index) {
+            CHECK(curved_cells.vertices[scale_index * cell_stride + ray_index] ==
+                  hda_cell_shape.vertices[scale_index * cell_stride + ray_index]);
+        }
+    }
+
     Settings center_contract = hda_cell_base;
+    Settings sculpt_test = hda_cell_base;
+    sculpt_test.sculpt_surface.enabled = true;
+    sculpt_test.sculpt_surface.resolution = 8U;
+    sculpt_test.sculpt_settled_resolution = 8U;
+    sculpt_test.sculpt_surface.deltas.resize(81U);
+    const auto neutral_grid = bifrost_scales::shape_cells(orientation.samples, cells.cells, sculpt_test, guides);
+    sculpt_test.sculpt_surface.deltas[40U] = {5.0, 0.7, 0.8};
+    const auto sculpt_grid = bifrost_scales::shape_cells(orientation.samples, cells.cells, sculpt_test, guides);
+    CHECK(neutral_grid.faces == sculpt_grid.faces);
+    CHECK(neutral_grid.vertices != sculpt_grid.vertices);
+    CHECK(sculpt_grid.scale_count == hda_cell_shape.scale_count);
+    const auto sculpt_stride = ring_size * (hda_cell_base.cell_shape_divisions + 1U) + 81U;
+    for (std::size_t cell_index=0;cell_index<cells.cells.size();++cell_index) {
+        for (std::size_t vertex=0;vertex<ring_size*(hda_cell_base.cell_shape_divisions+1U);++vertex) {
+            CHECK(sculpt_grid.vertices[cell_index*sculpt_stride+vertex] == hda_cell_shape.vertices[cell_index*cell_stride+vertex]);
+        }
+    }
+    CHECK(sculpt_grid.vertices[ring_size*(hda_cell_base.cell_shape_divisions+1U)+40U] != neutral_grid.vertices[ring_size*(hda_cell_base.cell_shape_divisions+1U)+40U]);
+    Settings per_type_sculpt = hda_cell_base;
+    per_type_sculpt.scale_types[0].sculpt_surface = sculpt_test.sculpt_surface;
+    const auto type_grid = bifrost_scales::shape_cells(orientation.samples,cells.cells,per_type_sculpt,guides);
+    CHECK(type_grid.vertices == sculpt_grid.vertices);
+    CHECK(type_grid.faces == sculpt_grid.faces);
+    std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint32_t> sculpt_edges;
+    for (const auto& face : neutral_grid.faces) {
+        CHECK(std::set<std::uint32_t>(face.begin(), face.end()).size() == face.size());
+        for (std::size_t i=0; i<face.size(); ++i) {
+            auto a=face[i], b=face[(i+1U)%face.size()];
+            if (a>b) std::swap(a,b);
+            ++sculpt_edges[{a,b}];
+        }
+    }
+    std::size_t open_edges=0;
+    for (const auto& edge : sculpt_edges) {
+        CHECK(edge.second <= 2U);
+        if (edge.second == 1U) ++open_edges;
+    }
+    CHECK(open_edges == ring_size*cells.cells.size());
+    Settings full_sculpt = sculpt_test;
+    full_sculpt.sculpt_surface.full_surface = true;
+    const auto full_grid = bifrost_scales::shape_cells(orientation.samples, cells.cells, full_sculpt, guides);
+    full_sculpt.cell_growth = 0.0;
+    full_sculpt.cell_shape_divisions = 6U;
+    const auto no_growth = bifrost_scales::shape_cells(orientation.samples, cells.cells, full_sculpt, guides);
+    CHECK(full_grid.vertices == no_growth.vertices);
+    CHECK(full_grid.faces == no_growth.faces);
+    CHECK(full_grid.vertices.size() == full_grid.scale_count*81U);
+    CHECK(full_grid.faces.size() == full_grid.scale_count*64U);
+    full_sculpt.sculpt_surface.deltas[0U] = {0.2, 0.1, 0.5};
+    const auto moved_boundary = bifrost_scales::shape_cells(orientation.samples, cells.cells, full_sculpt, guides);
+    CHECK(moved_boundary.vertices[0] != full_grid.vertices[0]);
+    CHECK(moved_boundary.faces == full_grid.faces);
+    full_sculpt.inset += 0.2;
+    const auto reshaped_outline = bifrost_scales::shape_cells(orientation.samples, cells.cells, full_sculpt, guides);
+    CHECK(reshaped_outline.vertices != moved_boundary.vertices);
+    Settings pinned = sculpt_test;
+    pinned.sculpt_surface.full_surface = true;
+    pinned.sculpt_surface.pinned_boundary = true;
+    pinned.sculpt_surface.deltas[0] = {1., 2., 3.};
+    const auto pinned_mesh = bifrost_scales::shape_cells(orientation.samples, cells.cells, pinned, guides);
+    for (const auto* uv_mesh : {&hda_cell_shape, &pinned_mesh, &full_grid}) {
+        CHECK(uv_mesh->uvs.size() == uv_mesh->vertices.size());
+        const auto stride=uv_mesh->vertices.size()/uv_mesh->scale_count;
+        for (std::size_t start=0;start<uv_mesh->uvs.size();start+=stride) {
+            double min_u=1.,min_v=1.,max_u=0.,max_v=0.;
+            for (std::size_t i=start;i<start+stride;++i) {
+                const auto& uv=uv_mesh->uvs[i];
+                CHECK(uv.x>=0. && uv.x<=1. && uv.y>=0. && uv.y<=1.);
+                min_u=std::min(min_u,uv.x); min_v=std::min(min_v,uv.y);
+                max_u=std::max(max_u,uv.x); max_v=std::max(max_v,uv.y);
+            }
+            CHECK(min_u==0. && min_v==0. && max_u==1. && max_v==1.);
+        }
+    }
+    pinned.normal_offset = .002;
+    const auto thicker = bifrost_scales::shape_cells(orientation.samples, cells.cells, pinned, guides);
+    CHECK(thicker.vertices != pinned_mesh.vertices);
+    CHECK(thicker.faces == pinned_mesh.faces);
+    const auto pinned_stride = ring_size+81U;
+    for (std::size_t cell_index=0; cell_index<cells.cells.size(); ++cell_index) {
+        for (std::size_t v=0; v<ring_size; ++v) {
+            CHECK(pinned_mesh.vertices[cell_index*pinned_stride+v] == hda_cell_shape.vertices[cell_index*cell_stride+v]);
+            CHECK(thicker.vertices[cell_index*pinned_stride+v] == pinned_mesh.vertices[cell_index*pinned_stride+v]);
+        }
+    }
+    pinned.cell_growth = .0;
+    pinned.cell_shape_divisions = 6U;
+    CHECK(bifrost_scales::shape_cells(orientation.samples,cells.cells,pinned,guides).vertices == thicker.vertices);
+
     center_contract.size = 0.5;
     center_contract.tip_offset = 0.6;
     center_contract.forward_offset = 0.4;
@@ -977,6 +1145,94 @@ int main() {
     CHECK(std::abs(center_vertex.z - expected_center_longitudinal) < 1.0e-12);
 
     Settings typed_cell = hda_cell_base;
+    // An asymmetric outline must be covered once, with consistently wound triangles.
+    Settings disk_settings = center_contract;
+    disk_settings.curvature = 0.0;
+    disk_settings.lift = 0.0;
+    disk_settings.sculpt_surface.enabled = true;
+    disk_settings.sculpt_surface.full_surface = true;
+    disk_settings.sculpt_surface.pinned_boundary = true;
+    auto disk_cell = center_cell;
+    // A center sculpted beyond the unit editing disk must overhang the cell.
+    auto overhang_settings = disk_settings;
+    overhang_settings.size = .1;
+    overhang_settings.sculpt_surface.resolution = 8U;
+    overhang_settings.sculpt_surface.deltas.resize(81U);
+    const auto neutral_overhang = bifrost_scales::shape_cells(
+        {center_oriented}, {center_cell}, overhang_settings);
+    overhang_settings.sculpt_surface.deltas[40] = {.75, .0, .2};
+    const auto overhang = bifrost_scales::shape_cells(
+        {center_oriented}, {center_cell}, overhang_settings);
+    CHECK(overhang.faces == neutral_overhang.faces);
+    CHECK(overhang.vertices[4U+40U].x > 1.0);
+    for (std::size_t i=0; i<4U; ++i)
+        CHECK(overhang.vertices[i] == neutral_overhang.vertices[i]);
+    auto typed_overhang = disk_settings;
+    typed_overhang.size = .1;
+    typed_overhang.sculpt_surface = {};
+    typed_overhang.scale_types[0].sculpt_surface = overhang_settings.sculpt_surface;
+    CHECK(bifrost_scales::shape_cells({center_oriented}, {center_cell}, typed_overhang).vertices == overhang.vertices);
+    // Height is relative to cell dimensions; strength 1 must not be spacing-capped.
+    auto height_settings = overhang_settings;
+    height_settings.size = 1.;
+    height_settings.sculpt_surface.deltas[40] = {0., 0., .2};
+    auto close_sample = center_oriented;
+    close_sample.sample.local_spacing = .2;
+    const auto tall = bifrost_scales::shape_cells({close_sample}, {center_cell}, height_settings);
+    CHECK(std::abs(tall.vertices[44].y - .4) < 1e-12);
+    height_settings.size = 2.;
+    const auto twice_tall = bifrost_scales::shape_cells({close_sample}, {center_cell}, height_settings);
+    CHECK(std::abs(twice_tall.vertices[44].y - .8) < 1e-12);
+    CHECK(tall.faces == twice_tall.faces);
+    for (std::size_t i=0; i<4U; ++i) CHECK(tall.vertices[i] == twice_tall.vertices[i]);
+    height_settings.sculpt_surface.deltas[40].z = -.2;
+    const auto recessed = bifrost_scales::shape_cells({close_sample}, {center_cell}, height_settings);
+    CHECK(std::abs(recessed.vertices[44].y + .8) < 1e-12);
+    auto type_height = height_settings;
+    type_height.scale_types[0].sculpt_surface = height_settings.sculpt_surface;
+    type_height.sculpt_surface = {};
+    CHECK(bifrost_scales::shape_cells({close_sample}, {center_cell}, type_height).vertices == recessed.vertices);
+    auto large_cell = center_cell;
+    for (auto& vertex : large_cell.boundary) { vertex.x *= 2.; vertex.z *= 2.; }
+    const auto large_height = bifrost_scales::shape_cells({close_sample}, {large_cell}, height_settings);
+    CHECK(std::abs(large_height.vertices[44].y + 1.6) < 1e-12);
+    disk_cell.boundary = {{-1.,0.,-.5},{-.2,0.,-1.2},{.9,0.,-.8},
+        {1.4,0.,.1},{.4,0.,1.1},{-.8,0.,.8}};
+    double polygon_area2 = 0.;
+    for (std::size_t i=0; i<disk_cell.boundary.size(); ++i) {
+        const auto& a=disk_cell.boundary[i];
+        const auto& b=disk_cell.boundary[(i+1)%disk_cell.boundary.size()];
+        polygon_area2 += a.x*b.z-a.z*b.x;
+    }
+    for (const auto resolution : {4U,5U,8U,16U,31U,32U}) {
+        disk_settings.sculpt_settled_resolution=resolution;
+        const auto disk=bifrost_scales::shape_cells({center_oriented},{disk_cell},disk_settings);
+        std::map<std::pair<std::uint32_t,std::uint32_t>,std::pair<int,int>> edges;
+        double area2=0.;
+        for (const auto& face : disk.faces) {
+            CHECK(face.size()==3U);
+            const auto& a=disk.vertices[face[0]];
+            const auto& b=disk.vertices[face[1]];
+            const auto& c=disk.vertices[face[2]];
+            const double signed_area=(b.z-a.z)*(c.x-a.x)-(b.x-a.x)*(c.z-a.z);
+            CHECK(signed_area>1e-12);
+            area2+=signed_area;
+            for (std::size_t i=0;i<3;++i) {
+                auto a=face[i],b=face[(i+1)%3];
+                const int direction=a<b ? 1 : -1;
+                if (a>b) std::swap(a,b);
+                auto& edge=edges[{a,b}]; ++edge.first; edge.second+=direction;
+            }
+        }
+        CHECK(std::abs(area2-std::abs(polygon_area2))<1e-8);
+        std::size_t boundary_edges=0;
+        for (const auto& edge : edges) {
+            CHECK(edge.second.first<=2);
+            if (edge.second.first==2) CHECK(edge.second.second==0);
+            else ++boundary_edges;
+        }
+        CHECK(boundary_edges==disk_cell.boundary.size());
+    }
     ScaleType typed_classic = classic;
     typed_classic.width_multiplier = 1.4;
     typed_classic.length_multiplier = 0.8;
@@ -1156,7 +1412,14 @@ int main() {
         PreviewMode::Final,
         {forward_curve});
     CHECK(forward_orientation.samples.size() == 1U);
-    CHECK(forward_orientation.samples.front().tangent.x > 0.999);
+    CHECK(forward_orientation.samples.front().tangent.x < -0.999);
+    CHECK(forward_orientation.samples.front().partition_tangent.x > 0.999);
+    Guide forward_flow = forward_curve;
+    forward_flow.kind = GuideKind::FlowCurve;
+    const auto flow_orientation = bifrost_scales::orient_samples(
+        {directed_sample}, directed_settings, PreviewMode::Final, {forward_flow});
+    CHECK(flow_orientation.samples.front().tangent.x < -0.999);
+    CHECK(flow_orientation.samples.front().partition_tangent.x > 0.999);
 
     Guide reverse_curve = forward_curve;
     reverse_curve.id = "reverse_curve";
@@ -1167,7 +1430,7 @@ int main() {
         PreviewMode::Final,
         {reverse_curve});
     CHECK(reverse_orientation.samples.size() == 1U);
-    CHECK(reverse_orientation.samples.front().tangent.x < -0.999);
+    CHECK(reverse_orientation.samples.front().tangent.x > 0.999);
 
     Guide independent_curve = forward_curve;
     independent_curve.id = "independent_curve";
@@ -1192,7 +1455,7 @@ int main() {
         directed_settings,
         PreviewMode::Final,
         {independent_curve});
-    CHECK(direction_only_orientation.samples.front().tangent.z > 0.999);
+    CHECK(direction_only_orientation.samples.front().tangent.z < -0.999);
     CHECK(direction_only_orientation.samples.front().partition_tangent.x > 0.999);
     CHECK(direction_only_orientation.samples.front().direction_influence > 0.999);
     CHECK(direction_only_orientation.samples.front().cell_anisotropy_influence < 1.0e-12);

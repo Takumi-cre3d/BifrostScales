@@ -34,6 +34,7 @@ target_compile_features(bifrost_scales_core PUBLIC cxx_std_17)
 set_target_properties(bifrost_scales_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(MSVC)
+    add_link_options(/Brepro)
     target_compile_options(bifrost_scales_core PRIVATE /W4 /permissive-)
 else()
     target_compile_options(bifrost_scales_core PRIVATE -Wall -Wextra -Wpedantic -Werror)

@@ -57,6 +57,7 @@ GUIDE_SYMMETRY_SPACE = "bsGuideSymmetrySpace"
 GUIDE_GROUP_MARKER = "bsOwnedGuideGroup"
 GUIDE_GROUP_NAME = "bsGuideGroupName"
 GUIDE_GROUP_ORDER = "bsGuideGroupOrder"
+GUIDE_GROUP_COLLAPSED = "bsGuideGroupCollapsed"
 GUIDE_GROUP_ENABLED = "bsGuideGroupEnabled"
 GUIDE_GROUP_RADIUS_MULTIPLIER = "bsGuideGroupRadiusMultiplier"
 GUIDE_GROUP_FALLOFF_MULTIPLIER = "bsGuideGroupFalloffMultiplier"
@@ -377,9 +378,59 @@ class MayaSceneManager:
                     self.cmds.delete(duplicate)
                 raise
 
-    def create_guide_group(self, settings_node: str, name: str = "") -> str:
+    def _initialize_guide_group(
+        self,
+        group: str,
+        binding: SystemBinding,
+        name: str,
+        order: int,
+    ) -> str:
+        group_id = "group_" + uuid.uuid4().hex
+        display_name = (
+            " ".join(str(name).strip().split())[:64]
+            or self._next_group_display_name(binding)
+        )
+        self._ensure_bool(group, GUIDE_GROUP_MARKER, True)
+        self._ensure_string(group, SYSTEM_ID, binding.system_id)
+        self._ensure_string(group, GUIDE_GROUP_ID, group_id)
+        self._ensure_string(group, GUIDE_GROUP_NAME, display_name)
+        self._ensure_int(group, GUIDE_GROUP_ORDER, order)
+        self._ensure_bool(group, GUIDE_GROUP_COLLAPSED, False)
+        self._ensure_bool(group, GUIDE_GROUP_ENABLED, True)
+        self._ensure_double(group, GUIDE_GROUP_RADIUS_MULTIPLIER, 1.0)
+        self._ensure_double(group, GUIDE_GROUP_FALLOFF_MULTIPLIER, 1.0)
+        self._ensure_double(group, GUIDE_GROUP_DENSITY_STRENGTH, 1.0)
+        self._ensure_double(group, GUIDE_GROUP_SIZE_STRENGTH, 1.0)
+        self._ensure_double(group, GUIDE_GROUP_DIRECTION_STRENGTH, 1.0)
+        self._ensure_double(group, GUIDE_GROUP_ANGLE_OFFSET, 0.0)
+        self._ensure_bool(group, GUIDE_GROUP_SYMMETRY_ENABLED, False)
+        self._ensure_string(group, GUIDE_GROUP_SYMMETRY_AXIS, "x")
+        self._ensure_string(group, GUIDE_GROUP_SYMMETRY_SPACE, "world")
+        return group_id
+
+    def create_guide_group(
+        self,
+        settings_node: str,
+        name: str = "",
+        guide_nodes: list[str] | tuple[str, ...] = (),
+    ) -> str:
         binding = self.bind(settings_node)
         self._ensure_guide_management_metadata(binding)
+        owned_guides = self._owned_guide_nodes(binding)
+        guides: list[str] = []
+        for node in guide_nodes:
+            guide = self._canonical_owned_node(node, owned_guides)
+            if not guide:
+                raise ValueError("Guide is not owned by the current system")
+            if guide not in guides:
+                guides.append(guide)
+        order = max(
+            (
+                self._int_attr(node, GUIDE_GROUP_ORDER, -1)
+                for node in self._owned_group_nodes(binding)
+            ),
+            default=-1,
+        ) + 1
         with self.user_undo_chunk("Bifrost Scales Create Guide Group"):
             group = self._long_node_name(
                 str(
@@ -390,49 +441,49 @@ class MayaSceneManager:
                     )
                 )
             )
-            group_id = "group_" + uuid.uuid4().hex
-            display_name = (
-                " ".join(str(name).strip().split())[:64]
-                or self._next_group_display_name(binding)
-            )
-            order = max(
-                (
-                    self._int_attr(node, GUIDE_GROUP_ORDER, -1)
-                    for node in self._owned_group_nodes(binding)
-                    if node != group
-                ),
-                default=-1,
-            ) + 1
-            self._ensure_bool(group, GUIDE_GROUP_MARKER, True)
-            self._ensure_string(group, SYSTEM_ID, binding.system_id)
-            self._ensure_string(group, GUIDE_GROUP_ID, group_id)
-            self._ensure_string(group, GUIDE_GROUP_NAME, display_name)
-            self._ensure_int(group, GUIDE_GROUP_ORDER, order)
-            self._ensure_bool(group, GUIDE_GROUP_ENABLED, True)
-            self._ensure_double(group, GUIDE_GROUP_RADIUS_MULTIPLIER, 1.0)
-            self._ensure_double(group, GUIDE_GROUP_FALLOFF_MULTIPLIER, 1.0)
-            self._ensure_double(group, GUIDE_GROUP_DENSITY_STRENGTH, 1.0)
-            self._ensure_double(group, GUIDE_GROUP_SIZE_STRENGTH, 1.0)
-            self._ensure_double(group, GUIDE_GROUP_DIRECTION_STRENGTH, 1.0)
-            self._ensure_double(group, GUIDE_GROUP_ANGLE_OFFSET, 0.0)
-            self._ensure_bool(group, GUIDE_GROUP_SYMMETRY_ENABLED, False)
-            self._ensure_string(group, GUIDE_GROUP_SYMMETRY_AXIS, "x")
-            self._ensure_string(group, GUIDE_GROUP_SYMMETRY_SPACE, "world")
+            group_id = self._initialize_guide_group(group, binding, name, order)
+            for index, guide in enumerate(guides):
+                parented = self.cmds.parent(guide, group) or [guide]
+                moved = self._long_node_name(str(parented[0]))
+                self._ensure_string(moved, GUIDE_GROUP_ID, group_id)
+                self._ensure_int(moved, GUIDE_UI_ORDER, index)
             self.cmds.select(group, replace=True)
         return group
 
     def list_guide_groups(self, settings_node: str) -> list[str]:
         binding = self.bind(settings_node)
         self._ensure_guide_management_metadata(binding)
-        return sorted(
-            self._owned_group_nodes(binding),
-            key=lambda node: (
+        groups = self._owned_group_nodes(binding)
+        children: dict[str, list[str]] = {"": []}
+        for node in groups:
+            parent = self._group_parent_node(binding, node, groups)
+            children.setdefault(parent, []).append(node)
+
+        def key(node: str) -> tuple[object, ...]:
+            return (
                 self._int_attr(node, GUIDE_GROUP_ORDER, 0),
                 self._string_attr(node, GUIDE_GROUP_ID, ""),
                 str(node),
-            ),
-        )
+            )
 
+        ordered: list[str] = []
+        seen: set[str] = set()
+
+        def append_children(parent: str) -> None:
+            for node in sorted(children.get(parent, ()), key=key):
+                if node in seen:
+                    continue
+                seen.add(node)
+                ordered.append(node)
+                append_children(node)
+
+        append_children("")
+        for node in sorted(groups, key=key):
+            if node not in seen:
+                seen.add(node)
+                ordered.append(node)
+                append_children(node)
+        return ordered
     def list_guides(self, settings_node: str) -> list[str]:
         """Return guides in management order without changing evaluation order."""
 
@@ -471,11 +522,20 @@ class MayaSceneManager:
         binding = self.bind(settings_node)
         self._ensure_guide_management_metadata(binding)
         group_rows: list[tuple[object, ...]] = []
-        for node in self.list_guide_groups(settings_node):
+        group_nodes = self.list_guide_groups(settings_node)
+        for node in group_nodes:
             group = self.read_guide_group(node)
             group_rows.append(
                 (
                     group.group_id,
+                    self._string_attr(
+                        self._group_parent_node(binding, node, group_nodes),
+                        GUIDE_GROUP_ID,
+                        "",
+                    ),
+                    self._bool_attr(node, GUIDE_GROUP_COLLAPSED, False),
+                    self._bool_attr(node, "visibility", True),
+                    self._node_locked(node),
                     group.name,
                     group.enabled,
                     group.order,
@@ -498,6 +558,8 @@ class MayaSceneManager:
                     self._guide_display_name(node),
                     self._string_attr(node, GUIDE_GROUP_ID, ""),
                     self._int_attr(node, GUIDE_UI_ORDER, 0),
+                    self._bool_attr(node, "visibility", True),
+                    self._node_locked(node),
                     self._bool_attr(node, GUIDE_SYMMETRY_ENABLED, False),
                     self._string_attr(node, GUIDE_SYMMETRY_AXIS, "x"),
                     self._string_attr(node, GUIDE_SYMMETRY_SPACE, "world"),
@@ -550,6 +612,84 @@ class MayaSceneManager:
                 node, GUIDE_GROUP_SYMMETRY_SPACE, "world"
             ),
         ).normalized()
+
+    def guide_group_layout_state(
+        self,
+        settings_node: str,
+    ) -> dict[str, tuple[str, bool]]:
+        binding = self.bind(settings_node)
+        groups = self.list_guide_groups(settings_node)
+        return {
+            node: (
+                self._group_parent_node(binding, node, groups),
+                self._bool_attr(node, GUIDE_GROUP_COLLAPSED, False),
+            )
+            for node in groups
+        }
+
+    def guide_group_parent(self, settings_node: str, node: str) -> str:
+        binding = self.bind(settings_node)
+        groups = self._owned_group_nodes(binding)
+        node = self._canonical_owned_node(node, groups)
+        if not node:
+            raise ValueError("Guide group is not owned by the current system")
+        return self._group_parent_node(binding, node, groups)
+
+    def guide_group_collapsed(self, node: str) -> bool:
+        self.read_guide_group(node)
+        return self._bool_attr(node, GUIDE_GROUP_COLLAPSED, False)
+
+    def guide_item_presentation_state(
+        self,
+        settings_node: str,
+    ) -> dict[str, tuple[bool, bool]]:
+        binding = self.bind(settings_node)
+        nodes = self._owned_guide_nodes(binding) + self._owned_group_nodes(binding)
+        return {
+            node: (
+                self._bool_attr(node, "visibility", True),
+                self._node_locked(node),
+            )
+            for node in nodes
+        }
+
+    def set_guide_item_visible(
+        self,
+        settings_node: str,
+        node: str,
+        visible: bool,
+    ) -> None:
+        binding = self.bind(settings_node)
+        owned = self._owned_guide_nodes(binding) + self._owned_group_nodes(binding)
+        node = self._canonical_owned_node(node, owned)
+        if not node:
+            raise ValueError("Guide item is not owned by the current system")
+        # Even an unchanged Maya write discards the user's redo history.
+        if bool(self.cmds.getAttr(node + ".visibility")) == bool(visible):
+            return
+        with self.user_undo_chunk("Bifrost Scales Set Guide Visibility"):
+            self.cmds.setAttr(node + ".visibility", bool(visible))
+
+    def set_guide_item_locked(
+        self,
+        settings_node: str,
+        node: str,
+        locked: bool,
+    ) -> None:
+        binding = self.bind(settings_node)
+        owned = self._owned_guide_nodes(binding) + self._owned_group_nodes(binding)
+        node = self._canonical_owned_node(node, owned)
+        if not node:
+            raise ValueError("Guide item is not owned by the current system")
+        if bool(self.cmds.lockNode(node, query=True, lock=True)[0]) == bool(locked):
+            return
+        with self.user_undo_chunk("Bifrost Scales Set Guide Lock"):
+            self.cmds.lockNode(node, lock=bool(locked))
+
+    def set_guide_group_collapsed(self, node: str, collapsed: bool) -> None:
+        self.read_guide_group(node)
+        with self._automatic_update_guard():
+            self._ensure_bool(node, GUIDE_GROUP_COLLAPSED, bool(collapsed))
 
     def read_guide(self, node: str, effective: bool = False) -> GuideData:
         if not node or not self.cmds.objExists(node):
@@ -817,26 +957,33 @@ class MayaSceneManager:
         return new_index
 
     def reorder_guide_group(self, settings_node: str, node: str, delta: int) -> int:
+        binding = self.bind(settings_node)
         groups = self.list_guide_groups(settings_node)
         node = self._canonical_owned_node(node, groups)
         if not node:
             raise ValueError("Guide group is not owned by the current system")
-        old_index = groups.index(node)
-        new_index = max(0, min(len(groups) - 1, old_index + int(delta)))
+        parent = self._group_parent_node(binding, node, groups)
+        siblings = [
+            group
+            for group in groups
+            if self._group_parent_node(binding, group, groups) == parent
+        ]
+        old_index = siblings.index(node)
+        new_index = max(0, min(len(siblings) - 1, old_index + int(delta)))
         if new_index == old_index:
             return old_index
-        groups.pop(old_index)
-        groups.insert(new_index, node)
+        siblings.pop(old_index)
+        siblings.insert(new_index, node)
         with self.user_undo_chunk("Bifrost Scales Reorder Guide Groups"):
-            for index, item in enumerate(groups):
+            for index, item in enumerate(siblings):
                 self._ensure_int(item, GUIDE_GROUP_ORDER, index)
         return new_index
-
     def apply_guide_tree_layout(
         self,
         settings_node: str,
         ordered_groups: list[str],
         guides_by_group: dict[str, list[str]],
+        group_parents: dict[str, str] | None = None,
     ) -> None:
         """Apply one validated drag/drop layout without touching evaluation order."""
 
@@ -846,9 +993,54 @@ class MayaSceneManager:
         canonical_groups = [
             self._canonical_owned_node(node, current_groups) for node in ordered_groups
         ]
-        if any(not node for node in canonical_groups) or set(canonical_groups) != set(current_groups):
+        if (
+            any(not node for node in canonical_groups)
+            or len(canonical_groups) != len(current_groups)
+            or set(canonical_groups) != set(current_groups)
+        ):
             raise ValueError("Guide group layout must contain every group exactly once")
+        group_ids = {
+            node: self._string_attr(node, GUIDE_GROUP_ID, "")
+            for node in canonical_groups
+        }
+        if not all(group_ids.values()) or len(set(group_ids.values())) != len(group_ids):
+            raise ValueError("Guide groups must have unique stable IDs")
+        ordered_group_ids = [group_ids[node] for node in canonical_groups]
+
+        parent_by_id: dict[str, str] = {}
+        if group_parents is None:
+            parent_by_id = {group_id: "" for group_id in ordered_group_ids}
+        else:
+            for raw_group, raw_parent in group_parents.items():
+                group = self._canonical_owned_node(raw_group, current_groups)
+                if not group or group_ids[group] in parent_by_id:
+                    raise ValueError("Guide group parent layout is invalid")
+                parent = ""
+                if raw_parent:
+                    parent = self._canonical_owned_node(raw_parent, current_groups)
+                    if not parent or parent == group:
+                        raise ValueError("Guide group cannot parent itself")
+                parent_by_id[group_ids[group]] = group_ids[parent] if parent else ""
+            if set(parent_by_id) != set(ordered_group_ids):
+                raise ValueError("Guide group parent layout must contain every group")
+
+        def depth(group_id: str) -> int:
+            seen: set[str] = set()
+            current = group_id
+            value = 0
+            while parent_by_id.get(current, ""):
+                if current in seen:
+                    raise ValueError("Guide group layout contains a cycle")
+                seen.add(current)
+                current = parent_by_id[current]
+                if current not in parent_by_id:
+                    raise ValueError("Guide group layout contains an unknown parent")
+                value += 1
+            return value
+
+        depths = {group_id: depth(group_id) for group_id in ordered_group_ids}
         current_guides = self._owned_guide_nodes(binding)
+        guide_ids = {node: self._guide_id(node) for node in current_guides}
         canonical_layout: dict[str, list[str]] = {}
         flattened: list[str] = []
         for raw_group, raw_guides in guides_by_group.items():
@@ -856,40 +1048,81 @@ class MayaSceneManager:
                 group = self._canonical_owned_node(raw_group, current_groups)
                 if not group:
                     raise ValueError("Guide layout contains an unknown group")
+                group_id = group_ids[group]
             else:
-                group = ""
+                group_id = ""
+            if group_id in canonical_layout:
+                raise ValueError("Guide layout contains a duplicate container")
             canonical_guides = [
                 self._canonical_owned_node(node, current_guides) for node in raw_guides
             ]
             if any(not node for node in canonical_guides):
                 raise ValueError("Guide layout contains an unknown guide")
-            canonical_layout[group] = canonical_guides
-            flattened.extend(canonical_guides)
-        if len(flattened) != len(current_guides) or set(flattened) != set(current_guides):
+            stable_ids = [guide_ids[node] for node in canonical_guides]
+            canonical_layout[group_id] = stable_ids
+            flattened.extend(stable_ids)
+        if len(flattened) != len(current_guides) or set(flattened) != set(
+            guide_ids.values()
+        ):
             raise ValueError("Guide layout must contain every guide exactly once")
-        if "" not in canonical_layout:
-            canonical_layout[""] = []
-        for group in canonical_groups:
-            canonical_layout.setdefault(group, [])
+        canonical_layout.setdefault("", [])
+        for group_id in ordered_group_ids:
+            canonical_layout.setdefault(group_id, [])
 
+        order_index = {group_id: index for index, group_id in enumerate(ordered_group_ids)}
         with self.user_undo_chunk("Bifrost Scales Arrange Guide Tree"):
-            for index, group in enumerate(canonical_groups):
+            for group_id in sorted(
+                ordered_group_ids,
+                key=lambda item: (depths[item], order_index[item]),
+            ):
+                group = self._group_node_for_stable_id(binding, group_id)
+                parent_id = parent_by_id[group_id]
+                destination = (
+                    self._group_node_for_stable_id(binding, parent_id)
+                    if parent_id
+                    else binding.guide_root
+                )
+                if not group or not destination:
+                    raise ValueError("Guide group layout could not be resolved")
+                current_parent = self._group_parent_node(binding, group)
+                current_parent_id = (
+                    self._string_attr(current_parent, GUIDE_GROUP_ID, "")
+                    if current_parent
+                    else ""
+                )
+                if current_parent_id != parent_id:
+                    self.cmds.parent(group, destination)
+
+            sibling_orders: dict[str, int] = {}
+            for group_id in ordered_group_ids:
+                parent_id = parent_by_id[group_id]
+                group = self._group_node_for_stable_id(binding, group_id)
+                index = sibling_orders.get(parent_id, 0)
                 self._ensure_int(group, GUIDE_GROUP_ORDER, index)
-            for group in [""] + canonical_groups:
-                destination = group or binding.guide_root
-                group_id = self._string_attr(group, GUIDE_GROUP_ID, "") if group else ""
-                for index, guide in enumerate(canonical_layout[group]):
+                sibling_orders[parent_id] = index + 1
+
+            for group_id in [""] + ordered_group_ids:
+                destination = (
+                    self._group_node_for_stable_id(binding, group_id)
+                    if group_id
+                    else binding.guide_root
+                )
+                for index, guide_id in enumerate(canonical_layout[group_id]):
+                    guide = self._guide_node_for_stable_id(binding, guide_id)
+                    if not guide or not destination:
+                        raise ValueError("Guide layout could not be resolved")
                     parents = self.cmds.listRelatives(
                         guide, parent=True, fullPath=True
                     ) or []
                     parent = str(parents[0]) if parents else ""
                     moved = guide
-                    if self._canonical_node_name(parent) != self._canonical_node_name(destination):
+                    if self._canonical_node_name(parent) != self._canonical_node_name(
+                        destination
+                    ):
                         parented = self.cmds.parent(guide, destination) or [guide]
                         moved = self._long_node_name(str(parented[0]))
                     self._ensure_string(moved, GUIDE_GROUP_ID, group_id)
                     self._ensure_int(moved, GUIDE_UI_ORDER, index)
-
     def reorder_guides(self, settings_node: str, ordered_nodes: list[str]) -> list[str]:
         """Compatibility API: reorder guides within their current containers."""
 
@@ -921,10 +1154,17 @@ class MayaSceneManager:
 
     def delete_guide_group(self, settings_node: str, node: str) -> list[str]:
         binding = self.bind(settings_node)
-        node = self._canonical_owned_node(node, self._owned_group_nodes(binding))
+        groups = self._owned_group_nodes(binding)
+        node = self._canonical_owned_node(node, groups)
         if not node:
             raise ValueError("Guide group is not owned by the current system")
         group_id = self._string_attr(node, GUIDE_GROUP_ID, "")
+        parent_group = self._group_parent_node(binding, node, groups)
+        parent_group_id = (
+            self._string_attr(parent_group, GUIDE_GROUP_ID, "")
+            if parent_group
+            else ""
+        )
         members = [
             item
             for item in self._owned_guide_nodes(binding)
@@ -936,58 +1176,112 @@ class MayaSceneManager:
                 self._guide_id(item),
             )
         )
-        start = self._next_guide_ui_order(binding, "")
+        child_groups = [
+            group
+            for group in groups
+            if self._group_parent_node(binding, group, groups) == node
+        ]
+        child_groups.sort(
+            key=lambda item: (
+                self._int_attr(item, GUIDE_GROUP_ORDER, 0),
+                self._string_attr(item, GUIDE_GROUP_ID, ""),
+            )
+        )
+        guide_start = self._next_guide_ui_order(binding, parent_group_id)
+        sibling_orders = [
+            self._int_attr(group, GUIDE_GROUP_ORDER, -1)
+            for group in groups
+            if group != node
+            and self._group_parent_node(binding, group, groups) == parent_group
+        ]
+        group_start = max(sibling_orders, default=-1) + 1
+        destination = parent_group or binding.guide_root
         moved_members: list[str] = []
         with self.user_undo_chunk("Bifrost Scales Delete Guide Group"):
-            for offset, guide in enumerate(members):
-                parented = self.cmds.parent(guide, binding.guide_root) or [guide]
+            for offset, child in enumerate(child_groups):
+                child_id = self._string_attr(child, GUIDE_GROUP_ID, "")
+                current = self._group_node_for_stable_id(binding, child_id)
+                parented = self.cmds.parent(current, destination) or [current]
                 moved = self._long_node_name(str(parented[0]))
-                self._ensure_string(moved, GUIDE_GROUP_ID, "")
-                self._ensure_int(moved, GUIDE_UI_ORDER, start + offset)
+                self._ensure_int(moved, GUIDE_GROUP_ORDER, group_start + offset)
+            for offset, guide in enumerate(members):
+                guide_id = self._guide_id(guide)
+                current = self._guide_node_for_stable_id(binding, guide_id)
+                parented = self.cmds.parent(current, destination) or [current]
+                moved = self._long_node_name(str(parented[0]))
+                self._ensure_string(moved, GUIDE_GROUP_ID, parent_group_id)
+                self._ensure_int(moved, GUIDE_UI_ORDER, guide_start + offset)
                 moved_members.append(moved)
-            self.cmds.delete(node)
+            current_group = self._group_node_for_stable_id(binding, group_id)
+            self.cmds.delete(current_group)
         return moved_members
-
     def select_guide(self, node: str) -> None:
         self.select_guide_item(node)
 
     def select_guide_item(self, node: str) -> None:
-        if not node or not self.cmds.objExists(node):
-            raise ValueError("Guide item does not exist")
-        is_guide = bool(
-            self.cmds.attributeQuery(GUIDE_MARKER, node=node, exists=True)
-            and self.cmds.getAttr(node + "." + GUIDE_MARKER)
-        )
-        is_group = bool(
-            self.cmds.attributeQuery(GUIDE_GROUP_MARKER, node=node, exists=True)
-            and self.cmds.getAttr(node + "." + GUIDE_GROUP_MARKER)
-        )
-        if not (is_guide or is_group):
-            raise ValueError("Node is not a Bifrost Scales guide item")
-        self.cmds.select(node, replace=True)
+        self.select_guide_items([node])
+
+    def select_guide_items(self, nodes: list[str] | tuple[str, ...]) -> None:
+        selected: list[str] = []
+        for node in nodes:
+            node = str(node)
+            if not node or not self.cmds.objExists(node):
+                raise ValueError("Guide item does not exist")
+            is_guide = bool(
+                self.cmds.attributeQuery(GUIDE_MARKER, node=node, exists=True)
+                and self.cmds.getAttr(node + "." + GUIDE_MARKER)
+            )
+            is_group = bool(
+                self.cmds.attributeQuery(GUIDE_GROUP_MARKER, node=node, exists=True)
+                and self.cmds.getAttr(node + "." + GUIDE_GROUP_MARKER)
+            )
+            if not (is_guide or is_group):
+                raise ValueError("Node is not a Bifrost Scales guide item")
+            if node not in selected:
+                selected.append(node)
+        if selected:
+            self.cmds.select(selected, replace=True)
+        else:
+            self.cmds.select(clear=True)
 
     def selected_guide_item(self, settings_node: str) -> str:
-        binding = self.bind(settings_node)
+        selected = self.selected_guide_items(settings_node)
+        return selected[0] if selected else ""
+
+    def _maya_selected_objects(self) -> list[str]:
+        try:
+            return list(
+                self.cmds.ls(
+                    selection=True,
+                    long=True,
+                    objectsOnly=True,
+                )
+                or []
+            )
+        except Exception:
+            return list(self.cmds.ls(selection=True, long=True) or [])
+
+    def _resolve_selected_guide_items(
+        self,
+        binding: SystemBinding,
+        selection: list[str] | tuple[str, ...],
+    ) -> tuple[list[str], bool]:
         owned_nodes = self._owned_guide_nodes(binding) + self._owned_group_nodes(binding)
         owned = {
             self._canonical_node_name(node): node for node in owned_nodes
         }
-        try:
-            selection = self.cmds.ls(
-                selection=True,
-                long=True,
-                objectsOnly=True,
-            ) or []
-        except Exception:
-            selection = self.cmds.ls(selection=True, long=True) or []
+        result: list[str] = []
+        seen: set[str] = set()
+        unmatched = False
         for selected in selection:
             candidate = str(selected).split(".", 1)[0]
             visited: set[str] = set()
+            resolved = ""
             while candidate and candidate not in visited and self.cmds.objExists(candidate):
                 visited.add(candidate)
-                resolved = owned.get(self._canonical_node_name(candidate))
-                if resolved is not None:
-                    return resolved
+                resolved = owned.get(self._canonical_node_name(candidate), "")
+                if resolved:
+                    break
                 try:
                     parents = self.cmds.listRelatives(
                         candidate,
@@ -997,16 +1291,48 @@ class MayaSceneManager:
                 except Exception:
                     parents = []
                 candidate = str(parents[0]) if parents else ""
-        return ""
+            if not resolved:
+                unmatched = True
+                continue
+            canonical = self._canonical_node_name(resolved)
+            if canonical not in seen:
+                result.append(resolved)
+                seen.add(canonical)
+        return result, unmatched
+
+    def selected_guide_items(self, settings_node: str) -> list[str]:
+        binding = self.bind(settings_node)
+        selection = self._maya_selected_objects()
+        self._adopt_selected_maya_guide_groups(binding, selection)
+        return self._resolve_selected_guide_items(binding, selection)[0]
+
+    def guide_grouping_selection(
+        self,
+        settings_node: str,
+    ) -> tuple[list[str], bool, bool]:
+        binding = self.bind(settings_node)
+        selected, unmatched = self._resolve_selected_guide_items(
+            binding,
+            self._maya_selected_objects(),
+        )
+        owned_guides = {
+            self._canonical_node_name(node): node
+            for node in self._owned_guide_nodes(binding)
+        }
+        guides = [
+            owned_guides[self._canonical_node_name(node)]
+            for node in selected
+            if self._canonical_node_name(node) in owned_guides
+        ]
+        has_guide_items = bool(selected)
+        mixed = unmatched or len(guides) != len(selected)
+        return guides, has_guide_items, mixed
 
     def selected_guides(
         self,
         settings_node: str,
         guide_nodes: list[str] | tuple[str, ...] | None = None,
     ) -> list[str]:
-        selected = self.selected_guide_item(settings_node)
-        if not selected:
-            return []
         allowed = (
             [str(node) for node in guide_nodes]
             if guide_nodes is not None
@@ -1015,8 +1341,12 @@ class MayaSceneManager:
         canonical = {
             self._canonical_node_name(node): node for node in allowed
         }
-        node = canonical.get(self._canonical_node_name(selected))
-        return [node] if node else []
+        result: list[str] = []
+        for selected in self.selected_guide_items(settings_node):
+            node = canonical.get(self._canonical_node_name(selected))
+            if node is not None:
+                result.append(node)
+        return result
 
     def guide_stage(self, node: str) -> str:
         try:
@@ -1101,6 +1431,27 @@ class MayaSceneManager:
                 (str(shape) + ".alwaysDrawOnTop", True, {}),
                 (str(shape) + ".lineWidth", 4.0, {}),
             ):
+                matches = False
+                try:
+                    current = self.cmds.getAttr(plug)
+                    if isinstance(value, tuple):
+                        if (
+                            isinstance(current, (list, tuple))
+                            and len(current) == 1
+                            and isinstance(current[0], (list, tuple))
+                        ):
+                            current = current[0]
+                        current_values = tuple(current)
+                        matches = len(current_values) == len(value) and all(
+                            abs(float(actual) - float(expected)) <= 1.0e-6
+                            for actual, expected in zip(current_values, value)
+                        )
+                    else:
+                        matches = current == value
+                except Exception:
+                    pass
+                if matches:
+                    continue
                 try:
                     if isinstance(value, tuple):
                         self.cmds.setAttr(plug, *value, **kwargs)
@@ -1179,14 +1530,14 @@ class MayaSceneManager:
         return result
 
     def _owned_group_nodes(self, binding: SystemBinding) -> list[str]:
-        children = self.cmds.listRelatives(
+        descendants = self.cmds.listRelatives(
             binding.guide_root,
-            children=True,
+            allDescendents=True,
             fullPath=True,
             type="transform",
         ) or []
         result: list[str] = []
-        for node in children:
+        for node in descendants:
             try:
                 if not (
                     self.cmds.attributeQuery(GUIDE_GROUP_MARKER, node=node, exists=True)
@@ -1199,6 +1550,107 @@ class MayaSceneManager:
             except Exception:
                 continue
         return result
+
+    def _group_parent_node(
+        self,
+        binding: SystemBinding,
+        node: str,
+        groups: list[str] | None = None,
+    ) -> str:
+        groups = self._owned_group_nodes(binding) if groups is None else groups
+        parents = self.cmds.listRelatives(node, parent=True, fullPath=True) or []
+        if not parents:
+            return ""
+        return self._canonical_owned_node(str(parents[0]), groups)
+
+    def _group_node_for_stable_id(self, binding: SystemBinding, group_id: str) -> str:
+        if not group_id:
+            return ""
+        matches = [
+            node
+            for node in self._owned_group_nodes(binding)
+            if self._string_attr(node, GUIDE_GROUP_ID, "") == group_id
+        ]
+        return matches[0] if len(matches) == 1 else ""
+
+    def _guide_node_for_stable_id(self, binding: SystemBinding, guide_id: str) -> str:
+        matches = [
+            node for node in self._owned_guide_nodes(binding) if self._guide_id(node) == guide_id
+        ]
+        return matches[0] if len(matches) == 1 else ""
+    def _adopt_selected_maya_guide_groups(
+        self,
+        binding: SystemBinding,
+        selection: list[str] | tuple[str, ...],
+    ) -> None:
+        root = self._canonical_node_name(binding.guide_root)
+        order = max(
+            (
+                self._int_attr(node, GUIDE_GROUP_ORDER, -1)
+                for node in self._owned_group_nodes(binding)
+            ),
+            default=-1,
+        ) + 1
+        for selected in selection:
+            group = str(selected).split(".", 1)[0]
+            if not group or not self.cmds.objExists(group):
+                continue
+            try:
+                if self.cmds.nodeType(group) != "transform":
+                    continue
+                parents = self.cmds.listRelatives(
+                    group,
+                    parent=True,
+                    fullPath=True,
+                ) or []
+                if (
+                    not parents
+                    or self._canonical_node_name(str(parents[0])) != root
+                    or self.cmds.attributeQuery(
+                        GUIDE_MARKER,
+                        node=group,
+                        exists=True,
+                    )
+                    or self.cmds.attributeQuery(
+                        GUIDE_GROUP_MARKER,
+                        node=group,
+                        exists=True,
+                    )
+                ):
+                    continue
+                children = self.cmds.listRelatives(
+                    group,
+                    children=True,
+                    fullPath=True,
+                    type="transform",
+                ) or []
+                guides = [
+                    str(node)
+                    for node in children
+                    if self.cmds.attributeQuery(
+                        GUIDE_MARKER,
+                        node=node,
+                        exists=True,
+                    )
+                    and bool(self.cmds.getAttr(str(node) + "." + GUIDE_MARKER))
+                    and self._string_attr(str(node), SYSTEM_ID, "")
+                    == binding.system_id
+                ]
+                if not guides or len(guides) != len(children):
+                    continue
+            except Exception:
+                continue
+            with self._automatic_update_guard():
+                group_id = self._initialize_guide_group(
+                    group,
+                    binding,
+                    str(group).split("|")[-1],
+                    order,
+                )
+                for index, guide in enumerate(guides):
+                    self._ensure_string(guide, GUIDE_GROUP_ID, group_id)
+                    self._ensure_int(guide, GUIDE_UI_ORDER, index)
+            order += 1
 
     def _ensure_guide_management_metadata(self, binding: SystemBinding) -> None:
         """Lazily migrate older guides/groups without changing evaluation order."""
@@ -1232,6 +1684,7 @@ class MayaSceneManager:
                     self._ensure_string(node, GUIDE_GROUP_NAME, candidate)
                     used_group_names.add(candidate)
                 defaults = (
+                    (GUIDE_GROUP_COLLAPSED, "bool", False),
                     (GUIDE_GROUP_ENABLED, "bool", True),
                     (GUIDE_GROUP_RADIUS_MULTIPLIER, "double", 1.0),
                     (GUIDE_GROUP_FALLOFF_MULTIPLIER, "double", 1.0),
@@ -1453,6 +1906,13 @@ class MayaSceneManager:
         except Exception:
             pass
         return str(default)
+
+    def _node_locked(self, node: str) -> bool:
+        try:
+            values = self.cmds.lockNode(node, query=True, lock=True) or []
+            return bool(values[0]) if values else False
+        except Exception:
+            return False
 
     def _bool_attr(self, node: str, attribute: str, default: bool) -> bool:
         try:

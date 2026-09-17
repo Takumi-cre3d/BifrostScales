@@ -26,12 +26,12 @@ OPERATOR_NAMESPACE = "BifrostScales"
 OPERATOR_SHORT_NAME = "generate_scale_mesh_payload_arrays"
 OPERATOR_DEFINITION = "{}::{}".format(OPERATOR_NAMESPACE, OPERATOR_SHORT_NAME)
 GRAPH_ASSET_NAME = "BifrostScales_native_scales_v4_graph.json"
-GRAPH_CONTRACT = "bifrost-scales/native-graph/4-dgmesh-1"
+GRAPH_CONTRACT = "bifrost-scales/native-graph/4-dgmesh-2-uv"
 PACK_CONFIG_NAME = "BifrostScalesPackConfig.json"
 MANIFEST_NAME = "manifest.bifrost-scales.json"
 MINIMUM_NATIVE_PACK_VERSION = (0, 10, 9)
 MINIMUM_NATIVE_PACK_VERSION_TEXT = "0.10.9"
-NATIVE_BEHAVIOR_CONTRACT = "bifrost-scales/native-core/0.10.9-settled-proposal-index-1"
+NATIVE_BEHAVIOR_CONTRACT = "bifrost-scales/native-core/0.10.9-vector-surface-6"
 NATIVE_PROFILE_SCHEMA = "bifrost-scales/native-profile/11"
 
 NATIVE_GRAPH_PATH_ATTR = "bsNativeGraphPath"
@@ -1230,10 +1230,38 @@ class NativeGraphController:
 
     def set_active(self, binding: SystemBinding, active: bool, visible: bool = True) -> None:
         graph_shape = self.graph_for_system(binding)
+        if graph_shape and self._get_string(self._graph_parent(graph_shape), NATIVE_GRAPH_CONTRACT_ATTR) == "bifrost-scales/native-graph/4-dgmesh-1":
+            graph_shape = self._upgrade_uv_graph(binding, graph_shape)
         if graph_shape:
             self._set_visibility(self._graph_parent(graph_shape), bool(active and visible))
         if binding.preview_transform and self.cmds.objExists(binding.preview_transform):
             self._set_visibility(binding.preview_transform, bool((not active) and visible))
+
+    def _upgrade_uv_graph(self, binding: SystemBinding, old_graph: str) -> str:
+        """Replace only the known pre-UV graph, keeping it until evaluation succeeds."""
+        parent = self._graph_parent(old_graph)
+        payload = self.cmds.getAttr(old_graph + ".payload_json")
+        new_graph = ""
+        self.cmds.undoInfo(openChunk=True, chunkName="Bifrost Scales UV Upgrade")
+        try:
+            self._ensure_string(parent, NATIVE_GRAPH_SYSTEM_ATTR, "")
+            self._clear_graph_reference(binding.settings_node)
+            new_graph = self.create_graph(binding)
+            if payload:
+                self.cmds.setAttr(new_graph + ".payload_json", payload, type="string")
+                if not self.cmds.getAttr(new_graph + ".success"):
+                    raise RuntimeError("UV graph upgrade failed: " + str(self.cmds.getAttr(new_graph + ".status")))
+            self._delete_graph_shape(old_graph)
+            self._last_payload_by_graph.clear()
+            return new_graph
+        except Exception:
+            if new_graph:
+                self._delete_graph_shape(new_graph)
+            self._ensure_string(parent, NATIVE_GRAPH_SYSTEM_ATTR, binding.system_id)
+            self._store_graph_reference(binding.settings_node, old_graph)
+            raise
+        finally:
+            self.cmds.undoInfo(closeChunk=True)
 
     def evaluate(
         self,

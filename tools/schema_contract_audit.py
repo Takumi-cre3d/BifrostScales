@@ -13,7 +13,7 @@ EXPECTED_PRODUCT_VERSION = "0.10.9"
 EXPECTED_PAYLOAD_SCHEMA = "bifrost-scales/native-payload/10"
 EXPECTED_OPERATOR_CONTRACT = "bifrost-scales/operator-contract/20"
 EXPECTED_MINIMUM_PACK = "0.10.9"
-EXPECTED_NATIVE_BEHAVIOR_CONTRACT = "bifrost-scales/native-core/0.10.9-settled-proposal-index-1"
+EXPECTED_NATIVE_BEHAVIOR_CONTRACT = "bifrost-scales/native-core/0.10.9-vector-surface-6"
 EXPECTED_NATIVE_PROFILE_SCHEMA = "bifrost-scales/native-profile/11"
 
 
@@ -127,7 +127,7 @@ def audit(root: Path = ROOT) -> dict[str, Any]:
         "manifest_cell_cache_key_basis": str(
             manifest_data.get("native_cell_cache_key_basis", "")
         ),
-        "cpp_payload_schema": _extract(r'schema\s*!=\s*"([^"]+)"', cpp_payload_text, "C++ payload schema"),
+        "cpp_payload_schema": _extract(r'\bschema\s*!=\s*"(bifrost-scales/native-payload/[^"]+)"', cpp_payload_text, "C++ payload schema"),
         "minimum_native_pack": _extract(r'^MINIMUM_NATIVE_PACK_VERSION_TEXT\s*=\s*"([^"]+)"', backend_text, "minimum Native Pack"),
         "native_cmake_version": _extract(r'project\(BifrostScalesCore VERSION ([0-9.]+)', cmake_text, "Native CMake version"),
     }

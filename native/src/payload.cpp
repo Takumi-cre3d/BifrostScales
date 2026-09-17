@@ -437,6 +437,95 @@ Vec3 vec3_from_value(const JsonValue& value, const Vec3& fallback) {
     };
 }
 
+std::vector<Vec2> shape_curve_value(
+    const JsonValue::Object& object,
+    std::string_view key,
+    double minimum,
+    double maximum) {
+    const std::vector<Vec2> neutral{{0.0, 1.0}, {1.0, 1.0}};
+    const auto* array = array_member(object, key);
+    if (array == nullptr || array->size() > 16U) {
+        return neutral;
+    }
+
+    std::vector<Vec2> points;
+    points.reserve(array->size());
+    for (const JsonValue& value : *array) {
+        const auto* pair = value.array();
+        if (pair == nullptr || pair->size() < 2U) {
+            return neutral;
+        }
+        const auto* x = std::get_if<double>(&(*pair)[0].value);
+        const auto* y = std::get_if<double>(&(*pair)[1].value);
+        if (x == nullptr || y == nullptr || !std::isfinite(*x) || !std::isfinite(*y)) {
+            return neutral;
+        }
+        points.push_back({
+            std::max(0.0, std::min(1.0, *x)),
+            std::max(minimum, std::min(maximum, *y)),
+        });
+    }
+    std::stable_sort(points.begin(), points.end(), [](const Vec2& left, const Vec2& right) {
+        return left.x < right.x;
+    });
+    std::vector<Vec2> unique;
+    for (const Vec2& point : points) {
+        if (!unique.empty() && unique.back().x == point.x) {
+            unique.back() = point;
+        } else {
+            unique.push_back(point);
+        }
+    }
+    if (unique.size() < 2U) {
+        return neutral;
+    }
+    unique.front().x = 0.0;
+    unique.back().x = 1.0;
+    return unique;
+}
+
+SculptSurface sculpt_surface_value(const JsonValue::Object& parent) {
+    SculptSurface result;
+    const auto* object = object_member(parent, "sculpt_surface");
+    if (object == nullptr && member(parent, "sculpt_surface")) {
+        throw std::runtime_error("sculpt surface must be an object");
+    }
+    if (object == nullptr || object->empty()) {
+        return result;
+    }
+    const auto schema = string_value(*object, "schema");
+    if (schema != "vector-surface/1" && schema != "vector-surface/2" && schema != "vector-surface/3") {
+        throw std::runtime_error("unsupported sculpt surface schema");
+    }
+    const double n = number_value(*object, "resolution", 32.0);
+    if (!std::isfinite(n) || n < 4.0 || n > 128.0 || std::floor(n) != n) {
+        throw std::runtime_error("sculpt resolution must be 4..128");
+    }
+    result.enabled = true;
+    result.full_surface = schema != "vector-surface/1";
+    result.pinned_boundary = schema == "vector-surface/3";
+    result.resolution = static_cast<std::uint32_t>(n);
+    if (member(*object, "u_curve")) result.u_curve = shape_curve_value(*object, "u_curve", -4.0, 4.0);
+    if (member(*object, "v_curve")) result.v_curve = shape_curve_value(*object, "v_curve", -4.0, 4.0);
+    if (const auto* values = array_member(*object, "deltas")) {
+        if (!values->empty() && values->size() != (result.resolution + 1U) * (result.resolution + 1U)) {
+            throw std::runtime_error("sculpt sample count does not match resolution");
+        }
+        for (const auto& value : *values) {
+            const auto* xyz = value.array();
+            if (xyz == nullptr || xyz->size() != 3U) throw std::runtime_error("invalid sculpt vector");
+            for (const auto& component : *xyz) {
+                const auto* number = std::get_if<double>(&component.value);
+                if (!number || !std::isfinite(*number) || std::abs(*number) > 8.0) throw std::runtime_error("invalid sculpt displacement");
+            }
+            result.deltas.push_back(vec3_from_value(value, {}));
+        }
+    } else if (member(*object, "deltas")) {
+        throw std::runtime_error("sculpt deltas must be an array");
+    }
+    return result;
+}
+
 Color4 color_from_object(
     const JsonValue::Object& object,
     const Color4& fallback) {
@@ -487,6 +576,7 @@ ScaleType parse_scale_type(const JsonValue::Object& object, std::size_t index) {
     result.random_offset = number_value(object, "random_offset", result.random_offset);
     result.tip_offset = number_value(object, "tip_offset", result.tip_offset);
     result.guide_id = string_value(object, "guide_id", result.guide_id);
+    result.sculpt_surface = sculpt_surface_value(object);
     result.use_custom_color = bool_value(
         object, "use_custom_color", result.use_custom_color);
     result.color = color_from_object(object, result.color);
@@ -517,6 +607,12 @@ void parse_settings(const JsonValue::Object& object, Settings& result) {
     result.tip_roundness = number_value(object, "tip_roundness", result.tip_roundness);
     result.tip_offset = number_value(object, "tip_offset", result.tip_offset);
     result.forward_offset = number_value(object, "forward_offset", result.forward_offset);
+    result.width_curve = shape_curve_value(object, "width_curve", 0.05, 4.0);
+    result.profile_curve = shape_curve_value(object, "profile_curve", -4.0, 4.0);
+    result.sculpt_surface = sculpt_surface_value(object);
+    result.sculpt_interactive_resolution = std::clamp(uint32_value(object, "sculpt_interactive_resolution", 4U), 4U, 32U);
+    result.normal_offset = number_value(object, "normal_offset", 0.0);
+    result.sculpt_settled_resolution = std::clamp(uint32_value(object, "sculpt_settled_resolution", 8U), 4U, 32U);
     result.cell_mode = geometry_mode(string_value(object, "cell_mode", "auto"));
     result.cell_growth = number_value(object, "cell_growth", result.cell_growth);
     result.cell_gap = number_value(object, "cell_gap", result.cell_gap);

@@ -52,6 +52,36 @@ def test_release_schedules_settled_refinement():
     assert settled.scope is ChangeCategory.SHAPE
 
 
+def test_slider_drag_baseline_is_one_interactive_then_one_settled():
+    scheduler = PreviewSchedulerCore(60, 180)
+    applied = []
+
+    scheduler.begin_interaction(now=0.0)
+    for index, value in enumerate((0.2, 0.4, 0.6, 0.8)):
+        scheduler.queue_change(
+            ChangeCategory.SHAPE,
+            {"size": value},
+            now=index * 0.02,
+        )
+
+    interactive = scheduler.poll(now=0.12)
+    assert interactive is not None
+    applied.append((interactive.mode, interactive.snapshot["size"]))
+    assert scheduler.complete(interactive.revision, True, now=0.13)
+
+    scheduler.end_interaction(now=0.14)
+    settled = scheduler.poll(now=0.32)
+    assert settled is not None
+    applied.append((settled.mode, settled.snapshot["size"]))
+    assert scheduler.complete(settled.revision, True, now=0.33)
+
+    assert applied == [
+        (PreviewMode.INTERACTIVE, 0.8),
+        (PreviewMode.SETTLED, 0.8),
+    ]
+    assert scheduler.poll(now=1.0) is None
+
+
 def test_fault_requires_explicit_clear():
     scheduler = PreviewSchedulerCore(0, 0)
     scheduler.queue_change(ChangeCategory.DISTRIBUTION, {"seed": 2}, now=0.0)

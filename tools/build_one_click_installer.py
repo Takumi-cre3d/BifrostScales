@@ -16,6 +16,7 @@ OUTPUT_NAME = "BifrostScales_0_10_9_Beta_OneClick_Installer.zip"
 FIXED_TIME = (2026, 8, 29, 0, 0, 0)
 
 _RETIRED_RUNTIME_MODULES = {
+    "legacy_cleanup.py",
     "adaptive.py",
     "cells.py",
     "generator.py",

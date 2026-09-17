@@ -21,7 +21,7 @@ GPU転送前後のcompact変換は8k～15k Sampleでの一時スレッド起動�
 Core version        0.10.9
 Payload             bifrost-scales/native-payload/10
 Operator            bifrost-scales/operator-contract/20
-Behavior            bifrost-scales/native-core/0.10.9-settled-proposal-index-1
+Behavior            bifrost-scales/native-core/0.10.9-vector-surface-6
 Profile             bifrost-scales/native-profile/11
 GPU Buffer          bifrost-scales/compact-orientation-buffer/2
 ```

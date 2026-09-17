@@ -118,6 +118,16 @@ struct SymmetryPlane {
     Vec3 normal{1.0, 0.0, 0.0};
 };
 
+struct SculptSurface {
+    bool enabled{false};
+    bool full_surface{false};
+    bool pinned_boundary{false};
+    std::uint32_t resolution{32};
+    std::vector<Vec3> deltas;
+    std::vector<Vec2> u_curve{{0.0, 0.0}, {1.0, 0.0}};
+    std::vector<Vec2> v_curve{{0.0, 0.0}, {1.0, 0.0}};
+};
+
 struct ScaleType {
     std::string id{"classic"};
     std::string name{"Classic"};
@@ -132,6 +142,7 @@ struct ScaleType {
     std::string guide_id;
     bool use_custom_color{false};
     Color4 color{0.34, 0.58, 0.82, 1.0};
+    SculptSurface sculpt_surface;
 };
 struct Settings {
     std::uint32_t target_count{512};
@@ -142,6 +153,7 @@ struct Settings {
 
     double size{0.1};
     double lift{0.002};
+    double normal_offset{0.0};
     double curvature{0.22};
     double direction_degrees{0.0};
     std::uint32_t direction_relax_iterations{0};
@@ -155,6 +167,11 @@ struct Settings {
     double tip_roundness{0.15};
     double tip_offset{0.0};
     double forward_offset{0.0};
+    std::vector<Vec2> width_curve{{0.0, 1.0}, {1.0, 1.0}};
+    std::vector<Vec2> profile_curve{{0.0, 1.0}, {1.0, 1.0}};
+    SculptSurface sculpt_surface;
+    std::uint32_t sculpt_interactive_resolution{4};
+    std::uint32_t sculpt_settled_resolution{8};
 
     GeometryMode cell_mode{GeometryMode::Auto};
     double cell_growth{0.85};
@@ -255,8 +272,8 @@ struct GeneratedMesh {
 
 struct GenerationOptions {
     // Reference/parity callers keep the complete mesh contract by default.
-    // The Bifrost Preview operator disables auxiliary arrays that are not
-    // connected by Static Graph v4 and requests flat topology instead.
+    // The Bifrost Preview operator emits UVs and flat topology, but disables
+    // other auxiliary arrays not connected by the static graph.
     bool include_uvs{true};
     bool include_colors{true};
     bool include_scale_type_ids{true};

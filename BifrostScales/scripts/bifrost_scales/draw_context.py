@@ -486,12 +486,14 @@ class SurfaceCurveDrawSession:
 
     def _schedule_refresh(self) -> None:
         try:
-            self.projector.omui.M3dView.scheduleRefreshAllViews()  # type: ignore[attr-defined]
+            # Dragger callbacks can defer scheduled paints until mouse release.
+            # Paint only the active view; the draft is not a registered guide yet.
+            self.cmds.refresh(currentView=True, force=True)
             return
         except Exception:
             pass
         try:
-            self.cmds.refresh(currentView=True, force=True)
+            self.projector.omui.M3dView.scheduleRefreshAllViews()  # type: ignore[attr-defined]
         except Exception:
             pass
 

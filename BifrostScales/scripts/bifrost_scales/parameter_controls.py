@@ -89,6 +89,9 @@ class FloatParameterControl(QtWidgets.QWidget):
         self.spin.setSuffix(str(value))
 
     def _slider_position(self, value: float) -> int:
+        # Numeric entry expands the soft range; the spin box owns hard bounds.
+        self._slider_minimum = min(self._slider_minimum, value)
+        self._slider_maximum = max(self._slider_maximum, value)
         normalized = value_to_normalized(
             clamp(value, self._slider_minimum, self._slider_maximum),
             self._slider_minimum,

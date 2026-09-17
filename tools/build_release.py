@@ -637,7 +637,7 @@ def _operator_compatible_native_pack(pack_config):
         and _manifest_payload_schema(manifest)
         == "bifrost-scales/native-payload/10"
         and _manifest_behavior_contract(manifest)
-        == "bifrost-scales/native-core/0.10.9-settled-proposal-index-1"
+        == "bifrost-scales/native-core/0.10.9-vector-surface-6"
         and _manifest_profile_schema(manifest)
         == "bifrost-scales/native-profile/11"
     )
@@ -794,7 +794,7 @@ def _is_valid_native_pack_config(pack_config):
         return False
     if _manifest_payload_schema(manifest) != "bifrost-scales/native-payload/10":
         return False
-    if _manifest_behavior_contract(manifest) != "bifrost-scales/native-core/0.10.9-settled-proposal-index-1":
+    if _manifest_behavior_contract(manifest) != "bifrost-scales/native-core/0.10.9-vector-surface-6":
         return False
     if _manifest_profile_schema(manifest) != "bifrost-scales/native-profile/11":
         return False
@@ -1254,9 +1254,9 @@ def build() -> dict[str, str]:
         "version": VERSION,
         "release_channel": "beta",
         "schema": "bifrost-scales/5",
-        "source_development_state": "0.10.9-settled-proposal-index",
-        "milestone": "settled-proposal-index",
-        "build_date": "2026-08-31",
+        "source_development_state": "0.10.9-shape-curves",
+        "milestone": "shape-curves",
+        "build_date": "2026-09-08",
         "runtime_payload_sha256": hashlib.sha256(payload).hexdigest(),
         "standalone": True,
         "runtime_engine": "native-bifrost-only",
@@ -1320,11 +1320,11 @@ def build() -> dict[str, str]:
         "create_transaction_rollback": True,
         "existing_system_missing_graph_policy": "explicit-rebuild-only",
         "final_and_bake_status": "not-exposed-until-native-final-contract",
-        "native_core_api": "0.10.9-settled-proposal-index-contract",
+        "native_core_api": "0.10.9-shape-curves-contract",
         "minimum_native_pack": "0.10.9",
         "native_payload_schema": "bifrost-scales/native-payload/10",
         "operator_contract": "bifrost-scales/operator-contract/20",
-        "native_behavior_contract": "bifrost-scales/native-core/0.10.9-settled-proposal-index-1",
+        "native_behavior_contract": "bifrost-scales/native-core/0.10.9-vector-surface-6",
         "native_profile_schema": "bifrost-scales/native-profile/11",
         "cell_pair_gap_feasibility": "owner-preserving-local-center-distance-cap",
         "cell_surface_follow": "cached-midpoint-quadratic-plus-selective-exact-shape-projection",
@@ -1371,7 +1371,7 @@ def build() -> dict[str, str]:
         "open_boundary_density_spacing": "inverse-sqrt-local-density",
         "static_graph": "Graphs::BifrostScales::native_scales_v4",
         "static_graph_revision": 4,
-        "graph_host_contract": "bifrost-scales/native-graph/4-dgmesh-1",
+        "graph_host_contract": "bifrost-scales/native-graph/4-dgmesh-2-uv",
         "native_mesh_binding": "maya-dg-worldMesh",
         "normal_updates": ["payload_json", "parent_visibility"],
         "runtime_topology_mutation": False,

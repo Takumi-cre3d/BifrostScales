@@ -2,11 +2,30 @@ from types import SimpleNamespace
 
 import pytest
 
-from bifrost_scales.backend import NativeMayaBackend
+from bifrost_scales.backend import NativeMayaBackend, _next_interactive_budget
 from bifrost_scales.guides import GuideSet
 from bifrost_scales.native_backend import NativeGraphEvaluation
 from bifrost_scales.scene import SystemBinding
 from bifrost_scales.settings import ScaleSettings
+
+
+def test_auto_preview_budget_changes_one_step_for_the_next_interaction_only():
+    settings = ScaleSettings(target_count=1000, interactive_budget=128)
+
+    assert _next_interactive_budget(settings, "interactive", 121.0) == 64
+    assert _next_interactive_budget(settings, "interactive", 59.0) == 256
+    assert _next_interactive_budget(settings, "interactive", 80.0) == 128
+    assert _next_interactive_budget(settings, "settled", 500.0) == 128
+    assert _next_interactive_budget(
+        ScaleSettings(target_count=100, interactive_budget=128),
+        "interactive",
+        10.0,
+    ) == 100
+    assert _next_interactive_budget(
+        ScaleSettings(target_count=1000, interactive_budget=8),
+        "interactive",
+        500.0,
+    ) == 8
 
 
 class FakeScene:
@@ -16,6 +35,7 @@ class FakeScene:
         self.deleted = []
         self.written = []
         self.stats = []
+        self.guide_reads = 0
         self._binding = None
 
     def create_system(self, target_mesh, settings):
@@ -41,6 +61,7 @@ class FakeScene:
 
     def read_guides(self, settings_node):
         assert settings_node == "settings1"
+        self.guide_reads += 1
         return GuideSet()
 
     def guide_management_fingerprint(self, settings_node):
@@ -152,6 +173,36 @@ def test_create_system_builds_graph_and_completes_first_native_preview():
     assert report.face_count == 576
     assert report.mesh_update == "native-payload"
     assert scene.stats == [("preview1", 64, 640, 576)]
+
+
+def test_create_system_loads_bifrost_plugin_before_readiness_probe():
+    scene = FakeScene()
+    native = FakeNative(ready=False)
+    loaded = []
+
+    def load_plugin(name, quiet):
+        loaded.append((name, quiet))
+        native.ready = True
+
+    scene.cmds.loadPlugin = load_plugin
+    backend = backend_with(scene, native)
+
+    backend.create_system("targetShape", ScaleSettings())
+
+    assert loaded == [("bifrostGraph", True)]
+
+
+def test_repeated_parameter_previews_reuse_cached_guides():
+    scene = FakeScene()
+    backend = backend_with(scene, FakeNative())
+    settings = ScaleSettings(target_count=64, settled_budget=64)
+    backend.create_system_with_preview("targetShape", settings, mode="settled")
+
+    backend.apply(
+        backend._request_for_settings(settings, mode="interactive", revision=2)
+    )
+
+    assert scene.guide_reads == 1
 
 
 def test_create_system_rolls_back_scene_when_graph_creation_fails():

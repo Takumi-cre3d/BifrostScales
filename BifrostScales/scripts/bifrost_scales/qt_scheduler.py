@@ -39,16 +39,23 @@ class QtPreviewScheduler(QtCore.QObject):
 
     def begin_interaction(self) -> None:
         self.core.begin_interaction()
-        self.status_changed.emit("Interactive")
+        self.status_changed.emit("Editing")
         self._arm()
 
     def end_interaction(self) -> None:
         self.core.end_interaction()
-        self.status_changed.emit("Refining")
+        self.status_changed.emit(
+            "Settled pending" if self.core.status.pending else "Settled current"
+        )
         self._arm()
 
     def queue_change(self, category: ChangeCategory, values: Mapping[str, Any]) -> int:
         revision = self.core.queue_change(category, values)
+        self.status_changed.emit(
+            "Interactive pending; Settled pending"
+            if self.core.status.dragging
+            else "Settled pending"
+        )
         self._arm()
         return revision
 
@@ -59,7 +66,7 @@ class QtPreviewScheduler(QtCore.QObject):
         immediate: bool = False,
     ) -> int:
         revision = self.core.request_settled(category, values, immediate=immediate)
-        self.status_changed.emit("Refining")
+        self.status_changed.emit("Settled pending")
         self._arm()
         return revision
 
@@ -91,7 +98,9 @@ class QtPreviewScheduler(QtCore.QObject):
             return
         self.request_started.emit(request.revision, request.mode.value)
         self.status_changed.emit(
-            "Interactive" if request.mode.value == "interactive" else "Refining"
+            "Interactive evaluating; Settled pending"
+            if request.mode.value == "interactive"
+            else "Settled evaluating"
         )
         started = time.monotonic()
         try:
@@ -104,6 +113,10 @@ class QtPreviewScheduler(QtCore.QObject):
             return
         elapsed_ms = (time.monotonic() - started) * 1000.0
         self.core.complete(request.revision, True)
-        self.status_changed.emit("Up to date ({:.1f} ms)".format(elapsed_ms))
+        self.status_changed.emit(
+            "Interactive ready; Settled pending ({:.1f} ms)".format(elapsed_ms)
+            if request.mode.value == "interactive"
+            else "Settled complete ({:.1f} ms)".format(elapsed_ms)
+        )
         self.request_finished.emit(request.revision, request.mode.value, report)
         self._arm()

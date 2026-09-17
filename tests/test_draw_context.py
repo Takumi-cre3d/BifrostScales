@@ -483,11 +483,15 @@ def test_failed_tool_activation_removes_the_partial_context():
 def test_live_preview_curve_is_visible_and_forced_to_refresh_during_drag():
     cmds = FakeCmds()
     backend = FakeBackend()
+    projector = FakeProjector()
+    projector.omui = SimpleNamespace(
+        M3dView=SimpleNamespace(scheduleRefreshAllViews=lambda: None)
+    )
     session = draw_context.start_draw(
         backend,
         GuideKind.FLOW_CURVE,
         cmds_module=cmds,
-        projector=FakeProjector(),
+        projector=projector,
     )
     context = session.context_name
     cmds.set_context_point(context, anchor=(10, 10, 0))
@@ -503,3 +507,4 @@ def test_live_preview_curve_is_visible_and_forced_to_refresh_during_drag():
     assert cmds.getAttr(shape + ".overrideDisplayType") == 0
     assert cmds.getAttr(shape + ".lineWidth") == 4.0
     assert cmds.refresh_count > 0
+    assert backend.adopted == []

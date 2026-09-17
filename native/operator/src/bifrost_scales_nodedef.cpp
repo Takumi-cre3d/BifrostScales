@@ -543,7 +543,7 @@ void BifrostScales::generate_scale_mesh_payload_arrays(
             std::chrono::duration<double, std::milli>(
                 Clock::now() - source_started).count();
         bifrost_scales::GenerationOptions generation_options;
-        generation_options.include_uvs = false;
+        generation_options.include_uvs = true;
         generation_options.include_colors = false;
         generation_options.include_scale_type_ids = false;
         generation_options.materialize_faces = false;

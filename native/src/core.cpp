@@ -407,6 +407,26 @@ double lerp_scalar(double left, double right, double amount) {
     return left + (right - left) * amount;
 }
 
+double sample_shape_curve(const std::vector<Vec2>& points, double position) {
+    if (points.size() < 2U) {
+        return 1.0;
+    }
+    const double x = clamp(position, 0.0, 1.0);
+    for (std::size_t index = 1U; index < points.size(); ++index) {
+        if (x <= points[index].x) {
+            const double span = points[index].x - points[index - 1U].x;
+            if (span <= 1.0e-12) {
+                return points[index].y;
+            }
+            return lerp_scalar(
+                points[index - 1U].y,
+                points[index].y,
+                (x - points[index - 1U].x) / span);
+        }
+    }
+    return points.back().y;
+}
+
 double combine_size_multipliers(
     double guide_multiplier,
     double type_multiplier) {
@@ -582,6 +602,9 @@ std::uint32_t effective_direction_relax_iterations(
 }
 
 bool uses_cells(const Settings& settings, PreviewMode mode) {
+    if (settings.normal_offset != 0.0) return true;
+    if (settings.sculpt_surface.enabled || std::any_of(settings.scale_types.begin(), settings.scale_types.end(),
+        [](const ScaleType& type) { return type.enabled && type.sculpt_surface.enabled; })) return true;
     switch (settings.cell_mode) {
         case GeometryMode::Cards:
             return false;
@@ -1096,6 +1119,7 @@ struct DirectionGuideContribution {
     double angle_degrees{0.0};
     double direction_weight{0.0};
     double cell_weight{0.0};
+    bool reverse_scale{false};
 };
 
 void prepare_direction_guide_contributions(
@@ -1134,6 +1158,7 @@ void prepare_direction_guide_contributions(
             source.angle_degrees,
             direction_weight,
             cell_weight,
+            guide.curve,
         });
     }
 }
@@ -1178,7 +1203,7 @@ DirectionSolution guided_direction_solution(
         if (direction_weight > 0.0) {
             direction_accumulated = blend_oriented_direction(
                 direction_accumulated,
-                desired,
+                contribution.reverse_scale ? mul(desired, -1.0) : desired,
                 normal,
                 direction_weight);
             direction_remaining *= 1.0 - direction_weight;
@@ -6067,6 +6092,7 @@ struct ScaleShape {
     double normal_offset{0.0};
     double forward_offset{0.0};
     Color4 color{};
+    double sculpt_strength{0.1};
 };
 
 ScaleShape shape_for(
@@ -6091,7 +6117,8 @@ ScaleShape shape_for(
     const double combined_size_multiplier = combine_size_multipliers(
         sample.size_multiplier,
         type_size_multiplier);
-    double size = settings.size * combined_size_multiplier * random_scale;
+    const double sculpt_strength = settings.size * combined_size_multiplier * random_scale;
+    double size = sculpt_strength;
     if (cell_safe) {
         size = std::min(
             size,
@@ -6138,9 +6165,10 @@ ScaleShape shape_for(
         0.0,
         0.0,
         clamp(settings.tip_offset + type.tip_offset * type_amount, -1.0, 1.0),
-        type.offset * type_amount * size + random_offset,
+        (settings.normal_offset + type.offset * type_amount) * size + random_offset,
         settings.forward_offset,
         color,
+        sculpt_strength,
     };
 }
 
@@ -6285,20 +6313,29 @@ GeneratedMesh build_mesh_impl(
             add(sample.position, mul(normal, settings.lift + shape.normal_offset)),
             mul(tangent, shape.forward_offset * shape.size));
         const auto outline = outline_for(shape);
+        const double outline_span = std::max(
+            1.0e-12,
+            outline[2][1] - outline[0][1]);
+        const auto outline_position = [&outline, outline_span](double longitudinal) {
+            return clamp((longitudinal - outline[0][1]) / outline_span, 0.0, 1.0);
+        };
         const std::uint32_t base = static_cast<std::uint32_t>(result.vertices.size());
 
         if (interactive) {
             for (const std::size_t index : {0U, 4U, 2U}) {
+                const double curve_position = outline_position(outline[index][1]);
                 result.vertices.push_back(make_point(
                     origin,
                     tangent,
                     bitangent,
                     normal,
-                    outline[index][0] * shape.width,
+                    outline[index][0] * shape.width *
+                        sample_shape_curve(settings.width_curve, curve_position),
                     outline[index][1] * shape.scale_length,
-                    shape.curvature * shape.size * outline[index][2]));
+                    shape.curvature * shape.size * outline[index][2] *
+                        sample_shape_curve(settings.profile_curve, curve_position)));
                 if (options.include_uvs) {
-                    result.uvs.push_back(outline_uvs[index]);
+                    result.uvs.push_back(index == 0U ? Vec2{1,0} : (index == 4U ? Vec2{0,0} : Vec2{.5,1}));
                 }
                 if (options.include_colors) {
                     result.colors.push_back(shape.color);
@@ -6322,30 +6359,37 @@ GeneratedMesh build_mesh_impl(
 
         for (std::size_t index = 0; index < outline.size(); ++index) {
             const auto& value = outline[index];
+            const double curve_position = outline_position(value[1]);
             result.vertices.push_back(make_point(
                 origin,
                 tangent,
                 bitangent,
                 normal,
-                value[0] * shape.width,
+                value[0] * shape.width *
+                    sample_shape_curve(settings.width_curve, curve_position),
                 value[1] * shape.scale_length,
-                shape.curvature * shape.size * value[2]));
+                shape.curvature * shape.size * value[2] *
+                    sample_shape_curve(settings.profile_curve, curve_position)));
             if (options.include_uvs) {
-                result.uvs.push_back(outline_uvs[index]);
+                result.uvs.push_back({1.0-outline_uvs[index].x, outline_uvs[index].y});
             }
             if (options.include_colors) {
                 result.colors.push_back(shape.color);
             }
         }
+        const double center_longitudinal = 0.12 + shape.inset * 0.06;
         result.vertices.push_back(make_point(
             origin,
             tangent,
             bitangent,
             normal,
             0.0,
-            (0.12 + shape.inset * 0.06) * shape.scale_length,
+            center_longitudinal * shape.scale_length,
             shape.curvature * shape.size *
-                (0.28 + 0.10 * shape.roundness)));
+                (0.28 + 0.10 * shape.roundness) *
+                sample_shape_curve(
+                    settings.profile_curve,
+                    outline_position(center_longitudinal))));
         if (options.include_uvs) {
             result.uvs.push_back({0.50, 0.42});
         }
@@ -6641,6 +6685,162 @@ SurfaceFollowResult follow_cell_surface(
     return {add(candidate, sub(curved, linear)), followed_normal};
 }
 
+Vec3 sculpt_displacement(const SculptSurface& surface, double u, double v) {
+    if (surface.pinned_boundary && std::min({u,v,1-u,1-v}) <= 0.0) return {};
+    Vec3 value{};
+    const auto n = surface.resolution;
+    if (surface.deltas.size() == (n + 1U) * (n + 1U)) {
+        const double x = clamp(u, 0.0, 1.0) * n;
+        const double y = clamp(v, 0.0, 1.0) * n;
+        const auto i = std::min(n - 1U, static_cast<std::uint32_t>(x));
+        const auto j = std::min(n - 1U, static_cast<std::uint32_t>(y));
+        const double a = x - i, b = y - j;
+        value = add(
+            mul(add(mul(surface.deltas[j*(n+1U)+i], 1-a), mul(surface.deltas[j*(n+1U)+i+1U], a)), 1-b),
+            mul(add(mul(surface.deltas[(j+1U)*(n+1U)+i], 1-a), mul(surface.deltas[(j+1U)*(n+1U)+i+1U], a)), b));
+    }
+    value.z += sample_shape_curve(surface.u_curve, u) + sample_shape_curve(surface.v_curve, v);
+    if (surface.full_surface) return value;
+    const double t = std::min(1.0, 8.0 * std::min({u, v, 1-u, 1-v}));
+    return mul(value, t*t*(3-2*t));
+}
+
+void append_sculpt_grid(
+    GeneratedMesh& result, std::uint32_t final_ring, std::uint32_t ring_size,
+    const Vec3& center, const Vec3& tangent, const Vec3& bitangent, const Vec3& normal,
+    const ScaleShape& shape, const SculptSurface& surface, std::uint32_t resolution,
+    double strength, const GenerationOptions& options,
+    const std::vector<Vec3>* full_boundary = nullptr) {
+    const auto n = std::clamp(resolution, 4U, 32U);
+    const auto base = static_cast<std::uint32_t>(result.vertices.size());
+    std::vector<std::pair<double, std::uint32_t>> rim, perimeter;
+    Vec3 map_center = center;
+    if (surface.pinned_boundary) {
+        Vec3 centroid{};
+        for (std::uint32_t i=0; i<ring_size; ++i) centroid=add(centroid,result.vertices[final_ring+i]);
+        centroid=mul(centroid,1.0/ring_size);
+        map_center=add(centroid,mul(normal,dot(sub(center,centroid),normal)));
+    }
+    const auto angle_of = [&](const Vec3& point) {
+        const Vec3 d = sub(point, map_center);
+        double a = std::atan2(dot(d, tangent), dot(d, bitangent));
+        return a < 0.0 ? a + 2*kPi : a;
+    };
+    const auto rim_point = [&](std::uint32_t index) -> const Vec3& {
+        return full_boundary ? (*full_boundary)[index] : result.vertices[index];
+    };
+    double min_x=0., max_x=0., min_y=0., max_y=0.;
+    for (std::uint32_t i=0; i<ring_size; ++i) {
+        const auto index = full_boundary ? i : final_ring+i;
+        rim.push_back({angle_of(rim_point(index)), index});
+        const Vec3 d=sub(rim_point(index),map_center);
+        const double x=dot(d,bitangent), y=dot(d,tangent);
+        min_x=std::min(min_x,x); max_x=std::max(max_x,x);
+        min_y=std::min(min_y,y); max_y=std::max(max_y,y);
+    }
+    const double height_scale=std::sqrt((max_x-min_x)*(max_y-min_y))*shape.sculpt_strength;
+    std::sort(rim.begin(), rim.end());
+    const auto boundary_at = [&](double angle) {
+        std::size_t right = 0;
+        while (right < rim.size() && rim[right].first <= angle) ++right;
+        const auto& r = rim[right % rim.size()];
+        const auto& l = rim[(right + rim.size() - 1U) % rim.size()];
+        if (surface.pinned_boundary) {
+            const Vec3 a=sub(rim_point(l.second),map_center);
+            const Vec3 e=sub(rim_point(r.second),rim_point(l.second));
+            const double ax=dot(a,bitangent), ay=dot(a,tangent);
+            const double ex=dot(e,bitangent), ey=dot(e,tangent);
+            const double dx=std::cos(angle), dy=std::sin(angle);
+            const double denominator=dx*ey-dy*ex;
+            if (std::abs(denominator)>1e-12) {
+                const double t=clamp((ax*dy-ay*dx)/denominator,0.0,1.0);
+                return add(rim_point(l.second),mul(e,t));
+            }
+        }
+        double left_angle=l.first, right_angle=r.first;
+        if (right==0U) left_angle -= 2*kPi;
+        if (right==rim.size()) right_angle += 2*kPi;
+        const double t = clamp((angle-left_angle)/std::max(1e-12, right_angle-left_angle), 0.0, 1.0);
+        return add(mul(rim_point(l.second), 1-t), mul(rim_point(r.second), t));
+    };
+    std::vector<Vec3> rest;
+    rest.reserve((n+1U)*(n+1U));
+    for (std::uint32_t j=0; j<=n; ++j) {
+        for (std::uint32_t i=0; i<=n; ++i) {
+            const double u=double(i)/n, v=double(j)/n;
+            const double x=2*u-1, y=2*v-1;
+            const double disk_x=surface.pinned_boundary ? x*std::sqrt(1.0-.5*y*y) : x;
+            const double disk_y=surface.pinned_boundary ? y*std::sqrt(1.0-.5*x*x) : y;
+            double angle=std::atan2(disk_y,disk_x);
+            if (angle<0) angle += 2*kPi;
+            const double radius=(full_boundary ? 1.0 : (surface.pinned_boundary ? .97 : .85)) *
+                (surface.pinned_boundary ? std::hypot(disk_x,disk_y) : std::max(std::abs(x),std::abs(y)));
+            const Vec3 point=add(map_center,mul(sub(boundary_at(angle),map_center),radius));
+            rest.push_back(point);
+            const Vec3 edit=mul(sculpt_displacement(surface,u,v),strength);
+            Vec3 delta=mul(edit,shape.size);
+            if (surface.pinned_boundary) {
+                // The editor disk is fitted to the cell, so fit planar edits
+                // through that same map. Extrapolate outside it for overhangs.
+                // Unit-diameter editor heights follow the cell's width/length
+                // scale, without the legacy interior-ring spacing cap.
+                delta.z=edit.z*height_scale;
+                if (edit.x != 0.0 || edit.y != 0.0) {
+                    const double edited_x=disk_x+2.0*edit.x;
+                    const double edited_y=disk_y+2.0*edit.y;
+                    double edited_angle=std::atan2(edited_y,edited_x);
+                    if (edited_angle<0.0) edited_angle+=2*kPi;
+                    const Vec3 edited=add(map_center,mul(
+                        sub(boundary_at(edited_angle),map_center),
+                        .97*std::hypot(edited_x,edited_y)));
+                    const Vec3 offset=sub(edited,point);
+                    delta.x=dot(offset,bitangent);
+                    delta.y=dot(offset,tangent);
+                }
+                const double t=std::min(1.0, 8.0*std::min({u,v,1-u,1-v}));
+                delta.z += shape.normal_offset*t*t*(3.0-2.0*t);
+            }
+            result.vertices.push_back(add(point,add(add(mul(bitangent,delta.x),mul(tangent,delta.y)),mul(normal,delta.z))));
+            if (options.include_uvs) result.uvs.push_back({dot(point,bitangent), dot(point,tangent)});
+            if (options.include_colors) result.colors.push_back(shape.color);
+            if (i==0 || j==0 || i==n || j==n) perimeter.push_back({angle,base+j*(n+1U)+i});
+        }
+    }
+    const auto rest_point = [&](std::uint32_t index) { return index<base ? result.vertices[index] : rest[index-base]; };
+    const auto face = [&](std::vector<std::uint32_t> indices) {
+        if (dot(cross(sub(rest_point(indices[1]),rest_point(indices[0])),sub(rest_point(indices[2]),rest_point(indices[0]))),normal)<0)
+            std::reverse(indices.begin(),indices.end());
+        append_face(result,indices.data(),indices.size(),options);
+    };
+    for (std::uint32_t j=0;j<n;++j) for (std::uint32_t i=0;i<n;++i) {
+        const auto a=base+j*(n+1U)+i;
+        const auto b=a+1U, c=a+n+2U, d=a+n+1U;
+        if (surface.pinned_boundary) {
+            const auto area = [&](std::uint32_t p, std::uint32_t q, std::uint32_t r) {
+                return dot(cross(sub(rest_point(q),rest_point(p)),sub(rest_point(r),rest_point(p))),normal);
+            };
+            const auto score = [](double x, double y) {
+                return (x*y>0 ? 1.0 : -1.0)*std::min(std::abs(x),std::abs(y));
+            };
+            if (score(area(a,b,c),area(a,c,d)) >= score(area(a,b,d),area(b,c,d))) {
+                face({a,b,c}); face({a,c,d});
+            } else {
+                face({a,b,d}); face({b,c,d});
+            }
+        } else face({a,b,c,d});
+    }
+    if (full_boundary) return;
+    std::sort(perimeter.begin(),perimeter.end());
+    std::size_t i=0,j=0;
+    while (i<rim.size() || j<perimeter.size()) {
+        const auto outer=rim[i%rim.size()].second, inner=perimeter[j%perimeter.size()].second;
+        const double next_outer=i<rim.size() ? rim[(i+1U)%rim.size()].first+(i+1U==rim.size()?2*kPi:0) : std::numeric_limits<double>::infinity();
+        const double next_inner=j<perimeter.size() ? perimeter[(j+1U)%perimeter.size()].first+(j+1U==perimeter.size()?2*kPi:0) : std::numeric_limits<double>::infinity();
+        if (next_outer<=next_inner) { face({outer,rim[(i+1U)%rim.size()].second,inner}); ++i; }
+        else { face({outer,perimeter[(j+1U)%perimeter.size()].second,inner}); ++j; }
+    }
+}
+
 GeneratedMesh build_cell_mesh_range(
     const std::vector<OrientedSample>& oriented_samples,
     const std::vector<CellData>& cells,
@@ -6651,50 +6851,62 @@ GeneratedMesh build_cell_mesh_range(
     std::uint32_t projection_rings,
     std::size_t begin_index,
     std::size_t end_index,
-    const std::vector<std::uint32_t>& global_scale_indices) {
-    GeneratedMesh result;
+    const std::vector<std::uint32_t>& global_scale_indices,
+    std::uint32_t sculpt_resolution) {
+    GeneratedMesh output;
     const std::size_t available_count = std::min(
         oriented_samples.size(),
         cells.size());
     begin_index = std::min(begin_index, available_count);
     end_index = std::min(std::max(end_index, begin_index), available_count);
     if (begin_index == end_index) {
-        return result;
+        return output;
     }
 
-    const std::uint32_t divisions = std::clamp<std::uint32_t>(
+    const std::uint32_t reserve_divisions = std::clamp<std::uint32_t>(
         settings.cell_shape_divisions,
         1U,
         6U);
     std::size_t estimated_vertices = 0U;
     std::size_t estimated_faces = 0U;
+    const bool has_sculpt = settings.sculpt_surface.enabled || std::any_of(
+        settings.scale_types.begin(), settings.scale_types.end(),
+        [](const ScaleType& type) { return type.enabled && type.sculpt_surface.enabled; });
+    const bool has_triangles = settings.sculpt_surface.pinned_boundary || std::any_of(
+        settings.scale_types.begin(), settings.scale_types.end(),
+        [](const ScaleType& type) { return type.enabled && type.sculpt_surface.pinned_boundary; });
     for (std::size_t index = begin_index; index < end_index; ++index) {
         const std::size_t ring_size = cells[index].boundary.size();
         if (ring_size < 3U) {
             continue;
         }
-        estimated_vertices += ring_size * (static_cast<std::size_t>(divisions) + 1U) + 1U;
-        estimated_faces += ring_size * static_cast<std::size_t>(divisions) + ring_size;
+        estimated_vertices += ring_size * (static_cast<std::size_t>(reserve_divisions) + 1U) + 1U;
+        estimated_faces += ring_size * static_cast<std::size_t>(reserve_divisions) + ring_size;
+        if (has_sculpt) {
+            const auto n = std::clamp<std::uint32_t>(sculpt_resolution, 4U, 32U);
+            estimated_vertices += (n + 1U) * (n + 1U);
+            estimated_faces += (has_triangles ? 2U : 1U) * n * n + 4U * n;
+        }
     }
-    result.vertices.reserve(estimated_vertices);
+    output.vertices.reserve(estimated_vertices);
     initialize_topology(
-        result,
+        output,
         options,
         estimated_faces,
         estimated_faces * 4U);
     if (options.include_uvs) {
-        result.uvs.reserve(estimated_vertices);
+        output.uvs.reserve(estimated_vertices);
     }
     if (options.include_colors) {
-        result.colors.reserve(estimated_vertices);
+        output.colors.reserve(estimated_vertices);
     }
     if (options.include_scale_type_ids) {
-        result.scale_type_ids.reserve(end_index - begin_index);
+        output.scale_type_ids.reserve(end_index - begin_index);
     }
     if (options.include_cell_ids) {
-        result.cell_ids.reserve(end_index - begin_index);
+        output.cell_ids.reserve(end_index - begin_index);
     }
-    result.cell_metadata.reserve(
+    output.cell_metadata.reserve(
         options.cell_metadata_indices.size() + options.resolve_cell_ids.size());
     const double growth = clamp(settings.cell_growth, 0.0, 1.0);
 
@@ -6721,6 +6933,16 @@ GeneratedMesh build_cell_mesh_range(
         const Vec3 tangent = normalize(oriented.tangent, orthonormal_tangent(normal));
         const Vec3 bitangent = normalize(cross(normal, tangent));
         const ScaleShape shape = shape_for(sample, settings, guides, true);
+        const auto uv_start = output.uvs.size();
+        const auto selected = select_scale_type(sample, settings, guides);
+        const SculptSurface& surface = selected.value->sculpt_surface.enabled
+            ? selected.value->sculpt_surface : settings.sculpt_surface;
+        const double sculpt_strength = selected.value->sculpt_surface.enabled ? selected.local_amount : 1.0;
+        // Reuse the established outline deformation without emitting Growth rings.
+        GeneratedMesh outline_mesh;
+        GeneratedMesh& result = surface.full_surface ? outline_mesh : output;
+        const std::uint32_t divisions = surface.full_surface ? 1U
+            : std::clamp<std::uint32_t>(settings.cell_shape_divisions, 1U, 6U);
 
         // The Cell stage owns the exact global Gap contract.  Preserve the
         // outer ring verbatim so local Density/Size cannot open an additional
@@ -6736,7 +6958,7 @@ GeneratedMesh build_cell_mesh_range(
             shape.size / std::max(1.0e-8, cell.local_spacing),
             0.12,
             0.96);
-        const double growth_fill = lerp_scalar(start_fill, 1.0, growth);
+        const double growth_fill = surface.full_surface ? 1.0 : lerp_scalar(start_fill, 1.0, growth);
         std::vector<Vec3> interior_boundary;
         interior_boundary.reserve(source_boundary.size());
         for (const Vec3& point : source_boundary) {
@@ -6873,6 +7095,10 @@ GeneratedMesh build_cell_mesh_range(
                         1.0);
                     const double tip_mask = tip_coordinate * tip_coordinate *
                         (3.0 - 2.0 * tip_coordinate) * edit_weight;
+                    lateral *= lerp_scalar(
+                        1.0,
+                        sample_shape_curve(settings.width_curve, front_coordinate),
+                        edit_weight);
                     longitudinal += shape.forward_offset * shape.size * 0.30 * edit_weight;
                     longitudinal += shape.tip_offset * shape.size * 0.45 * tip_mask;
                     const double round_amount = shape.roundness * tip_mask;
@@ -6896,7 +7122,8 @@ GeneratedMesh build_cell_mesh_range(
                     const double normal_height =
                         settings.lift +
                         shape.normal_offset * edit_weight +
-                        shape.curvature * shape.size * curve_weight * edit_weight;
+                        shape.curvature * shape.size * curve_weight * edit_weight *
+                            sample_shape_curve(settings.profile_curve, front_coordinate);
                     const Vec3 surface_candidate = add(
                         add(
                             add(center, mul(bitangent, lateral)),
@@ -6922,17 +7149,7 @@ GeneratedMesh build_cell_mesh_range(
                 }
 
                 if (options.include_uvs) {
-                    const Vec3 local_uv = sub(point, center);
-                    result.uvs.push_back({
-                        clamp(
-                            0.5 + 0.48 * dot(local_uv, bitangent) / maximum_lateral,
-                            0.0,
-                            1.0),
-                        clamp(
-                            0.5 + 0.48 * dot(local_uv, tangent) / maximum_longitudinal,
-                            0.0,
-                            1.0),
-                    });
+                    result.uvs.push_back({dot(point,bitangent), dot(point,tangent)});
                 }
                 result.vertices.push_back(point);
                 if (options.include_colors) {
@@ -6951,6 +7168,10 @@ GeneratedMesh build_cell_mesh_range(
             polygon);
         center_lateral = clamped_center.x;
         center_longitudinal = clamped_center.y;
+        const double center_front_coordinate = clamp(
+            (center_longitudinal - back_extent) / longitudinal_span,
+            0.0,
+            1.0);
         const Vec3 center_candidate = add(
             add(center, mul(bitangent, center_lateral)),
             mul(tangent, center_longitudinal));
@@ -6971,18 +7192,21 @@ GeneratedMesh build_cell_mesh_range(
         const double center_height =
             settings.lift + shape.normal_offset +
             shape.curvature * shape.size *
-                (0.78 + 0.12 * shape.roundness);
+                (0.78 + 0.12 * shape.roundness) *
+                sample_shape_curve(settings.profile_curve, center_front_coordinate);
         const Vec3 center_point = add(
             followed_center.point,
             mul(followed_center.normal, center_height));
         const std::uint32_t center_index =
             static_cast<std::uint32_t>(result.vertices.size());
+        if (!surface.enabled) {
         result.vertices.push_back(center_point);
         if (options.include_uvs) {
-            result.uvs.push_back({0.5, 0.5});
+            result.uvs.push_back({dot(center_point,bitangent), dot(center_point,tangent)});
         }
         if (options.include_colors) {
             result.colors.push_back(shape.color);
+        }
         }
 
         for (std::uint32_t ring_index = 0U; ring_index < divisions; ++ring_index) {
@@ -7002,6 +7226,22 @@ GeneratedMesh build_cell_mesh_range(
             }
         }
         const std::uint32_t final_ring = ring_starts.back();
+        if (surface.pinned_boundary) {
+            const auto outer = static_cast<std::uint32_t>(output.vertices.size());
+            output.vertices.insert(output.vertices.end(), result.vertices.begin(), result.vertices.begin()+ring_size);
+            if (options.include_uvs) output.uvs.insert(output.uvs.end(), result.uvs.begin(), result.uvs.begin()+ring_size);
+            if (options.include_colors) output.colors.insert(output.colors.end(), result.colors.begin(), result.colors.begin()+ring_size);
+            append_sculpt_grid(output, outer, ring_size, sub(center_point,mul(normal,shape.normal_offset)), tangent, bitangent,
+                normal, shape, surface, sculpt_resolution, sculpt_strength, options);
+        } else if (surface.full_surface) {
+            const std::vector<Vec3> boundary(result.vertices.begin()+final_ring,
+                result.vertices.begin()+final_ring+ring_size);
+            append_sculpt_grid(output, 0U, ring_size, center_point, tangent, bitangent,
+                normal, shape, surface, sculpt_resolution, sculpt_strength, options, &boundary);
+        } else if (surface.enabled) {
+            append_sculpt_grid(result, final_ring, ring_size, center_point, tangent, bitangent,
+                normal, shape, surface, sculpt_resolution, sculpt_strength, options);
+        } else {
         for (std::uint32_t point_index = 0U; point_index < ring_size; ++point_index) {
             const std::uint32_t next_index =
                 (point_index + 1U) % ring_size;
@@ -7027,18 +7267,30 @@ GeneratedMesh build_cell_mesh_range(
                 center_face,
                 options);
         }
+        }
+        if (options.include_uvs && output.uvs.size()>uv_start) {
+            Vec2 lo=output.uvs[uv_start], hi=lo;
+            for (auto i=uv_start;i<output.uvs.size();++i) {
+                lo.x=std::min(lo.x,output.uvs[i].x); lo.y=std::min(lo.y,output.uvs[i].y);
+                hi.x=std::max(hi.x,output.uvs[i].x); hi.y=std::max(hi.y,output.uvs[i].y);
+            }
+            for (auto i=uv_start;i<output.uvs.size();++i) {
+                auto& uv=output.uvs[i];
+                uv={1.0-(uv.x-lo.x)/std::max(1e-12,hi.x-lo.x),(uv.y-lo.y)/std::max(1e-12,hi.y-lo.y)};
+            }
+        }
         if (options.include_scale_type_ids) {
-            result.scale_type_ids.push_back(shape.type_id);
+            output.scale_type_ids.push_back(shape.type_id);
         }
         append_cell_identity(
-            result,
+            output,
             sample,
             global_scale_indices[scale_index],
             cell_boundary_signature(source_boundary),
             options);
-        ++result.scale_count;
+        ++output.scale_count;
     }
-    return result;
+    return output;
 }
 
 GeneratedMesh merge_generated_mesh_chunks(
@@ -7148,7 +7400,8 @@ GeneratedMesh build_cell_mesh_impl(
     const GenerationOptions& options,
     std::uint32_t* used_workers = nullptr,
     const Mesh* surface_mesh = nullptr,
-    std::uint32_t projection_rings = 0U) {
+    std::uint32_t projection_rings = 0U,
+    PreviewMode sculpt_mode = PreviewMode::Settled) {
     if (used_workers != nullptr) {
         *used_workers = 1U;
     }
@@ -7183,7 +7436,8 @@ GeneratedMesh build_cell_mesh_impl(
             projection_rings,
             0U,
             available_count,
-            global_scale_indices);
+            global_scale_indices,
+            sculpt_mode == PreviewMode::Interactive ? settings.sculpt_interactive_resolution : settings.sculpt_settled_resolution);
     }
 
     std::vector<GeneratedMesh> chunks(worker_count);
@@ -7201,7 +7455,8 @@ GeneratedMesh build_cell_mesh_impl(
                 projection_rings,
                 begin,
                 end,
-                global_scale_indices);
+                global_scale_indices,
+                sculpt_mode == PreviewMode::Interactive ? settings.sculpt_interactive_resolution : settings.sculpt_settled_resolution);
         });
     if (used_workers != nullptr) {
         *used_workers = actual_workers;
@@ -7883,7 +8138,7 @@ GenerationResult generate(
             options,
             &profile.shape_worker_threads,
             &mesh,
-            effective_cell_projection_rings(settings, mode));
+            effective_cell_projection_rings(settings, mode), mode);
         profile.shape_ms = std::chrono::duration<double, std::milli>(
             Clock::now() - shape_started).count();
         report = std::move(cell_report);

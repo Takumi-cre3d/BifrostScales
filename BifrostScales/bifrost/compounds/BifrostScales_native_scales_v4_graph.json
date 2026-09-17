@@ -188,6 +188,10 @@
       ],
       "compoundNodes": [
         {
+          "nodeName": "set_mesh_UVs",
+          "nodeType": "Geometry::Mesh::set_mesh_UVs"
+        },
+        {
           "nodeName": "get_mesh_structure",
           "nodeType": "Geometry::Mesh::get_mesh_structure",
           "metadata": [
@@ -256,6 +260,14 @@
         },
         {
           "source": "construct_mesh.mesh",
+          "target": "set_mesh_UVs.mesh"
+        },
+        {
+          "source": "generate_scale_mesh_payload_arrays.uv",
+          "target": "set_mesh_UVs.coordinates"
+        },
+        {
+          "source": "set_mesh_UVs.out_mesh",
           "target": ".out_mesh"
         },
         {

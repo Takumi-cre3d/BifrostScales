@@ -6,6 +6,8 @@ import json
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Mapping, Sequence
 
+from .shape_curves import NEUTRAL_SHAPE_CURVE, normalize_shape_curve
+from .sculpt_surface import normalize_surface
 from .version import SCHEMA_VERSION
 
 
@@ -79,6 +81,7 @@ class ScaleTypeSettings:
     tip_offset: float = 0.0
 
     guide_id: str = ""
+    sculpt_surface: dict = field(default_factory=dict)
 
     use_custom_color: bool = False
     color_r: float = 0.34
@@ -113,12 +116,13 @@ class ScaleTypeSettings:
                 4.0,
                 defaults.curvature_multiplier,
             ),
-            offset=_clamp(values.get("offset"), -4.0, 4.0, defaults.offset),
+            offset=_clamp(values.get("offset"), -1.0e6, 1.0e6, defaults.offset),
             random_offset=_clamp(
                 values.get("random_offset"), 0.0, 1.0, defaults.random_offset
             ),
             tip_offset=_clamp(values.get("tip_offset"), -1.0, 1.0, defaults.tip_offset),
             guide_id=_safe_identifier(values.get("guide_id"), ""),
+            sculpt_surface=normalize_surface(values.get("sculpt_surface", defaults.sculpt_surface)),
             use_custom_color=_as_bool(
                 values.get("use_custom_color"), defaults.use_custom_color
             ),
@@ -174,6 +178,7 @@ class ScaleSettings:
 
     size: float = 0.1
     lift: float = 0.002
+    normal_offset: float = 0.0
     curvature: float = 0.22
     direction_degrees: float = 0.0
     direction_relax_iterations: int = 0
@@ -187,6 +192,11 @@ class ScaleSettings:
     tip_roundness: float = 0.15
     tip_offset: float = 0.0
     forward_offset: float = 0.0
+    width_curve: tuple[tuple[float, float], ...] = NEUTRAL_SHAPE_CURVE
+    profile_curve: tuple[tuple[float, float], ...] = NEUTRAL_SHAPE_CURVE
+    sculpt_surface: dict = field(default_factory=dict)
+    sculpt_interactive_resolution: int = 4
+    sculpt_settled_resolution: int = 8
 
     # Native preview uses cards while interacting and exact local cells when settled.
     cell_mode: str = "auto"
@@ -215,6 +225,19 @@ class ScaleSettings:
     color_g: float = 0.58
     color_b: float = 0.82
 
+    def __post_init__(self):
+        # Keep the payload field for the native ABI, but never accept a manual cap.
+        # ponytail: conservative topology estimate, not a memory profiler.
+        vertices = 4 if self.cell_mode == "cards" else (
+            2 * self.cell_settled_resolution *
+            (self.cell_shape_divisions + self.cell_projection_rings + 1) + 1
+        )
+        if self.sculpt_surface or any(
+                item.enabled and item.sculpt_surface for item in self.scale_types):
+            vertices += (self.sculpt_settled_resolution + 1) ** 2
+        object.__setattr__(self, "settled_budget", max(1, min(
+            self.target_count, 50000, 2000000 // max(1, vertices))))
+
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any] | None) -> "ScaleSettings":
         values = values or {}
@@ -236,8 +259,9 @@ class ScaleSettings:
                 values.get("relax_strength"), 0.0, 1.0, defaults.relax_strength
             ),
             size=_clamp(values.get("size"), 1.0e-6, 1.0e6, defaults.size),
+            normal_offset=_clamp(values.get("normal_offset"), -1.0e6, 1.0e6, defaults.normal_offset),
             lift=_clamp(values.get("lift"), -1.0e6, 1.0e6, defaults.lift),
-            curvature=_clamp(values.get("curvature"), -4.0, 4.0, defaults.curvature),
+            curvature=_clamp(values.get("curvature"), -1.0e6, 1.0e6, defaults.curvature),
             direction_degrees=float(values.get("direction_degrees", defaults.direction_degrees)),
             direction_relax_iterations=_clamp_int(
                 values.get("direction_relax_iterations"),
@@ -266,8 +290,17 @@ class ScaleSettings:
             ),
             tip_offset=_clamp(values.get("tip_offset"), -1.0, 1.0, defaults.tip_offset),
             forward_offset=_clamp(
-                values.get("forward_offset"), -2.0, 2.0, defaults.forward_offset
+                values.get("forward_offset"), -1.0e6, 1.0e6, defaults.forward_offset
             ),
+            width_curve=normalize_shape_curve(
+                values.get("width_curve"), 0.05, 4.0
+            ),
+            profile_curve=normalize_shape_curve(
+                values.get("profile_curve"), -4.0, 4.0
+            ),
+            sculpt_surface=normalize_surface(values.get("sculpt_surface")),
+            sculpt_interactive_resolution=_clamp_int(values.get("sculpt_interactive_resolution"), 4, 32, 4),
+            sculpt_settled_resolution=_clamp_int(values.get("sculpt_settled_resolution"), 4, 32, 8),
             cell_mode=_cell_mode(values.get("cell_mode"), defaults.cell_mode),
             cell_growth=_clamp(
                 values.get("cell_growth"), 0.0, 1.0, defaults.cell_growth

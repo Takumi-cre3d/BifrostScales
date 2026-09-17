@@ -172,6 +172,12 @@ class FakeCmds:
     def nodeType(self, node):
         return self.nodes[node]["type"]
 
+    def lockNode(self, node, query=False, lock=None):
+        if query:
+            return [bool(self.nodes[node].get("locked", False))]
+        self.nodes[node]["locked"] = bool(lock)
+        return [node]
+
     def addAttr(self, node, longName, attributeType=None, dataType=None):
         self.nodes[node]["attrs"][longName] = None
 

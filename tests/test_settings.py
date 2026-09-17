@@ -28,8 +28,29 @@ def test_mode_budgets_are_independent():
         settled_budget=400,
     )
     assert settings.effective_count("interactive") == 64
-    assert settings.effective_count("settled") == 400
+    assert settings.effective_count("settled") == 1000
     assert settings.effective_count("final") == 1000
+
+
+def test_automatic_settled_limit_ignores_old_manual_limit_and_scales_with_topology():
+    from dataclasses import replace
+    settings = ScaleSettings.from_mapping({"target_count": 1000, "settled_budget": 8})
+    assert settings.settled_budget == 1000
+    heavy = replace(settings, target_count=50000, sculpt_settled_resolution=32,
+                    sculpt_surface={"schema": "vector-surface/3"})
+    assert 1 < heavy.settled_budget < heavy.target_count
+    assert ScaleSettings.from_json(heavy.to_json()).settled_budget == heavy.settled_budget
+    assert replace(heavy, sculpt_settled_resolution=8).settled_budget > heavy.settled_budget
+    assert replace(heavy, cell_mode="cards").settled_budget < heavy.target_count
+
+
+def test_unbounded_shape_values_survive_save_reload():
+    settings = ScaleSettings.from_mapping({"curvature": 8, "forward_offset": -5,
+                                          "normal_offset": 6,
+                                          "scale_types": [{"offset": -6}]})
+    restored = ScaleSettings.from_json(settings.to_json())
+    assert restored.curvature == 8 and restored.forward_offset == -5
+    assert restored.normal_offset == 6 and restored.scale_types[0].offset == -6
 
 
 def test_schema_one_payload_migrates_with_native_preview_defaults():

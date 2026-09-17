@@ -8,20 +8,30 @@ from dataclasses import asdict, replace
 from typing import Any
 
 from . import draw_context
+from . import i18n
 from .backend import NativeMayaBackend
 from .diagnostics import probe_environment
 from .guides import GuideKind
-from .legacy_cleanup import remove_legacy_installations, scan_legacy_installations
 from .parameter_controls import FloatParameterControl, IntParameterControl
-from .qt_compat import QtCore, QtWidgets
+from .qt_compat import QtCore, QtGui, QtWidgets
 from .qt_scheduler import QtPreviewScheduler
 from .scheduler import ChangeCategory
 from .settings import ScaleSettings, ScaleTypeSettings
 from .version import VERSION
+from .ui_theme import STUDIO_STYLE, ui_icon, add_depth
 
 _WINDOW = None
 _GUIDE_NODE_ROLE = int(QtCore.Qt.UserRole)
 _GUIDE_ITEM_KIND_ROLE = _GUIDE_NODE_ROLE + 1
+_RETIRED_SHAPE_FIELDS = ("lift", "inset", "squash", "expand", "tip_roundness", "tip_offset", "forward_offset")
+
+
+class _GuideItemDelegate(QtWidgets.QStyledItemDelegate):
+    def createEditor(self, parent, option, index):
+        # Keep checkbox events enabled; only names get a text editor.
+        if index.column() == 0:
+            return super().createEditor(parent, option, index)
+        return None
 
 
 class _GuideTreeWidget(QtWidgets.QTreeWidget):
@@ -34,6 +44,10 @@ class _GuideTreeWidget(QtWidgets.QTreeWidget):
 
     dropCompleted = QtCore.Signal()
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setItemDelegate(_GuideItemDelegate(self))
+
     def dropEvent(self, event) -> None:  # noqa: N802 - Qt virtual name
         super().dropEvent(event)
         self.dropCompleted.emit()
@@ -44,7 +58,7 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         super().__init__(parent)
         self.setObjectName("BifrostScalesStandaloneWindow")
         self.setWindowTitle("Bifrost Scales {}".format(VERSION))
-        self.resize(780, 900)
+        self.resize(760, 900)
         self.backend = NativeMayaBackend()
         self.scheduler = QtPreviewScheduler(self.backend, parent=self)
         self._inactivity = QtCore.QTimer(self)
@@ -53,6 +67,10 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         self._inactivity.timeout.connect(self._finish_interaction)
         self._updating_widgets = False
         self._scale_types = list(ScaleSettings().scale_types)
+        self._sculpt_surface = {}
+        self._legacy_curves = {"width_curve": ScaleSettings().width_curve, "profile_curve": ScaleSettings().profile_curve}
+        self._legacy_cell_shape = {"cell_growth": 0.85, "cell_shape_divisions": 2}
+        self._retained_shape_values = {name: getattr(ScaleSettings(), name) for name in _RETIRED_SHAPE_FIELDS}
         self._guide_nodes: list[str] = []
         self._guide_data_by_node = {}
         self._guide_group_nodes: list[str] = []
@@ -61,36 +79,74 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         self._active_draw_kind: GuideKind | None = None
         defaults = ScaleSettings()
         self._preview_color = (defaults.color_r, defaults.color_g, defaults.color_b)
+        self._pending_interactive_budget: int | None = None
+        self._pending_interactive_budget_reason = ""
         self._scene_selected_guide_item = ""
+        self._scene_selected_guide_items: tuple[str, ...] = ()
         self._syncing_guide_selection = False
         self._guide_tree_drop_pending = False
+        self._parameter_undo_open = False
         self._guide_undo_open = False
         self._guide_link_undo_sync = False
+        self._guide_callback_ids = []
+        self._scene_callback_ids = []
+        self._polling_guide_changes = False
         self._build_ui()
         self._connect_ui()
+        application = QtWidgets.QApplication.instance()
+        if application is not None:
+            application.installEventFilter(self)
         self._guide_poll = QtCore.QTimer(self)
+        self._guide_poll.setSingleShot(True)
         self._guide_poll.setInterval(180)
         self._guide_poll.timeout.connect(self._poll_guide_changes)
-        self._guide_poll.start()
         self._scene_poll = QtCore.QTimer(self)
-        self._scene_poll.setInterval(80)
+        self._scene_poll.setSingleShot(True)
+        self._scene_poll.setInterval(0)
         self._scene_poll.timeout.connect(self._poll_scene_selection_and_tool)
-        self._scene_poll.start()
+        self._watch_scene_events()
         self._refresh_systems()
+        self._change_language()
+
+    def eventFilter(self, watched, event):  # noqa: N802 - Qt API
+        if (
+            event.type() == QtCore.QEvent.KeyPress
+            and event.key() == QtCore.Qt.Key_G
+            and event.modifiers() & QtCore.Qt.ControlModifier
+            and not event.isAutoRepeat()
+            and self._group_selected_guides_from_shortcut()
+        ):
+            event.accept()
+            return True
+        return super().eventFilter(watched, event)
 
     def _build_ui(self) -> None:
+        self.setStyleSheet(STUDIO_STYLE)
         layout = QtWidgets.QVBoxLayout(self)
-        title = QtWidgets.QLabel(
-            "Native Bifrost engine / Python Reference生成機能は0.10.0で廃止されました"
-        )
-        title.setWordWrap(True)
-        layout.addWidget(title)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(8)
+        language_row = QtWidgets.QHBoxLayout()
+        brand = QtWidgets.QLabel("BIFROST SCALES")
+        brand.setObjectName("brand")
+        language_row.addWidget(brand)
+        language_row.addStretch()
+        self.language_switch = QtWidgets.QComboBox()
+        self.language_switch.addItem("日本語", "ja")
+        self.language_switch.addItem("English", "en")
+        self.language_switch.setAccessibleName("Language / 言語")
+        self.language_switch.setCurrentIndex(max(0, self.language_switch.findData(i18n.language())))
+        self.language_switch.currentIndexChanged.connect(self._change_language)
+        language_row.addWidget(self.language_switch)
+        layout.addLayout(language_row)
 
-        system_group = QtWidgets.QGroupBox("System / Target")
+        system_group = QtWidgets.QWidget()
         system_layout = QtWidgets.QGridLayout(system_group)
+        system_layout.setContentsMargins(0, 0, 0, 0)
+        system_layout.setVerticalSpacing(4)
         self.system_combo = QtWidgets.QComboBox()
         self.refresh_systems_button = QtWidgets.QPushButton("再検索")
-        self.create_system_button = QtWidgets.QPushButton("選択メッシュから新規作成（Bifrost Previewまで）")
+        self.create_system_button = QtWidgets.QPushButton("New System")
+        self.create_system_button.setToolTip("Create from Selected Mesh")
         self.set_target_button = QtWidgets.QPushButton("選択メッシュへ変更")
         self.refresh_target_button = QtWidgets.QPushButton("Target形状を再読込")
         self.target_label = QtWidgets.QLabel("Target: 未設定")
@@ -99,10 +155,19 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         system_layout.addWidget(QtWidgets.QLabel("System"), 0, 0)
         system_layout.addWidget(self.system_combo, 0, 1)
         system_layout.addWidget(self.refresh_systems_button, 0, 2)
-        system_layout.addWidget(self.create_system_button, 1, 0, 1, 2)
-        system_layout.addWidget(self.set_target_button, 1, 2)
-        system_layout.addWidget(self.refresh_target_button, 2, 0)
-        system_layout.addWidget(self.target_label, 2, 1, 1, 2)
+        system_layout.addWidget(self.create_system_button, 0, 3)
+        system_layout.addWidget(self.target_label, 1, 0, 1, 3)
+        system_layout.setColumnStretch(1, 1)
+        target_menu_button = QtWidgets.QToolButton()
+        target_menu_button.setText("Target Actions")
+        target_menu_button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        target_menu = QtWidgets.QMenu(target_menu_button)
+        for button in (self.set_target_button, self.refresh_target_button):
+            button.setParent(self)
+            button.hide()
+            target_menu.addAction(button.text(), button.click)
+        target_menu_button.setMenu(target_menu)
+        system_layout.addWidget(target_menu_button, 1, 3)
         layout.addWidget(system_group)
 
         self.tabs = QtWidgets.QTabWidget()
@@ -112,31 +177,99 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         self._build_scale_types_tab()
         self._build_preview_tab()
         self._build_maintenance_tab()
+        for index, name in enumerate(("parameters", "guides", "types", "display")):
+            self.tabs.setTabIcon(index, ui_icon(name))
+        self.tabs.setIconSize(QtCore.QSize(16, 16))
+        self.tabs.tabBar().setExpanding(False)
+        self.edit_sculpt.setIcon(ui_icon("sculpt"))
 
         action_layout = QtWidgets.QHBoxLayout()
-        self.preview_now_button = QtWidgets.QPushButton("Settled Preview")
+        self.create_mesh_button = QtWidgets.QPushButton("Create Mesh")
+        self.create_mesh_button.setIcon(ui_icon("mesh"))
+        self.create_mesh_button.setProperty("primary", True)
+        self.create_mesh_button.setToolTip("Create an independent Maya mesh from the current preview. The source system is preserved.")
+        self.create_mesh_button.clicked.connect(self._create_maya_mesh)
         self.delete_system_button = QtWidgets.QPushButton("System削除")
-        action_layout.addWidget(self.preview_now_button)
+        self.delete_system_button.setProperty("danger", True)
         action_layout.addWidget(self.delete_system_button)
+        action_layout.addStretch()
+        action_layout.addWidget(self.create_mesh_button)
+        self.maintenance_button = QtWidgets.QToolButton()
+        self.maintenance_button.setIcon(ui_icon("parameters"))
+        self.maintenance_button.setToolTip("Maintenance / メンテナンス")
+        self.maintenance_button.setAccessibleName("Maintenance / メンテナンス")
+        self.maintenance_button.clicked.connect(self._show_maintenance)
+        action_layout.addWidget(self.maintenance_button)
         layout.addLayout(action_layout)
 
-        status_group = QtWidgets.QGroupBox("Status")
+        status_group = QtWidgets.QWidget()
         status_layout = QtWidgets.QVBoxLayout(status_group)
+        status_layout.setContentsMargins(0, 0, 0, 0)
         self.status_label = QtWidgets.QLabel("Idle")
+        self.preview_limit_warning = QtWidgets.QLabel()
+        self.preview_limit_warning.setWordWrap(True)
+        self.preview_limit_warning.hide()
+        status_layout.addWidget(self.preview_limit_warning)
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(500)
         self.log.setMinimumHeight(130)
         status_layout.addWidget(self.status_label)
-        status_layout.addWidget(self.log)
+        self.maintenance_dialog.layout().addWidget(self.log)
         layout.addWidget(status_group)
+        add_depth(self)
 
     def _global_section(self, title: str, parent_layout):
         group = QtWidgets.QGroupBox(title)
         form = QtWidgets.QFormLayout(group)
+        form.setContentsMargins(0, 8, 0, 4)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(4)
+        form.setLabelAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
         form.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)
         parent_layout.addWidget(group)
         return form
+
+    def _change_language(self, *_args) -> None:
+        locale = self.language_switch.currentData()
+        i18n.set_language(locale)
+        i18n.translate_window(self, locale)
+        labels = [form.itemAt(row, QtWidgets.QFormLayout.LabelRole).widget()
+                  for form in self._global_forms for row in range(form.rowCount())
+                  if form.itemAt(row, QtWidgets.QFormLayout.LabelRole) is not None]
+        label_width = max(label.sizeHint().width() for label in labels)
+        for label in labels:
+            label.setFixedWidth(label_width)
+        # Only static choice captions; system/guide/type names are authored data.
+        for combo in (self.guide_symmetry_space, self.guide_group_symmetry_space):
+            blocked = combo.blockSignals(True)
+            try:
+                for index in range(combo.count()):
+                    combo.setItemText(index, i18n.translate(combo.itemText(index), locale))
+            finally:
+                combo.blockSignals(blocked)
+        header = self.guide_tree.headerItem()
+        for index in range(self.guide_tree.columnCount()):
+            header.setText(index, i18n.translate(header.text(index), locale))
+        self._update_preview_limit_warning()
+
+    def _update_preview_limit_warning(self) -> None:
+        # Budget estimation needs only topology metadata, not copied sculpt samples.
+        settings = ScaleSettings(
+            target_count=self.target_count.value(), cell_mode="auto",
+            cell_settled_resolution=self.cell_settled_resolution.value(),
+            cell_shape_divisions=self._legacy_cell_shape["cell_shape_divisions"],
+            cell_projection_rings=self.cell_projection_rings.value(),
+            sculpt_settled_resolution=self.sculpt_settled_resolution.value(),
+            sculpt_surface=self._sculpt_surface, scale_types=self._scale_types)
+        limited = settings.settled_budget < settings.target_count
+        self.preview_limit_warning.setVisible(limited)
+        template = (
+            "Warning: preview limited to {limit:,} of {target:,} scales to limit estimated geometry load. Reduce subdivisions to show more."
+            if i18n.language() == "en" else
+            "警告: 推定生成量が大きいため、プレビューを {target:,} 枚中 {limit:,} 枚に制限しています。分割数を下げると表示可能枚数が増えます。"
+        )
+        self.preview_limit_warning.setText(template.format(limit=settings.settled_budget, target=settings.target_count) if limited else "")
 
     def _build_global_tab(self) -> None:
         """Build one ordered Global tab for placement, cells, and base shape."""
@@ -147,306 +280,335 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
         content = QtWidgets.QWidget()
+        content.setObjectName("settingsContent")
         layout = QtWidgets.QVBoxLayout(content)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(8)
 
-        distribution = self._global_section("1. Distribution / Placement", layout)
+        self.show_advanced_parameters = QtWidgets.QCheckBox("詳細パラメータを表示")
+        self.show_advanced_parameters.setFocusPolicy(QtCore.Qt.StrongFocus)
+        self.show_advanced_parameters.setToolTip(
+            "高度な調整項目だけを表示します。この表示状態はSceneへ保存しません。"
+        )
+        layout.addWidget(self.show_advanced_parameters)
+
+        distribution = self._global_section("1. 配置", layout)
         self.target_count = IntParameterControl(1, 50000, 512)
-        distribution.addRow("Target Count", self.target_count)
+        distribution.addRow("鱗の数", self.target_count)
         self.seed = QtWidgets.QSpinBox()
         self.seed.setRange(-2147483647, 2147483647)
         self.seed.setValue(1)
         self.seed.setKeyboardTracking(True)
-        distribution.addRow("Seed", self.seed)
+        distribution.addRow("ランダムシード", self.seed)
         self.spacing_factor = FloatParameterControl(
             0.15, 2.5, 0.82, decimals=3, single_step=0.05
         )
-        distribution.addRow("Spacing", self.spacing_factor)
+        distribution.addRow("配置間隔", self.spacing_factor)
         self.relax_iterations = IntParameterControl(0, 64, 0)
-        distribution.addRow("Density Relax Iterations", self.relax_iterations)
+        distribution.addRow("配置の均し回数", self.relax_iterations)
         self.relax_strength = FloatParameterControl(
             0.0, 1.0, 0.45, decimals=3, single_step=0.05
         )
-        distribution.addRow("Density Relax Strength", self.relax_strength)
+        distribution.addRow("配置の均し強度", self.relax_strength)
+        self.reset_distribution_button = QtWidgets.QPushButton("配置を既定値へ戻す")
+        distribution.addRow(self.reset_distribution_button)
 
-        orientation = self._global_section("2. Direction / Flow", layout)
+        orientation = self._global_section("2. 向き・流れ", layout)
         self.direction = FloatParameterControl(
             -360.0, 360.0, 0.0, decimals=2, single_step=5.0, suffix=" deg"
         )
-        orientation.addRow("Global Direction", self.direction)
+        orientation.addRow("全体の向き", self.direction)
         self.random_rotation = FloatParameterControl(
             0.0, 180.0, 8.0, decimals=2, single_step=2.0, suffix=" deg"
         )
-        orientation.addRow("Random Rotation", self.random_rotation)
+        orientation.addRow("向きのランダム幅", self.random_rotation)
         self.direction_relax_iterations = IntParameterControl(0, 64, 0)
         orientation.addRow(
-            "Direction Relax Iterations", self.direction_relax_iterations
+            "向きの均し回数", self.direction_relax_iterations
         )
         self.direction_relax_strength = FloatParameterControl(
             0.0, 1.0, 0.35, decimals=3, single_step=0.05
         )
-        orientation.addRow("Direction Relax Strength", self.direction_relax_strength)
+        orientation.addRow("向きの均し強度", self.direction_relax_strength)
         orientation_note = QtWidgets.QLabel(
-            "Flow CurveのCV[0]からCV[n]への接線方向を、ウロコの向きへ使用します。"
+            "ガイドの描画方向で鱗の前後を指定します。逆向きに描くと180°反転します。"
         )
         orientation_note.setWordWrap(True)
         orientation.addRow(orientation_note)
+        self.reset_orientation_button = QtWidgets.QPushButton("向きを既定値へ戻す")
+        orientation.addRow(self.reset_orientation_button)
 
-        cells = self._global_section("3. Cell Partition / Surface", layout)
-        self.cell_mode = QtWidgets.QComboBox()
-        self.cell_mode.addItem("Auto: 操作中Card / 停止後Cell", "auto")
-        self.cell_mode.addItem("Cards only", "cards")
-        self.cell_mode.addItem("Cells while dragging", "cells")
-        cells.addRow("Preview Geometry", self.cell_mode)
-        self.cell_growth = FloatParameterControl(
-            0.0, 1.0, 0.85, decimals=3, single_step=0.05
-        )
-        cells.addRow("Growth", self.cell_growth)
+        cells = self._global_section("3. 鱗の境界・表面", layout)
         self.cell_gap = FloatParameterControl(
             0.0, 0.49, 0.06, decimals=3, single_step=0.01
         )
-        cells.addRow("Gap / Spacing", self.cell_gap)
+        cells.addRow("鱗の隙間", self.cell_gap)
         self.cell_collision_margin = FloatParameterControl(
             0.0, 0.49, 0.02, decimals=3, single_step=0.01
         )
-        cells.addRow("Collision Margin", self.cell_collision_margin)
+        cells.addRow("衝突余白", self.cell_collision_margin)
         self.cell_radius_multiplier = FloatParameterControl(
             0.35, 6.0, 1.65, decimals=3, single_step=0.05
         )
-        cells.addRow("Open Cell Radius Limit", self.cell_radius_multiplier)
+        cells.addRow("開いた境界の範囲", self.cell_radius_multiplier)
         self.cell_direction_anisotropy = FloatParameterControl(
             0.0, 1.0, 0.4, decimals=3, single_step=0.05
         )
         self.cell_direction_anisotropy.setToolTip(
             "0は従来の等方Cell、1はGuide効果内で最大2.25倍の方向性を与えます。"
         )
-        cells.addRow("Cell Direction Anisotropy", self.cell_direction_anisotropy)
-        self.cell_interactive_resolution = QtWidgets.QSpinBox()
-        self.cell_interactive_resolution.setRange(4, 16)
-        self.cell_interactive_resolution.setValue(6)
-        cells.addRow("Interactive Cell Sides", self.cell_interactive_resolution)
+        cells.addRow("流れ方向への伸び", self.cell_direction_anisotropy)
         self.cell_settled_resolution = QtWidgets.QSpinBox()
         self.cell_settled_resolution.setRange(4, 32)
         self.cell_settled_resolution.setValue(10)
-        cells.addRow("Settled Cell Sides", self.cell_settled_resolution)
-        self.cell_shape_divisions = QtWidgets.QSpinBox()
-        self.cell_shape_divisions.setRange(1, 6)
-        self.cell_shape_divisions.setValue(2)
-        cells.addRow("Interior Divisions", self.cell_shape_divisions)
+        cells.addRow("境界の分割数", self.cell_settled_resolution)
         self.cell_projection_rings = QtWidgets.QSpinBox()
         self.cell_projection_rings.setRange(0, 16)
         self.cell_projection_rings.setValue(2)
-        cells.addRow("Surface Projection Rings", self.cell_projection_rings)
+        cells.addRow("表面追従リング", self.cell_projection_rings)
         self.cell_project_to_surface = QtWidgets.QCheckBox(
             "Cell境界をTargetへ再投影"
         )
         self.cell_project_to_surface.setChecked(True)
         cells.addRow(self.cell_project_to_surface)
+        self.reset_cells_button = QtWidgets.QPushButton("境界を既定値へ戻す")
+        cells.addRow(self.reset_cells_button)
 
-        shape = self._global_section("4. Base Scale Shape / Appearance", layout)
+        shape = self._global_section("4. 鱗の基本形状", layout)
+        self.edit_sculpt = QtWidgets.QPushButton("鱗をスカルプト")
+        self.edit_sculpt.setProperty("primary", True)
+        self.edit_sculpt.clicked.connect(lambda: self._open_sculpt_editor())
+        shape.addRow(self.edit_sculpt)
         self.size = FloatParameterControl(
             0.000001,
             1000000.0,
             0.1,
             decimals=6,
-            single_step=0.01,
+            single_step=0.001,
             mapping="log",
+            slider_minimum=0.001,
+            slider_maximum=1.0,
         )
-        shape.addRow("Scale Size", self.size)
-        self.lift = QtWidgets.QDoubleSpinBox()
-        self.lift.setRange(-1000000.0, 1000000.0)
-        self.lift.setDecimals(6)
-        self.lift.setSingleStep(0.001)
-        self.lift.setValue(0.002)
-        self.lift.setKeyboardTracking(True)
-        shape.addRow("Surface Lift", self.lift)
+        shape.addRow("形状の強さ", self.size)
+        self.size.setToolTip("鱗の外周サイズではなく、反り・厚み・スカルプト変位の基準強度。")
+        self.normal_offset = FloatParameterControl(-1.0e8, 1.0e8, 0.0, decimals=3,
+            single_step=0.01, slider_minimum=-100.0, slider_maximum=100.0, suffix=" %")
+        self.normal_offset.setToolTip("内部の厚み。外周は固定。Typeの厚み補正を加算します。")
+        shape.addRow("内部の厚み", self.normal_offset)
         self.curvature = FloatParameterControl(
-            -4.0, 4.0, 0.22, decimals=3, single_step=0.05
+            -1.0e6, 1.0e6, 0.22, decimals=3, single_step=0.05,
+            slider_minimum=-4.0, slider_maximum=4.0
         )
-        shape.addRow("Curvature", self.curvature)
-        self.inset = FloatParameterControl(
-            0.0, 0.9, 0.0, decimals=3, single_step=0.05
-        )
-        shape.addRow("Inset", self.inset)
-        self.squash = FloatParameterControl(
-            -0.9, 0.9, 0.0, decimals=3, single_step=0.05
-        )
-        shape.addRow("Squash", self.squash)
-        self.expand = FloatParameterControl(
-            -0.75, 2.0, 0.0, decimals=3, single_step=0.05
-        )
-        shape.addRow("Expand", self.expand)
-        self.tip_roundness = FloatParameterControl(
-            0.0, 1.0, 0.15, decimals=3, single_step=0.05
-        )
-        shape.addRow("Tip Roundness", self.tip_roundness)
-        self.tip_offset = FloatParameterControl(
-            -1.0, 1.0, 0.0, decimals=3, single_step=0.05
-        )
-        shape.addRow("Tip Offset", self.tip_offset)
-        self.forward_offset = FloatParameterControl(
-            -2.0, 2.0, 0.0, decimals=3, single_step=0.05
-        )
-        shape.addRow("Forward Offset", self.forward_offset)
+        shape.addRow("反り", self.curvature)
+        self.sculpt_settled_resolution = QtWidgets.QSpinBox()
+        for control, value, label in (
+            (self.sculpt_settled_resolution, 8, "内側の分割数"),
+        ):
+            control.setRange(4, 32)
+            control.setValue(value)
+            control.valueChanged.connect(lambda: self._parameter_changed(ChangeCategory.SHAPE))
+            shape.addRow(label, control)
         self.random_size = FloatParameterControl(
             0.0, 0.95, 0.12, decimals=3, single_step=0.05
         )
-        shape.addRow("Random Size", self.random_size)
+        shape.addRow("形状の強さのばらつき", self.random_size)
         shape_note = QtWidgets.QLabel(
-            "各Cell固有の外周を保持し、対応するInterior Ringと中心だけをShapeパラメータで変形します。\n"
+            "外周・Gapを保持し、内部の形状と厚みを調整します。厚みは形状の強さを基準にした%表示です。\n"
             "色はScale TypesごとのVertex Colorで管理します。"
         )
         shape_note.setWordWrap(True)
         shape.addRow(shape_note)
+        self.reset_shape_button = QtWidgets.QPushButton("形状を既定値へ戻す")
+        shape.addRow(self.reset_shape_button)
+
+        for button in (
+            self.reset_distribution_button,
+            self.reset_orientation_button,
+            self.reset_cells_button,
+            self.reset_shape_button,
+        ):
+            button.setProperty("quiet", True)
+            button.setToolTip("このSectionだけを既定値へ戻します。1回のUndoで復元できます。")
+
+        for widget, tooltip in (
+            (self.target_count, "生成する鱗の目標数。既定値: 512 / 影響: 配置"),
+            (self.seed, "配置のランダム系列。既定値: 1 / 影響: 配置"),
+            (self.spacing_factor, "鱗同士の配置間隔。既定値: 0.82 / 影響: 配置"),
+            (self.relax_iterations, "配置を近傍で均す回数。既定値: 0 / 影響: 配置"),
+            (self.relax_strength, "配置を均す強さ。既定値: 0.45 / 影響: 配置"),
+            (self.direction, "全体の回転角度。既定値: 0 deg / 影響: 向き"),
+            (self.random_rotation, "鱗ごとの回転幅。既定値: 8 deg / 影響: 向き"),
+            (self.direction_relax_iterations, "向きを近傍で均す回数。既定値: 0 / 影響: 向き"),
+            (self.direction_relax_strength, "向きを均す強さ。既定値: 0.35 / 影響: 向き"),
+            (self.cell_gap, "隣接する鱗の隙間。既定値: 0.06 / 影響: 境界"),
+            (self.cell_collision_margin, "鱗同士の衝突を避ける余白。既定値: 0.02 / 影響: 境界"),
+            (self.cell_radius_multiplier, "開いた境界を探索する範囲。既定値: 1.65 / 影響: 境界"),
+            (self.cell_direction_anisotropy, "Guideの流れ方向へ境界を伸ばす量。既定値: 0.4 / 影響: 境界"),
+            (self.cell_settled_resolution, "停止後の境界分割数。既定値: 10 / 影響: 境界"),
+            (self.cell_projection_rings, "Target表面へ追従させる内側リング数。既定値: 2 / 影響: 境界"),
+            (self.cell_project_to_surface, "境界をTarget表面へ再投影します。既定値: On / 影響: 境界"),
+            (self.size, "形状の強さ。外周サイズではなく反り・厚み・スカルプト変位の基準。"),
+            (self.curvature, "RootからTipまでの反り。既定値: 0.22 / 影響: 形状"),
+            (self.random_size, "鱗ごとのサイズ幅。既定値: 0.12 / 影響: 形状"),
+        ):
+            widget.setToolTip(tooltip)
+
+        self._global_forms = (distribution, orientation, cells, shape)
+        for control in content.findChildren(FloatParameterControl) + content.findChildren(IntParameterControl):
+            control.spin.setFixedWidth(140)
+        self._advanced_parameter_rows = (
+            (distribution, self.relax_iterations),
+            (distribution, self.relax_strength),
+            (orientation, self.direction_relax_iterations),
+            (orientation, self.direction_relax_strength),
+            (cells, self.cell_collision_margin),
+            (cells, self.cell_radius_multiplier),
+            (cells, self.cell_direction_anisotropy),
+            (cells, self.cell_project_to_surface),
+        )
+        self._set_advanced_parameters_visible(False)
+        self._sync_parameter_dependencies()
 
         layout.addStretch(1)
         scroll.setWidget(content)
         tab_layout.addWidget(scroll)
-        self.tabs.addTab(tab, "Global")
+        self.tabs.addTab(tab, "Placement & Shape")
 
-    def _build_distribution_tab(self) -> None:
-        tab = QtWidgets.QWidget()
-        form = QtWidgets.QFormLayout(tab)
-        self.target_count = IntParameterControl(1, 50000, 512)
-        form.addRow("Target Count", self.target_count)
+    def _set_advanced_parameters_visible(self, visible: bool) -> None:
+        for form, field in self._advanced_parameter_rows:
+            label = form.labelForField(field)
+            if label is not None:
+                label.setVisible(bool(visible))
+            field.setVisible(bool(visible))
 
-        self.seed = QtWidgets.QSpinBox()
-        self.seed.setRange(-2147483647, 2147483647)
-        self.seed.setValue(1)
-        self.seed.setKeyboardTracking(True)
-        form.addRow("Seed", self.seed)
+    def _sync_parameter_dependencies(self, *_args) -> None:
+        density_enabled = self.relax_iterations.value() > 0
+        direction_enabled = self.direction_relax_iterations.value() > 0
+        projection_enabled = self.cell_project_to_surface.isChecked()
+        self.relax_strength.setEnabled(density_enabled)
+        self.direction_relax_strength.setEnabled(direction_enabled)
+        self.cell_projection_rings.setEnabled(projection_enabled)
+        self.relax_strength.setToolTip(
+            "配置を均す強さ。既定値: 0.45 / 影響: 配置"
+            + ("" if density_enabled else " / 均し回数が0のため無効")
+        )
+        self.direction_relax_strength.setToolTip(
+            "向きを均す強さ。既定値: 0.35 / 影響: 向き"
+            + ("" if direction_enabled else " / 均し回数が0のため無効")
+        )
+        self.cell_projection_rings.setToolTip(
+            "Target表面へ追従させる内側リング数。既定値: 2 / 影響: 境界"
+            + ("" if projection_enabled else " / 表面への再投影がOffのため無効")
+        )
 
-        self.spacing_factor = FloatParameterControl(
-            0.15,
-            2.5,
-            0.82,
-            decimals=3,
-            single_step=0.05,
-        )
-        form.addRow("Spacing", self.spacing_factor)
-
-        self.relax_iterations = IntParameterControl(0, 64, 0)
-        form.addRow("Density Relax Iterations", self.relax_iterations)
-        self.relax_strength = FloatParameterControl(
-            0.0, 1.0, 0.45, decimals=3, single_step=0.05
-        )
-        form.addRow("Density Relax Strength", self.relax_strength)
-
-        info = QtWidgets.QLabel(
-            "面積加重サンプリングと空間ハッシュで配置します。\n"
-            "Count / Seed / Spacing変更時のみ配置キャッシュを更新します。"
-        )
-        info.setWordWrap(True)
-        form.addRow(info)
-        self.tabs.addTab(tab, "Distribution")
-
-    def _build_orientation_tab(self) -> None:
-        tab = QtWidgets.QWidget()
-        form = QtWidgets.QFormLayout(tab)
-        self.direction = FloatParameterControl(
-            -360.0,
-            360.0,
-            0.0,
-            decimals=2,
-            single_step=5.0,
-            suffix=" deg",
-        )
-        form.addRow("Global Direction", self.direction)
-        self.random_rotation = FloatParameterControl(
-            0.0,
-            180.0,
-            8.0,
-            decimals=2,
-            single_step=2.0,
-            suffix=" deg",
-        )
-        form.addRow("Random Rotation", self.random_rotation)
-        self.direction_relax_iterations = IntParameterControl(0, 64, 0)
-        form.addRow("Direction Relax Iterations", self.direction_relax_iterations)
-        self.direction_relax_strength = FloatParameterControl(
-            0.0, 1.0, 0.35, decimals=3, single_step=0.05
-        )
-        form.addRow("Direction Relax Strength", self.direction_relax_strength)
-        note = QtWidgets.QLabel(
-            "Direction Curveは始点から終点への接線方向を使い、近傍平均で滑らかにします。"
-        )
-        note.setWordWrap(True)
-        form.addRow(note)
-        self.tabs.addTab(tab, "Orientation")
-
-    def _build_cells_tab(self) -> None:
-        tab = QtWidgets.QWidget()
-        form = QtWidgets.QFormLayout(tab)
-
-        self.cell_mode = QtWidgets.QComboBox()
-        self.cell_mode.addItem("Auto: \u64cd\u4f5c\u4e2dCard / \u505c\u6b62\u5f8cCell", "auto")
-        self.cell_mode.addItem("Cards only", "cards")
-        self.cell_mode.addItem("Cells while dragging", "cells")
-        form.addRow("Preview Geometry", self.cell_mode)
-
-        self.cell_growth = FloatParameterControl(
-            0.0, 1.0, 0.85, decimals=3, single_step=0.05
-        )
-        form.addRow("Growth", self.cell_growth)
-        self.cell_gap = FloatParameterControl(
-            0.0, 0.49, 0.06, decimals=3, single_step=0.01
-        )
-        form.addRow("Gap / Spacing", self.cell_gap)
-        self.cell_collision_margin = FloatParameterControl(
-            0.0, 0.49, 0.02, decimals=3, single_step=0.01
-        )
-        form.addRow("Collision Margin", self.cell_collision_margin)
-        self.cell_radius_multiplier = FloatParameterControl(
-            0.35, 6.0, 1.65, decimals=3, single_step=0.05
-        )
-        form.addRow("Open Cell Radius Limit", self.cell_radius_multiplier)
-        self.cell_direction_anisotropy = FloatParameterControl(
-            0.0, 1.0, 0.4, decimals=3, single_step=0.05
-        )
-        self.cell_direction_anisotropy.setToolTip(
-            "0は従来の等方Cell、1はGuide効果内で最大2.25倍の方向性を与えます。"
-        )
-        form.addRow("Cell Direction Anisotropy", self.cell_direction_anisotropy)
-
-        self.cell_interactive_resolution = QtWidgets.QSpinBox()
-        self.cell_interactive_resolution.setRange(4, 16)
-        self.cell_interactive_resolution.setValue(6)
-        form.addRow("Interactive Cell Sides", self.cell_interactive_resolution)
-        self.cell_settled_resolution = QtWidgets.QSpinBox()
-        self.cell_settled_resolution.setRange(4, 32)
-        self.cell_settled_resolution.setValue(10)
-        form.addRow("Settled Cell Sides", self.cell_settled_resolution)
-        self.cell_shape_divisions = QtWidgets.QSpinBox()
-        self.cell_shape_divisions.setRange(1, 6)
-        self.cell_shape_divisions.setValue(2)
-        form.addRow("Interior Divisions", self.cell_shape_divisions)
-        self.cell_projection_rings = QtWidgets.QSpinBox()
-        self.cell_projection_rings.setRange(0, 16)
-        self.cell_projection_rings.setValue(2)
-        form.addRow("Surface Projection Rings", self.cell_projection_rings)
-        self.cell_project_to_surface = QtWidgets.QCheckBox("Cell\u5883\u754c\u3092Target\u3078\u518d\u6295\u5f71")
-        self.cell_project_to_surface.setChecked(True)
-        form.addRow(self.cell_project_to_surface)
-
-        note = QtWidgets.QLabel(
-            "Direction Point / CurveはOrientationとCell Direction Anisotropyを制御します。\n"
-            "Direction CurveはStrengthが0より大きい場合だけ、DensityとPoisson間隔に従うCell中心候補列を維持し、補助のペア種点は作成しません。\n"
-            "Cell固有の外周点列は共通形状へ置き換えず、Interior Divisionsで対応する内側リングと中心を生成します。\n"
-            "ShapeパラメータはこのCell由来トポロジの内部を変形し、各Cellの不規則な境界形状を保持します。"
-        )
-        note.setWordWrap(True)
-        form.addRow(note)
-        self.tabs.addTab(tab, "Cells")
+    def _reset_global_section(self, section: str) -> None:
+        defaults = ScaleSettings()
+        sections = {
+            "distribution": (
+                "配置",
+                ChangeCategory.DISTRIBUTION,
+                (
+                    (self.target_count, defaults.target_count),
+                    (self.seed, defaults.seed),
+                    (self.spacing_factor, defaults.spacing_factor),
+                    (self.relax_iterations, defaults.relax_iterations),
+                    (self.relax_strength, defaults.relax_strength),
+                ),
+            ),
+            "orientation": (
+                "向き",
+                ChangeCategory.ORIENTATION,
+                (
+                    (self.direction, defaults.direction_degrees),
+                    (self.random_rotation, defaults.random_rotation_degrees),
+                    (
+                        self.direction_relax_iterations,
+                        defaults.direction_relax_iterations,
+                    ),
+                    (
+                        self.direction_relax_strength,
+                        defaults.direction_relax_strength,
+                    ),
+                ),
+            ),
+            "cells": (
+                "境界",
+                ChangeCategory.CELL,
+                (
+                    (self.cell_gap, defaults.cell_gap),
+                    (self.cell_collision_margin, defaults.cell_collision_margin),
+                    (self.cell_radius_multiplier, defaults.cell_radius_multiplier),
+                    (
+                        self.cell_direction_anisotropy,
+                        defaults.cell_direction_anisotropy,
+                    ),
+                    (
+                        self.cell_settled_resolution,
+                        defaults.cell_settled_resolution,
+                    ),
+                    (self.cell_projection_rings, defaults.cell_projection_rings),
+                ),
+            ),
+            "shape": (
+                "形状",
+                ChangeCategory.SHAPE,
+                (
+                    (self.size, defaults.size),
+                    (self.normal_offset, defaults.normal_offset*100.0),
+                    (self.curvature, defaults.curvature),
+                    (self.random_size, defaults.random_size),
+                ),
+            ),
+        }
+        reset = sections.get(str(section))
+        if reset is None:
+            return
+        label, category, fields = reset
+        before = self._snapshot()
+        self._updating_widgets = True
+        try:
+            for field, value in fields:
+                field.setValue(value)
+            if section == "cells":
+                self.cell_project_to_surface.setChecked(
+                    defaults.cell_project_to_surface
+                )
+        finally:
+            self._updating_widgets = False
+        self._sync_parameter_dependencies()
+        if self._snapshot() == before:
+            return
+        self._parameter_changed(category, settle=True)
+        self._append("{}を既定値へ戻しました".format(label))
 
     def _build_guides_tab(self) -> None:
         tab = QtWidgets.QWidget()
+        self.guides_tab = tab
         layout = QtWidgets.QVBoxLayout(tab)
 
+        self.guide_search = QtWidgets.QLineEdit()
+        self.guide_search.setPlaceholderText("Search Guides and Groups")
+        self.guide_search.setClearButtonEnabled(True)
+        layout.addWidget(self.guide_search)
+
         self.guide_tree = _GuideTreeWidget()
-        self.guide_tree.setHeaderHidden(True)
+        self.guide_tree.setColumnCount(5)
+        self.guide_tree.setHeaderLabels(("Name", "Info", "Visible", "Lock", "Scale Types"))
+        header = self.guide_tree.header()
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        header.setSectionResizeMode(4, QtWidgets.QHeaderView.Stretch)
+        for column in (1, 2, 3):
+            header.setSectionResizeMode(
+                column,
+                QtWidgets.QHeaderView.ResizeToContents,
+            )
+        self.guide_tree.setEditTriggers(
+            QtWidgets.QAbstractItemView.DoubleClicked
+            | QtWidgets.QAbstractItemView.EditKeyPressed
+            | QtWidgets.QAbstractItemView.SelectedClicked
+        )
         self.guide_tree.setMinimumHeight(220)
-        self.guide_tree.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.guide_tree.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.guide_tree.setDragEnabled(True)
         self.guide_tree.setAcceptDrops(True)
         self.guide_tree.setDropIndicatorShown(True)
@@ -619,8 +781,19 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         group_form.addRow("Symmetry Space", self.guide_group_symmetry_space)
         layout.addWidget(self.guide_group_editor)
 
+        self.guide_type_editor = QtWidgets.QGroupBox("Scale Type Link")
+        link_layout = QtWidgets.QHBoxLayout(self.guide_type_editor)
+        self.guide_type_combo = QtWidgets.QComboBox()
+        self.assign_guide_type_button = QtWidgets.QPushButton("Assign Here")
+        self.unassign_guide_type_button = QtWidgets.QPushButton("Unassign")
+        link_layout.addWidget(self.guide_type_combo, 1)
+        link_layout.addWidget(self.assign_guide_type_button)
+        link_layout.addWidget(self.unassign_guide_type_button)
+        layout.addWidget(self.guide_type_editor)
+
         self.guide_editor.setVisible(False)
         self.guide_group_editor.setVisible(False)
+        self.guide_type_editor.setVisible(False)
         self.delete_guide_button.setEnabled(False)
 
         note = QtWidgets.QLabel(
@@ -634,72 +807,11 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         note.setWordWrap(True)
         layout.addWidget(note)
         layout.addStretch(1)
-        self.tabs.addTab(tab, "Guides")
-
-    def _build_shape_tab(self) -> None:
-        tab = QtWidgets.QWidget()
-        form = QtWidgets.QFormLayout(tab)
-        self.size = FloatParameterControl(
-            0.000001,
-            1000000.0,
-            0.1,
-            decimals=6,
-            single_step=0.01,
-            mapping="log",
-        )
-        form.addRow("Scale Size", self.size)
-
-
-        self.lift = QtWidgets.QDoubleSpinBox()
-        self.lift.setRange(-1000000.0, 1000000.0)
-        self.lift.setDecimals(6)
-        self.lift.setSingleStep(0.001)
-        self.lift.setValue(0.002)
-        self.lift.setKeyboardTracking(True)
-        form.addRow("Surface Lift", self.lift)
-
-        self.curvature = FloatParameterControl(
-            -4.0,
-            4.0,
-            0.22,
-            decimals=3,
-            single_step=0.05,
-        )
-        form.addRow("Curvature", self.curvature)
-
-        self.inset = FloatParameterControl(0.0, 0.9, 0.0, decimals=3, single_step=0.05)
-        form.addRow("Inset", self.inset)
-        self.squash = FloatParameterControl(-0.9, 0.9, 0.0, decimals=3, single_step=0.05)
-        form.addRow("Squash", self.squash)
-        self.expand = FloatParameterControl(-0.75, 2.0, 0.0, decimals=3, single_step=0.05)
-        form.addRow("Expand", self.expand)
-        self.tip_roundness = FloatParameterControl(0.0, 1.0, 0.15, decimals=3, single_step=0.05)
-        form.addRow("Tip Roundness", self.tip_roundness)
-        self.tip_offset = FloatParameterControl(-1.0, 1.0, 0.0, decimals=3, single_step=0.05)
-        form.addRow("Tip Offset", self.tip_offset)
-        self.forward_offset = FloatParameterControl(-2.0, 2.0, 0.0, decimals=3, single_step=0.05)
-        form.addRow("Forward Offset", self.forward_offset)
-
-        self.random_size = FloatParameterControl(
-            0.0,
-            0.95,
-            0.12,
-            decimals=3,
-            single_step=0.05,
-        )
-        form.addRow("Random Size", self.random_size)
-
-        note = QtWidgets.QLabel(
-            "Cell表示でもScale Size / Inset / Squash / Expand / Tip / Forward Offsetを"
-            "HDA風の輪郭としてCell境界内へ最大フィットします。\n"
-            "Shape変更ではDistribution / Orientation / Cell Cacheを再利用し、同一解像度なら頂点位置だけを更新します。"
-        )
-        note.setWordWrap(True)
-        form.addRow(note)
-        self.tabs.addTab(tab, "Shape")
+        self.tabs.addTab(tab, "Guide Editor")
 
     def _build_scale_types_tab(self) -> None:
         tab = QtWidgets.QWidget()
+        self.scale_types_tab = tab
         outer = QtWidgets.QHBoxLayout(tab)
         left = QtWidgets.QVBoxLayout()
         self.scale_type_list = QtWidgets.QListWidget()
@@ -722,27 +834,35 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
         editor = QtWidgets.QWidget()
+        editor.setObjectName("settingsContent")
         form = QtWidgets.QFormLayout(editor)
         self.type_name = QtWidgets.QLineEdit()
         form.addRow("Name", self.type_name)
         self.type_enabled = QtWidgets.QCheckBox("Enabled")
         form.addRow(self.type_enabled)
         self.type_size = FloatParameterControl(0.05, 8.0, 1.0, decimals=3, mapping="log")
-        form.addRow("Size", self.type_size)
-        self.type_width = FloatParameterControl(0.05, 8.0, 1.0, decimals=3, mapping="log")
-        form.addRow("Width", self.type_width)
-        self.type_length = FloatParameterControl(0.05, 8.0, 1.0, decimals=3, mapping="log")
-        form.addRow("Length", self.type_length)
+        form.addRow("形状の強さ倍率", self.type_size)
         self.type_curvature = FloatParameterControl(-4.0, 4.0, 1.0, decimals=3)
         form.addRow("Curvature", self.type_curvature)
-        self.type_offset = FloatParameterControl(-4.0, 4.0, 0.0, decimals=3)
-        form.addRow("Normal Offset", self.type_offset)
+        self.edit_type_sculpt = QtWidgets.QPushButton("鱗をスカルプト")
+        self.edit_type_sculpt.setProperty("primary", True)
+        self.edit_type_sculpt.setIcon(ui_icon("sculpt"))
+        self.edit_type_sculpt.clicked.connect(lambda: self._open_sculpt_editor(per_type=True))
+        form.addRow(self.edit_type_sculpt)
+        self.type_offset = FloatParameterControl(-1.0e8, 1.0e8, 0.0, decimals=3,
+            single_step=0.01, slider_minimum=-100.0, slider_maximum=100.0, suffix=" %")
+        self.type_offset.setToolTip("Globalの内部厚みに加算する補正値。外周は固定します。")
+        form.addRow("内部の厚み補正", self.type_offset)
         self.type_random_offset = FloatParameterControl(0.0, 1.0, 0.0, decimals=3)
         form.addRow("Random Offset", self.type_random_offset)
-        self.type_tip_offset = FloatParameterControl(-1.0, 1.0, 0.0, decimals=3)
-        form.addRow("Tip Offset", self.type_tip_offset)
         self.type_guide_combo = QtWidgets.QComboBox()
         form.addRow("Guide Link", self.type_guide_combo)
+        link_actions = QtWidgets.QHBoxLayout()
+        self.filter_type_link_button = QtWidgets.QPushButton("Show Linked")
+        self.jump_type_link_button = QtWidgets.QPushButton("Jump to Link")
+        link_actions.addWidget(self.filter_type_link_button)
+        link_actions.addWidget(self.jump_type_link_button)
+        form.addRow(link_actions)
         type_note = QtWidgets.QLabel(
             "Guide／Group LinkがあるTypeは、その位置で最も強いLinkを確定採用します。"
             "複数Typeを別Guideへ割り当てても相互に抽選競合しません。"
@@ -795,12 +915,17 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         self.interactive_budget = QtWidgets.QSpinBox()
         self.interactive_budget.setRange(8, 50000)
         self.interactive_budget.setValue(128)
+        self.interactive_budget.setEnabled(False)
         form.addRow("Interactive上限", self.interactive_budget)
 
-        self.settled_budget = QtWidgets.QSpinBox()
-        self.settled_budget.setRange(8, 50000)
-        self.settled_budget.setValue(512)
-        form.addRow("Settled上限", self.settled_budget)
+        self.auto_preview_budget = QtWidgets.QCheckBox("上限を自動調整")
+        self.auto_preview_budget.setChecked(True)
+        form.addRow(self.auto_preview_budget)
+        self.auto_preview_budget_label = QtWidgets.QLabel(
+            "Auto: 128（次の操作から直近時間に合わせて調整）"
+        )
+        self.auto_preview_budget_label.setWordWrap(True)
+        form.addRow("選択理由", self.auto_preview_budget_label)
 
         self.interactive_delay = QtWidgets.QSpinBox()
         self.interactive_delay.setRange(16, 1000)
@@ -825,36 +950,25 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         self.performance_label.setWordWrap(True)
         form.addRow("Performance", self.performance_label)
 
-        note = QtWidgets.QLabel(
-            "Python Reference Preview、Python Final、Python Bakeは削除されています。\n"
-            "現在のPreview Geometryは常にStatic Bifrost GraphとNative C++ Coreから生成されます。"
-        )
-        note.setWordWrap(True)
-        form.addRow(note)
-        self.tabs.addTab(tab, "Preview")
+        self.tabs.addTab(tab, "Display & Updates")
 
     def _build_maintenance_tab(self) -> None:
-        tab = QtWidgets.QWidget()
+        tab = self.maintenance_dialog = QtWidgets.QDialog(self)
+        tab.setWindowTitle("Maintenance / メンテナンス")
+        tab.resize(640, 600)
         layout = QtWidgets.QVBoxLayout(tab)
-        note = QtWidgets.QLabel(
-            "旧ツールは新ランタイムに不要です。削除対象は既知のmodule登録、\n"
-            "旧Pythonパッケージ、旧Published Compound、検証済みWoutScales Packです。\n"
-            "シーン内のメッシュや制作データは削除しません。"
-        )
-        note.setWordWrap(True)
-        layout.addWidget(note)
         buttons = QtWidgets.QHBoxLayout()
         self.diagnostics_button = QtWidgets.QPushButton("環境診断")
-        self.scan_legacy_button = QtWidgets.QPushButton("旧ツール検索")
-        self.remove_legacy_button = QtWidgets.QPushButton("旧ツールを削除")
         buttons.addWidget(self.diagnostics_button)
-        buttons.addWidget(self.scan_legacy_button)
-        buttons.addWidget(self.remove_legacy_button)
         layout.addLayout(buttons)
         self.maintenance_text = QtWidgets.QPlainTextEdit()
         self.maintenance_text.setReadOnly(True)
         layout.addWidget(self.maintenance_text, 1)
-        self.tabs.addTab(tab, "Maintenance")
+
+    def _show_maintenance(self) -> None:
+        self.maintenance_dialog.show()
+        self.maintenance_dialog.raise_()
+        self.maintenance_dialog.activateWindow()
 
     @staticmethod
     def _color_spin(value: float):
@@ -872,9 +986,10 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         self.create_system_button.clicked.connect(self._create_system)
         self.set_target_button.clicked.connect(self._set_target)
         self.refresh_target_button.clicked.connect(self._refresh_target)
-        self.preview_now_button.clicked.connect(self._preview_now)
         self.delete_system_button.clicked.connect(self._delete_system)
         self.auto_preview.toggled.connect(self._auto_preview_toggled)
+        self.auto_preview_budget.toggled.connect(self._auto_preview_budget_toggled)
+        self.interactive_budget.valueChanged.connect(self._interactive_budget_changed)
         self.visible.toggled.connect(
             lambda *_: self._parameter_changed(ChangeCategory.DISPLAY, settle=True)
         )
@@ -886,11 +1001,31 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         self.scheduler.request_finished.connect(self._request_finished)
         self.scheduler.request_failed.connect(self._request_failed)
         self.diagnostics_button.clicked.connect(self._diagnose)
-        self.scan_legacy_button.clicked.connect(self._scan_legacy)
-        self.remove_legacy_button.clicked.connect(self._remove_legacy)
         self.native_probe_button.clicked.connect(self._probe_native_backend)
         self.native_rebuild_graph_button.clicked.connect(self._rebuild_native_graph)
         self.native_delete_graph_button.clicked.connect(self._delete_native_graph)
+        self.show_advanced_parameters.toggled.connect(
+            self._set_advanced_parameters_visible
+        )
+        self.relax_iterations.valueChanged.connect(self._sync_parameter_dependencies)
+        self.direction_relax_iterations.valueChanged.connect(
+            self._sync_parameter_dependencies
+        )
+        self.cell_project_to_surface.toggled.connect(
+            self._sync_parameter_dependencies
+        )
+        self.reset_distribution_button.clicked.connect(
+            lambda: self._reset_global_section("distribution")
+        )
+        self.reset_orientation_button.clicked.connect(
+            lambda: self._reset_global_section("orientation")
+        )
+        self.reset_cells_button.clicked.connect(
+            lambda: self._reset_global_section("cells")
+        )
+        self.reset_shape_button.clicked.connect(
+            lambda: self._reset_global_section("shape")
+        )
         for widget in (
             self.target_count,
             self.seed,
@@ -906,45 +1041,45 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             self.direction_relax_strength,
         ):
             self._connect_parameter(widget, ChangeCategory.ORIENTATION)
-        self.cell_mode.currentIndexChanged.connect(
-            lambda *_args: self._parameter_changed(ChangeCategory.CELL, settle=True)
-        )
-        self._connect_parameter(self.cell_growth, ChangeCategory.SHAPE)
         for widget in (
             self.cell_gap,
             self.cell_collision_margin,
             self.cell_radius_multiplier,
             self.cell_direction_anisotropy,
-            self.cell_interactive_resolution,
             self.cell_settled_resolution,
             self.cell_projection_rings,
         ):
             self._connect_parameter(widget, ChangeCategory.CELL)
-        self._connect_parameter(self.cell_shape_divisions, ChangeCategory.SHAPE)
         self.cell_project_to_surface.toggled.connect(
             lambda *_args: self._parameter_changed(ChangeCategory.CELL, settle=True)
         )
         for widget in (
             self.size,
-            self.lift,
+            self.normal_offset,
             self.curvature,
-            self.inset,
-            self.squash,
-            self.expand,
-            self.tip_roundness,
-            self.tip_offset,
-            self.forward_offset,
             self.random_size,
         ):
             self._connect_parameter(widget, ChangeCategory.SHAPE)
-        for widget in (self.interactive_budget, self.settled_budget):
-            self._connect_parameter(widget, ChangeCategory.DISTRIBUTION)
+        self._connect_parameter(self.interactive_budget, ChangeCategory.DISTRIBUTION)
         self.guide_tree.currentItemChanged.connect(self._guide_selection_changed)
         self.guide_tree.itemSelectionChanged.connect(
             self._guide_tree_selection_changed
         )
+        self.guide_search.textChanged.connect(self._filter_guide_tree)
+        self.guide_tree.itemChanged.connect(self._guide_tree_item_changed)
+        self.guide_tree.itemCollapsed.connect(self._guide_group_collapsed)
+        self.guide_tree.itemExpanded.connect(self._guide_group_expanded)
         self.guide_tree.model().rowsMoved.connect(self._guide_tree_rows_moved)
         self.guide_tree.dropCompleted.connect(self._guide_tree_rows_moved)
+        self.guide_type_combo.currentIndexChanged.connect(
+            self._guide_type_selection_changed
+        )
+        self.assign_guide_type_button.clicked.connect(
+            self._assign_current_scale_type
+        )
+        self.unassign_guide_type_button.clicked.connect(
+            self._unassign_current_scale_type
+        )
         self.rebuild_guides_button.clicked.connect(self._rebuild_guides)
         self.delete_guide_button.clicked.connect(self._delete_current_guide_item)
         self.create_guide_group_button.clicked.connect(self._create_guide_group)
@@ -1026,14 +1161,17 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         self.type_guide_combo.currentIndexChanged.connect(
             self._scale_type_editor_changed
         )
+        self.filter_type_link_button.clicked.connect(
+            self._filter_guides_for_scale_type
+        )
+        self.jump_type_link_button.clicked.connect(
+            self._jump_to_scale_type_link
+        )
         for widget in (
             self.type_size,
-            self.type_width,
-            self.type_length,
             self.type_curvature,
             self.type_offset,
             self.type_random_offset,
-            self.type_tip_offset,
             self.type_color_r,
             self.type_color_g,
             self.type_color_b,
@@ -1186,33 +1324,31 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             "relax_iterations": self.relax_iterations.value(),
             "relax_strength": self.relax_strength.value(),
             "size": self.size.value(),
-            "lift": self.lift.value(),
+            **self._retained_shape_values,
             "curvature": self.curvature.value(),
+            **self._legacy_curves,
+            "normal_offset": self.normal_offset.value()/100.0,
+            "sculpt_surface": self._sculpt_surface,
+            "sculpt_interactive_resolution": 4,
+            "sculpt_settled_resolution": self.sculpt_settled_resolution.value(),
             "direction_degrees": self.direction.value(),
             "direction_relax_iterations": self.direction_relax_iterations.value(),
             "direction_relax_strength": self.direction_relax_strength.value(),
             "random_size": self.random_size.value(),
             "random_rotation_degrees": self.random_rotation.value(),
-            "inset": self.inset.value(),
-            "squash": self.squash.value(),
-            "expand": self.expand.value(),
-            "tip_roundness": self.tip_roundness.value(),
-            "tip_offset": self.tip_offset.value(),
-            "forward_offset": self.forward_offset.value(),
-            "cell_mode": str(self.cell_mode.currentData() or "auto"),
-            "cell_growth": self.cell_growth.value(),
+            "cell_mode": "auto",
+            **self._legacy_cell_shape,
             "cell_gap": self.cell_gap.value(),
             "cell_collision_margin": self.cell_collision_margin.value(),
             "cell_radius_multiplier": self.cell_radius_multiplier.value(),
             "cell_direction_anisotropy": self.cell_direction_anisotropy.value(),
-            "cell_shape_divisions": self.cell_shape_divisions.value(),
-            "cell_interactive_resolution": self.cell_interactive_resolution.value(),
+            "cell_interactive_resolution": 6,
             "cell_settled_resolution": self.cell_settled_resolution.value(),
             "cell_projection_rings": self.cell_projection_rings.value(),
             "cell_project_to_surface": self.cell_project_to_surface.isChecked(),
             "scale_types": [asdict(item) for item in self._scale_types],
             "interactive_budget": self.interactive_budget.value(),
-            "settled_budget": self.settled_budget.value(),
+            "settled_budget": self.target_count.value(),
             "interactive_delay_ms": self.interactive_delay.value(),
             "settled_delay_ms": self.settled_delay.value(),
             "visible": self.visible.isChecked(),
@@ -1221,7 +1357,12 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             "color_b": self._preview_color[2],
         }
 
-    def _load_settings(self, settings: ScaleSettings) -> None:
+    def _load_settings(
+        self,
+        settings: ScaleSettings,
+        *,
+        refresh_scene: bool = True,
+    ) -> None:
         self._updating_widgets = True
         try:
             self.target_count.setValue(settings.target_count)
@@ -1230,8 +1371,12 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             self.relax_iterations.setValue(settings.relax_iterations)
             self.relax_strength.setValue(settings.relax_strength)
             self.size.setValue(settings.size)
-            self.lift.setValue(settings.lift)
+            self._retained_shape_values = {name: getattr(settings, name) for name in _RETIRED_SHAPE_FIELDS}
             self.curvature.setValue(settings.curvature)
+            self._legacy_curves = {"width_curve": settings.width_curve, "profile_curve": settings.profile_curve}
+            self.normal_offset.setValue(settings.normal_offset*100.0)
+            self._sculpt_surface = settings.sculpt_surface
+            self.sculpt_settled_resolution.setValue(settings.sculpt_settled_resolution)
             self.direction.setValue(settings.direction_degrees)
             self.direction_relax_iterations.setValue(
                 settings.direction_relax_iterations
@@ -1241,32 +1386,22 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             )
             self.random_size.setValue(settings.random_size)
             self.random_rotation.setValue(settings.random_rotation_degrees)
-            self.inset.setValue(settings.inset)
-            self.squash.setValue(settings.squash)
-            self.expand.setValue(settings.expand)
-            self.tip_roundness.setValue(settings.tip_roundness)
-            self.tip_offset.setValue(settings.tip_offset)
-            self.forward_offset.setValue(settings.forward_offset)
-            cell_mode_index = self.cell_mode.findData(settings.cell_mode)
-            self.cell_mode.setCurrentIndex(max(0, cell_mode_index))
-            self.cell_growth.setValue(settings.cell_growth)
+            self._legacy_cell_shape = {"cell_growth": settings.cell_growth,
+                                       "cell_shape_divisions": settings.cell_shape_divisions}
             self.cell_gap.setValue(settings.cell_gap)
             self.cell_collision_margin.setValue(settings.cell_collision_margin)
             self.cell_radius_multiplier.setValue(settings.cell_radius_multiplier)
             self.cell_direction_anisotropy.setValue(
                 settings.cell_direction_anisotropy
             )
-            self.cell_shape_divisions.setValue(settings.cell_shape_divisions)
-            self.cell_interactive_resolution.setValue(
-                settings.cell_interactive_resolution
-            )
             self.cell_settled_resolution.setValue(settings.cell_settled_resolution)
             self.cell_projection_rings.setValue(settings.cell_projection_rings)
             self.cell_project_to_surface.setChecked(settings.cell_project_to_surface)
             self._scale_types = list(settings.scale_types)
             self._guide_link_undo_sync = False
+            self._pending_interactive_budget = None
+            self._pending_interactive_budget_reason = ""
             self.interactive_budget.setValue(settings.interactive_budget)
-            self.settled_budget.setValue(settings.settled_budget)
             self.interactive_delay.setValue(settings.interactive_delay_ms)
             self.settled_delay.setValue(settings.settled_delay_ms)
             self.visible.setChecked(settings.visible)
@@ -1278,8 +1413,16 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             self._refresh_scale_type_list(select_row=0)
         finally:
             self._updating_widgets = False
-        self._refresh_guides()
-        self._configure_delays()
+        self._sync_parameter_dependencies()
+        self._update_preview_budget_label()
+        self._update_preview_limit_warning()
+        if refresh_scene:
+            self._refresh_guides()
+        self._inactivity.setInterval(self.settled_delay.value())
+        self.scheduler.configure_delays(
+            self.interactive_delay.value(),
+            self.settled_delay.value(),
+        )
 
     def _current_guide_item(self):
         return self.guide_tree.currentItem()
@@ -1330,6 +1473,10 @@ class BifrostScalesWindow(QtWidgets.QDialog):
 
     @staticmethod
     def _guide_label(guide) -> str:
+        return guide.name
+
+    @staticmethod
+    def _guide_info(guide) -> str:
         effects = []
         if guide.affects_density:
             effects.append("D")
@@ -1342,29 +1489,203 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         role_text = "/".join(effects) or "-"
         form = "Curve" if guide.kind.is_curve else "Point"
         active = "" if guide.enabled else " [OFF]"
-        return "{} | {} | {}{}".format(guide.name, form, role_text, active)
+        return "{} | {}{}".format(form, role_text, active)
 
-    def _guide_group_label(self, group) -> str:
+    @staticmethod
+    def _guide_group_label(group) -> str:
+        return group.name
+
+    def _guide_group_info(self, group) -> str:
         member_count = sum(
             1
             for guide in self._guide_data_by_node.values()
             if guide.group_id == group.group_id
         )
         active = "" if group.enabled else " [OFF]"
-        return "Group | {} ({}){}".format(group.name, member_count, active)
+        return "Group ({}){}".format(member_count, active)
 
     def _set_guide_item_label(self, node: str) -> None:
         item = self._guide_tree_items_by_node.get(node)
         if item is None:
             return
-        guide = self._guide_data_by_node.get(node)
-        if guide is not None:
-            item.setText(0, self._guide_label(guide))
-            return
-        group = self._guide_group_data_by_node.get(node)
-        if group is not None:
-            item.setText(0, self._guide_group_label(group))
+        blocked = self.guide_tree.blockSignals(True)
+        try:
+            guide = self._guide_data_by_node.get(node)
+            if guide is not None:
+                item.setText(0, self._guide_label(guide))
+                item.setText(1, self._guide_info(guide))
+                return
+            group = self._guide_group_data_by_node.get(node)
+            if group is not None:
+                item.setText(0, self._guide_group_label(group))
+                item.setText(1, self._guide_group_info(group))
+        finally:
+            self.guide_tree.blockSignals(blocked)
 
+    def _refresh_guide_type_links(self) -> None:
+        links = {}
+        for scale_type in self._scale_types:
+            if scale_type.guide_id:
+                links.setdefault(scale_type.guide_id, []).append(scale_type)
+        blocked = self.guide_tree.blockSignals(True)
+        try:
+            for node, item in self._guide_tree_items_by_node.items():
+                guide = self._guide_data_by_node.get(node)
+                group = self._guide_group_data_by_node.get(node)
+                if guide is None and group is None:
+                    continue
+                identifier = guide.guide_id if guide is not None else group.group_id
+                direct = links.get(identifier, [])
+                inherited = links.get(guide.group_id, []) if guide is not None else []
+                labels = [
+                    entry.name + ("" if entry.enabled else " [OFF]")
+                    for entry in direct
+                ]
+                labels.extend(
+                    entry.name + " [Group]" + ("" if entry.enabled else " [OFF]")
+                    for entry in inherited
+                )
+                label = ", ".join(labels) or "Unassigned"
+                if item.text(4) != label:
+                    item.setText(4, label)
+                item.setToolTip(4, label)
+                linked = direct + inherited
+                colors = {entry.color(self._preview_color) for entry in linked}
+                brush = QtGui.QBrush()
+                if len(colors) == 1:
+                    brush = QtGui.QBrush(QtGui.QColor.fromRgbF(*next(iter(colors))))
+                item.setData(4, QtCore.Qt.ForegroundRole, brush)
+        finally:
+            self.guide_tree.blockSignals(blocked)
+        self._filter_guide_tree(self.guide_search.text())
+        self._refresh_guide_type_combo()
+
+    def _guide_item_node_for_id(self, identifier: str) -> str:
+        for node, guide in self._guide_data_by_node.items():
+            if guide.guide_id == identifier:
+                return node
+        for node, group in self._guide_group_data_by_node.items():
+            if group.group_id == identifier:
+                return node
+        return ""
+
+    def _refresh_guide_type_combo(self) -> None:
+        target_id = self._current_guide_item_id()
+        guide = self._guide_data_by_node.get(
+            self._guide_item_node(self._current_guide_item())
+        )
+        group_id = guide.group_id if guide is not None else ""
+        previous = (
+            int(self.guide_type_combo.currentData())
+            if self.guide_type_combo.count()
+            and self.guide_type_combo.currentData() is not None
+            else self.scale_type_list.currentRow()
+        )
+        selected = previous if 0 <= previous < len(self._scale_types) else 0
+        direct = []
+        inherited = []
+        self.guide_type_combo.blockSignals(True)
+        try:
+            self.guide_type_combo.clear()
+            for row, scale_type in enumerate(self._scale_types):
+                if scale_type.guide_id == target_id and target_id:
+                    state = "Linked here"
+                    direct.append(row)
+                elif scale_type.guide_id == group_id and group_id:
+                    state = "Via group"
+                    inherited.append(row)
+                elif scale_type.guide_id:
+                    state = "Linked elsewhere"
+                else:
+                    state = "Unassigned"
+                self.guide_type_combo.addItem(
+                    "{} — {}".format(scale_type.name, state),
+                    row,
+                )
+            if direct or inherited:
+                selected = (direct or inherited)[0]
+            if self._scale_types:
+                self.guide_type_combo.setCurrentIndex(selected)
+        finally:
+            self.guide_type_combo.blockSignals(False)
+        self._guide_type_selection_changed()
+
+    def _guide_type_selection_changed(self, *_args) -> None:
+        row = self.guide_type_combo.currentData()
+        target_id = self._current_guide_item_id()
+        valid = isinstance(row, int) and 0 <= row < len(self._scale_types)
+        linked_here = valid and self._scale_types[row].guide_id == target_id
+        self.assign_guide_type_button.setEnabled(
+            bool(target_id and valid and not linked_here)
+        )
+        self.unassign_guide_type_button.setEnabled(bool(target_id and linked_here))
+
+    def _set_scale_type_link(self, row: int, identifier: str) -> bool:
+        if not (0 <= row < len(self._scale_types)):
+            return False
+        current = self._scale_types[row]
+        if current.guide_id == identifier:
+            return False
+        self._guide_link_undo_sync = False
+        self._scale_types[row] = replace(current, guide_id=identifier)
+        self._refresh_scale_type_list(select_row=row)
+        self._parameter_changed(ChangeCategory.SHAPE, settle=True)
+        return True
+
+    @QtCore.Slot()
+    def _assign_current_scale_type(self) -> None:
+        row = self.guide_type_combo.currentData()
+        target_id = self._current_guide_item_id()
+        if isinstance(row, int) and target_id and self._set_scale_type_link(
+            row, target_id
+        ):
+            self._append("Scale Type assigned: {}".format(self._scale_types[row].name))
+
+    @QtCore.Slot()
+    def _unassign_current_scale_type(self) -> None:
+        row = self.guide_type_combo.currentData()
+        target_id = self._current_guide_item_id()
+        if (
+            isinstance(row, int)
+            and target_id
+            and self._scale_types[row].guide_id == target_id
+            and self._set_scale_type_link(row, "")
+        ):
+            self._append(
+                "Scale Type unassigned: {}".format(self._scale_types[row].name)
+            )
+
+    def _set_guide_item_presentation(
+        self,
+        item,
+        kind: str,
+        visible: bool,
+        locked: bool,
+    ) -> None:
+        flags = (
+            QtCore.Qt.ItemIsEnabled
+            | QtCore.Qt.ItemIsSelectable
+            | QtCore.Qt.ItemIsUserCheckable
+        )
+        if not locked:
+            flags |= QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsDragEnabled
+            if kind == "group":
+                flags |= QtCore.Qt.ItemIsDropEnabled
+        blocked = self.guide_tree.blockSignals(True)
+        try:
+            item.setFlags(flags)
+            item.setCheckState(
+                2,
+                QtCore.Qt.Checked if visible else QtCore.Qt.Unchecked,
+            )
+            item.setCheckState(
+                3,
+                QtCore.Qt.Checked if locked else QtCore.Qt.Unchecked,
+            )
+            item.setToolTip(2, i18n.translate("Show or hide the guide; scale generation is unchanged."))
+            item.setToolTip(3, i18n.translate("Prevent deleting, renaming or reparenting the guide. This is not a transform lock."))
+        finally:
+            self.guide_tree.blockSignals(blocked)
     def _refresh_guide_group_combo(self, current_group_id: str = "") -> None:
         self.guide_group_combo.blockSignals(True)
         try:
@@ -1400,12 +1721,14 @@ class BifrostScalesWindow(QtWidgets.QDialog):
     def _refresh_guides(self, preferred: str | None = None) -> None:
         current = preferred or self._guide_item_node(self._current_guide_item())
         if self.backend.binding is None:
+            self._clear_guide_callbacks()
             self._guide_nodes = []
             self._guide_data_by_node = {}
             self._guide_group_nodes = []
             self._guide_group_data_by_node = {}
             self._guide_tree_items_by_node = {}
             self._scene_selected_guide_item = ""
+            self._scene_selected_guide_items = ()
             self.guide_tree.clear()
             self._refresh_guide_group_combo()
             self._refresh_scale_type_guide_combo()
@@ -1417,8 +1740,11 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             group_data = {
                 node: self.backend.read_guide_group(node) for node in group_nodes
             }
+            group_layout = self.backend.guide_group_layout_state()
+            presentation = self.backend.guide_item_presentation_state()
             guide_data = {node: self.backend.read_guide(node) for node in guide_nodes}
-            maya_selected = self.backend.selected_guide_item()
+            maya_selected_items = self.backend.selected_guide_items()
+            maya_selected = maya_selected_items[0] if maya_selected_items else ""
         except Exception as exc:
             self._append("Guide refresh failed: {}".format(exc))
             return
@@ -1429,12 +1755,13 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         self._guide_data_by_node = guide_data
         self._guide_tree_items_by_node = {}
         self._scene_selected_guide_item = maya_selected
+        self._scene_selected_guide_items = tuple(maya_selected_items)
 
         self._updating_widgets = True
         self.guide_tree.blockSignals(True)
         try:
             self.guide_tree.clear()
-            ungrouped_item = QtWidgets.QTreeWidgetItem(["Ungrouped"])
+            ungrouped_item = QtWidgets.QTreeWidgetItem(["Ungrouped", "", "", ""])
             ungrouped_item.setData(0, _GUIDE_ITEM_KIND_ROLE, "ungrouped")
             ungrouped_item.setData(0, _GUIDE_NODE_ROLE, "")
             ungrouped_item.setFlags(
@@ -1443,55 +1770,277 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             self.guide_tree.addTopLevelItem(ungrouped_item)
 
             group_items_by_id = {}
+            group_items_by_node = {}
             for group_node in self._guide_group_nodes:
                 group = self._guide_group_data_by_node.get(group_node)
                 if group is None:
                     continue
-                item = QtWidgets.QTreeWidgetItem([self._guide_group_label(group)])
+                item = QtWidgets.QTreeWidgetItem(
+                    [
+                        self._guide_group_label(group),
+                        self._guide_group_info(group),
+                        "",
+                        "",
+                    ]
+                )
                 item.setData(0, _GUIDE_ITEM_KIND_ROLE, "group")
                 item.setData(0, _GUIDE_NODE_ROLE, group_node)
-                item.setFlags(
-                    QtCore.Qt.ItemIsEnabled
-                    | QtCore.Qt.ItemIsSelectable
-                    | QtCore.Qt.ItemIsDragEnabled
-                    | QtCore.Qt.ItemIsDropEnabled
+                visible, locked = presentation.get(group_node, (True, False))
+                self._set_guide_item_presentation(
+                    item,
+                    "group",
+                    visible,
+                    locked,
                 )
-                self.guide_tree.addTopLevelItem(item)
-                self._guide_tree_items_by_node[group_node] = item
+                group_items_by_node[group_node] = item
                 group_items_by_id[group.group_id] = item
+                self._guide_tree_items_by_node[group_node] = item
+
+            for group_node in self._guide_group_nodes:
+                item = group_items_by_node.get(group_node)
+                if item is None:
+                    continue
+                parent_node = group_layout.get(group_node, ("", False))[0]
+                parent_item = group_items_by_node.get(parent_node)
+                if parent_item is None:
+                    self.guide_tree.addTopLevelItem(item)
+                else:
+                    parent_item.addChild(item)
 
             for guide_node in self._guide_nodes:
                 guide = self._guide_data_by_node.get(guide_node)
                 if guide is None:
                     continue
                 parent = group_items_by_id.get(guide.group_id, ungrouped_item)
-                item = QtWidgets.QTreeWidgetItem([self._guide_label(guide)])
+                item = QtWidgets.QTreeWidgetItem(
+                    [
+                        self._guide_label(guide),
+                        self._guide_info(guide),
+                        "",
+                        "",
+                    ]
+                )
                 item.setData(0, _GUIDE_ITEM_KIND_ROLE, "guide")
                 item.setData(0, _GUIDE_NODE_ROLE, guide_node)
-                item.setFlags(
-                    QtCore.Qt.ItemIsEnabled
-                    | QtCore.Qt.ItemIsSelectable
-                    | QtCore.Qt.ItemIsDragEnabled
+                visible, locked = presentation.get(guide_node, (True, False))
+                self._set_guide_item_presentation(
+                    item,
+                    "guide",
+                    visible,
+                    locked,
                 )
                 parent.addChild(item)
                 self._guide_tree_items_by_node[guide_node] = item
 
-            self.guide_tree.expandAll()
+            ungrouped_item.setExpanded(True)
+            for group_node, item in group_items_by_node.items():
+                collapsed = bool(group_layout.get(group_node, ("", False))[1])
+                item.setExpanded(not collapsed)
             selected_node = self._preferred_guide_node(current or "", maya_selected)
             selected_item = self._guide_tree_items_by_node.get(selected_node)
+            self.guide_tree.clearSelection()
             if selected_item is not None:
                 self.guide_tree.setCurrentItem(selected_item)
+                for selected in maya_selected_items:
+                    item = self._guide_tree_items_by_node.get(selected)
+                    if item is not None:
+                        item.setSelected(True)
+                selected_item.setSelected(True)
                 self.guide_tree.scrollToItem(selected_item)
             else:
-                self.guide_tree.clearSelection()
                 self.guide_tree.setCurrentItem(None)
         finally:
             self.guide_tree.blockSignals(False)
             self._updating_widgets = False
 
+        self._refresh_guide_type_links()
         self._refresh_guide_group_combo()
         self._refresh_scale_type_guide_combo()
         self._show_guide_item(self.guide_tree.currentItem(), sync_scene=False)
+        self._watch_guide_changes()
+
+    @QtCore.Slot(str)
+    def _filter_guide_tree(self, text: str) -> None:
+        query = " ".join(str(text).lower().split())
+
+        def update_visibility(item, ancestor_matches: bool = False) -> bool:
+            own_text = "{} {} {}".format(item.text(0), item.text(1), item.text(4)).lower()
+            own_matches = bool(query and query in own_text)
+            descendant_matches = False
+            for child_index in range(item.childCount()):
+                child = item.child(child_index)
+                descendant_matches = (
+                    update_visibility(
+                        child,
+                        ancestor_matches or own_matches,
+                    )
+                    or descendant_matches
+                )
+            shown = not query or ancestor_matches or own_matches or descendant_matches
+            item.setHidden(not shown)
+            return shown
+
+        for top_index in range(self.guide_tree.topLevelItemCount()):
+            update_visibility(self.guide_tree.topLevelItem(top_index))
+
+    @QtCore.Slot(object, int)
+    def _guide_tree_item_changed(self, item, column: int) -> None:
+        if self._updating_widgets or self.backend.binding is None:
+            return
+        kind = self._guide_item_kind(item)
+        node = self._guide_item_node(item)
+        if kind not in {"guide", "group"} or not node:
+            return
+
+        if column == 1:
+            self._set_guide_item_label(node)
+            return
+
+        self._updating_widgets = True
+        try:
+            if column == 0:
+                requested = item.text(0).strip()
+                if kind == "guide":
+                    previous = self._guide_data_by_node.get(node)
+                    if previous is None or requested == previous.name:
+                        self._set_guide_item_label(node)
+                        return
+                    actual = self.backend.rename_guide(node, requested)
+                    updated = self.backend.read_guide(node)
+                    self._guide_data_by_node[node] = updated
+                    if self._current_guide_node() == node:
+                        self.guide_name.setText(updated.name)
+                    self._append("Guide renamed: {}".format(actual))
+                else:
+                    previous = self._guide_group_data_by_node.get(node)
+                    if previous is None or requested == previous.name:
+                        self._set_guide_item_label(node)
+                        return
+                    self.backend.update_guide_group(node, name=requested)
+                    updated = self.backend.read_guide_group(node)
+                    self._guide_group_data_by_node[node] = updated
+                    if self._current_guide_group_node() == node:
+                        self.guide_group_name.setText(updated.name)
+                    self._append("Guide Group renamed: {}".format(updated.name))
+                self._set_guide_item_label(node)
+                self._refresh_guide_group_combo()
+                self._refresh_scale_type_guide_combo()
+                self._filter_guide_tree(self.guide_search.text())
+                return
+
+            if column == 2:
+                visible = item.checkState(2) == QtCore.Qt.Checked
+                self.backend.set_guide_item_visible(node, visible)
+            elif column == 3:
+                locked = item.checkState(3) == QtCore.Qt.Checked
+                self.backend.set_guide_item_locked(node, locked)
+            else:
+                return
+
+            visible, locked = self.backend.guide_item_presentation_state().get(
+                node,
+                (True, False),
+            )
+            self._set_guide_item_presentation(item, kind, visible, locked)
+        except Exception as exc:
+            self._set_guide_item_label(node)
+            try:
+                visible, locked = self.backend.guide_item_presentation_state().get(
+                    node,
+                    (True, False),
+                )
+                self._set_guide_item_presentation(
+                    item,
+                    kind,
+                    visible,
+                    locked,
+                )
+            except Exception:
+                pass
+            self._append("Guide Outliner update failed: {}".format(exc))
+        finally:
+            self._updating_widgets = False
+    def _set_guide_group_collapsed(self, item, collapsed: bool) -> None:
+        if self._updating_widgets or self._guide_item_kind(item) != "group":
+            return
+        node = self._guide_item_node(item)
+        if not node:
+            return
+        self._updating_widgets = True
+        try:
+            self.backend.set_guide_group_collapsed(node, collapsed)
+        except Exception as exc:
+            self._append("Guide Group collapse state failed: {}".format(exc))
+        finally:
+            self._updating_widgets = False
+
+    @QtCore.Slot(object)
+    def _guide_group_collapsed(self, item) -> None:
+        self._set_guide_group_collapsed(item, True)
+
+    @QtCore.Slot(object)
+    def _guide_group_expanded(self, item) -> None:
+        self._set_guide_group_collapsed(item, False)
+    def _clear_guide_callbacks(self) -> None:
+        if not self._guide_callback_ids:
+            return
+        try:
+            from maya.api import OpenMaya as om  # type: ignore
+
+            om.MMessage.removeCallbacks(self._guide_callback_ids)
+        except Exception:
+            pass
+        self._guide_callback_ids = []
+
+    def _watch_guide_changes(self) -> None:
+        self._clear_guide_callbacks()
+        binding = self.backend.binding
+        if binding is None:
+            return
+        try:
+            from maya.api import OpenMaya as om  # type: ignore
+
+            cmds = self.backend.scene.cmds
+            nodes = set(self._guide_nodes + self._guide_group_nodes)
+            if binding.guide_root:
+                nodes.add(binding.guide_root)
+            for node in tuple(nodes):
+                nodes.update(
+                    cmds.listRelatives(node, allDescendents=True, fullPath=True) or []
+                )
+            for node in nodes:
+                selection = om.MSelectionList()
+                selection.add(node)
+                self._guide_callback_ids.append(
+                    om.MNodeMessage.addAttributeChangedCallback(
+                        selection.getDependNode(0), self._guide_attribute_changed
+                    )
+                )
+        except Exception:
+            self._clear_guide_callbacks()
+
+    def _guide_attribute_changed(self, message, *_args) -> None:
+        from maya.api import OpenMaya as om  # type: ignore
+
+        authored_change = (
+            om.MNodeMessage.kAttributeSet
+            | om.MNodeMessage.kConnectionMade
+            | om.MNodeMessage.kConnectionBroken
+            | om.MNodeMessage.kAttributeArrayAdded
+            | om.MNodeMessage.kAttributeArrayRemoved
+            | om.MNodeMessage.kAttributeLocked
+            | om.MNodeMessage.kAttributeUnlocked
+        )
+        if message & authored_change:
+            self._guide_node_dirtied()
+
+    def _guide_node_dirtied(self, *_args) -> None:
+        if (
+            not self._polling_guide_changes
+            and not self._updating_widgets
+            and not self._guide_undo_open
+        ):
+            self._guide_poll.start()
 
     def _show_guide_item(self, item, *, sync_scene: bool) -> None:
         kind = self._guide_item_kind(item)
@@ -1503,6 +2052,7 @@ class BifrostScalesWindow(QtWidgets.QDialog):
 
         self.guide_editor.setVisible(guide is not None)
         self.guide_group_editor.setVisible(group is not None)
+        self.guide_type_editor.setVisible(guide is not None or group is not None)
         self.delete_guide_button.setEnabled(guide is not None or group is not None)
 
         self._updating_widgets = True
@@ -1595,51 +2145,89 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                 )
         finally:
             self._updating_widgets = False
+        self._refresh_guide_type_combo()
 
         if sync_scene and node and not self._syncing_guide_selection:
             try:
                 self.backend.select_guide_item(node)
                 self._scene_selected_guide_item = node
+                self._scene_selected_guide_items = (node,)
             except Exception as exc:
                 self._append("Guide selection failed: {}".format(exc))
+
+    def _selected_guide_item_nodes(self) -> list[str]:
+        current = self._guide_item_node(self.guide_tree.currentItem())
+        selected: list[str] = []
+        for item in self.guide_tree.selectedItems():
+            if self._guide_item_kind(item) not in {"guide", "group"}:
+                continue
+            node = self._guide_item_node(item)
+            if node and node not in selected:
+                selected.append(node)
+        if current in selected:
+            selected.remove(current)
+            selected.insert(0, current)
+        return selected
 
     @QtCore.Slot(object, object)
     def _guide_selection_changed(self, current, _previous) -> None:
         if self._updating_widgets:
             return
-        self._show_guide_item(
-            current,
-            sync_scene=not self._syncing_guide_selection,
-        )
+        self._show_guide_item(current, sync_scene=False)
 
     @QtCore.Slot()
     def _guide_tree_selection_changed(self) -> None:
         if self._updating_widgets:
             return
         item = self.guide_tree.currentItem()
-        if item is None:
-            self._show_guide_item(None, sync_scene=False)
+        selected = self._selected_guide_item_nodes()
+        self._show_guide_item(item if selected else None, sync_scene=False)
+        if self._syncing_guide_selection or not selected:
+            return
+        try:
+            self.backend.select_guide_items(selected)
+            self._scene_selected_guide_item = selected[0]
+            self._scene_selected_guide_items = tuple(selected)
+        except Exception as exc:
+            self._append("Guide selection failed: {}".format(exc))
 
     def _sync_guide_selection_from_maya(self) -> None:
         if self.backend.binding is None or self._updating_widgets:
             return
         try:
-            selected = self.backend.selected_guide_item()
+            selected = self.backend.selected_guide_items()
         except Exception:
             return
-        current = self._guide_item_node(self.guide_tree.currentItem())
-        if selected == current and selected == self._scene_selected_guide_item:
+        missing = [
+            node for node in selected if node not in self._guide_tree_items_by_node
+        ]
+        if missing:
+            self._refresh_guides(preferred=missing[0])
             return
-        self._scene_selected_guide_item = selected
-        item = self._guide_tree_items_by_node.get(selected)
+        current = self._selected_guide_item_nodes()
+        if (
+            set(selected) == set(current)
+            and tuple(selected) == self._scene_selected_guide_items
+        ):
+            return
+        self._scene_selected_guide_item = selected[0] if selected else ""
+        self._scene_selected_guide_items = tuple(selected)
+        items = [
+            self._guide_tree_items_by_node[node]
+            for node in selected
+            if node in self._guide_tree_items_by_node
+        ]
+        item = items[0] if items else None
         self._syncing_guide_selection = True
         self.guide_tree.blockSignals(True)
         try:
+            self.guide_tree.clearSelection()
             if item is None:
-                self.guide_tree.clearSelection()
                 self.guide_tree.setCurrentItem(None)
             else:
                 self.guide_tree.setCurrentItem(item)
+                for selected_item in items:
+                    selected_item.setSelected(True)
                 self.guide_tree.scrollToItem(item)
         finally:
             self.guide_tree.blockSignals(False)
@@ -1673,12 +2261,23 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             return
         try:
             actual = self.backend.rename_guide(node, requested)
-            self._refresh_guides(preferred=guide.guide_id)
+            updated = self.backend.read_guide(node)
+            self._guide_data_by_node[node] = updated
+            self._updating_widgets = True
+            try:
+                self.guide_name.setText(updated.name)
+                self._set_guide_item_label(node)
+            finally:
+                self._updating_widgets = False
+            self._refresh_guide_group_combo()
+            self._refresh_scale_type_guide_combo()
+            self._filter_guide_tree(self.guide_search.text())
             self._append("Guide renamed: {}".format(actual))
         except Exception as exc:
             self._updating_widgets = True
             try:
                 self.guide_name.setText(guide.name)
+                self._set_guide_item_label(node)
             finally:
                 self._updating_widgets = False
             self._append("Guide rename failed: {}".format(exc))
@@ -1707,38 +2306,46 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                 raise ValueError("Ungrouped must remain the first root item")
 
             ordered_groups: list[str] = []
+            group_parents: dict[str, str] = {}
             guides_by_group: dict[str, list[str]] = {"": []}
             seen_groups: set[str] = set()
             seen_guides: set[str] = set()
 
-            for top_index in range(self.guide_tree.topLevelItemCount()):
-                top_item = self.guide_tree.topLevelItem(top_index)
-                kind = self._guide_item_kind(top_item)
-                node = self._guide_item_node(top_item)
-                if top_index == 0:
-                    if kind != "ungrouped" or node:
-                        raise ValueError("Invalid Ungrouped item")
-                    group_key = ""
-                else:
-                    if kind != "group" or not node or node in seen_groups:
-                        raise ValueError("Guide Groups must stay at the root level")
-                    ordered_groups.append(node)
-                    seen_groups.add(node)
-                    guides_by_group[node] = []
-                    group_key = node
+            def add_guide(item, group_node: str) -> None:
+                node = self._guide_item_node(item)
+                if (
+                    self._guide_item_kind(item) != "guide"
+                    or not node
+                    or node in seen_guides
+                    or item.childCount() != 0
+                ):
+                    raise ValueError("Only Guides may be placed in a Guide container")
+                guides_by_group[group_node].append(node)
+                seen_guides.add(node)
 
-                for child_index in range(top_item.childCount()):
-                    child = top_item.child(child_index)
-                    child_node = self._guide_item_node(child)
-                    if (
-                        self._guide_item_kind(child) != "guide"
-                        or not child_node
-                        or child_node in seen_guides
-                        or child.childCount() != 0
-                    ):
-                        raise ValueError("Only Guides may be placed inside a container")
-                    guides_by_group[group_key].append(child_node)
-                    seen_guides.add(child_node)
+            def add_group(item, parent_node: str) -> None:
+                node = self._guide_item_node(item)
+                if (
+                    self._guide_item_kind(item) != "group"
+                    or not node
+                    or node in seen_groups
+                ):
+                    raise ValueError("Guide Group hierarchy is invalid")
+                seen_groups.add(node)
+                ordered_groups.append(node)
+                group_parents[node] = parent_node
+                guides_by_group[node] = []
+                for child_index in range(item.childCount()):
+                    child = item.child(child_index)
+                    if self._guide_item_kind(child) == "group":
+                        add_group(child, node)
+                    else:
+                        add_guide(child, node)
+
+            for child_index in range(ungrouped.childCount()):
+                add_guide(ungrouped.child(child_index), "")
+            for top_index in range(1, self.guide_tree.topLevelItemCount()):
+                add_group(self.guide_tree.topLevelItem(top_index), "")
 
             if seen_groups != set(self._guide_group_nodes):
                 raise ValueError("Guide Group layout is incomplete")
@@ -1748,6 +2355,7 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             category = self.backend.apply_guide_tree_layout(
                 ordered_groups,
                 guides_by_group,
+                group_parents,
             )
             self._refresh_guides(preferred=selected_id or selected_node or None)
             if category is not ChangeCategory.DISPLAY:
@@ -1756,7 +2364,6 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         except Exception as exc:
             self._append("Guide tree layout rejected: {}".format(exc))
             self._refresh_guides(preferred=selected_id or selected_node or None)
-
     def _create_guide(self, kind: GuideKind) -> None:
         if self.backend.binding is None:
             self._append("Systemを先に作成してください")
@@ -1845,22 +2452,55 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             reason="Guide Curve描画ツールを終了しました",
         )
 
-    @QtCore.Slot()
-    def _create_guide_group(self) -> None:
-        if self.backend.binding is None:
-            self._append("Systemを先に作成してください")
-            return
+    def _create_guide_group_with_guides(self, guides: list[str]) -> None:
         try:
-            node = self.backend.create_guide_group()
+            node = self.backend.create_guide_group(guide_nodes=guides)
             self._refresh_guides(preferred=node)
             try:
                 self.backend.select_guide_item(node)
                 self._scene_selected_guide_item = node
+                self._scene_selected_guide_items = (node,)
             except Exception:
                 pass
             self._append("Guide Group created: {}".format(node))
         except Exception as exc:
             self._append("Guide Group creation failed: {}".format(exc))
+
+    def _group_selected_guides_from_shortcut(self) -> bool:
+        if self.backend.binding is None:
+            return False
+        try:
+            guides, has_guide_items, mixed = self.backend.guide_grouping_selection()
+        except Exception:
+            return False
+        if not has_guide_items:
+            return False
+        if mixed:
+            message = (
+                "Guideと通常オブジェクト、またはGuide Groupは同時に"
+                "グループ化できません。Guideだけを選択してください。"
+            )
+            self.status_label.setText("Guide grouping cancelled")
+            self._append(message)
+            try:
+                self.backend.scene.cmds.warning(message)
+            except Exception:
+                pass
+            return True
+        self._create_guide_group_with_guides(guides)
+        return True
+
+    @QtCore.Slot()
+    def _create_guide_group(self) -> None:
+        if self.backend.binding is None:
+            self._append("Systemを先に作成してください")
+            return
+        selected_guides = [
+            node
+            for node in self._selected_guide_item_nodes()
+            if node in self._guide_data_by_node
+        ]
+        self._create_guide_group_with_guides(selected_guides)
 
     @QtCore.Slot()
     def _delete_current_guide_item(self) -> None:
@@ -1909,6 +2549,7 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                 self.backend.end_undo_chunk()
 
         self._scene_selected_guide_item = ""
+        self._scene_selected_guide_items = ()
         self._refresh_guides()
         if category is not ChangeCategory.DISPLAY:
             self._parameter_changed(category, settle=True)
@@ -2065,6 +2706,83 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         draw_context.sync_active_tool()
         self._sync_guide_selection_from_maya()
 
+    def _watch_scene_events(self) -> None:
+        self._clear_scene_callbacks()
+        try:
+            from maya.api import OpenMaya as om  # type: ignore
+
+            for event in ("SelectionChanged", "ToolChanged"):
+                self._scene_callback_ids.append(
+                    om.MEventMessage.addEventCallback(event, self._scene_event_changed)
+                )
+            for event in ("Undo", "Redo"):
+                try:
+                    self._scene_callback_ids.append(
+                        om.MEventMessage.addEventCallback(
+                            event,
+                            self._guide_undo_redo_changed,
+                        )
+                    )
+                except Exception:
+                    # Keep selection sync on Maya versions missing an optional event.
+                    pass
+        except Exception:
+            self._clear_scene_callbacks()
+            self._scene_poll.setSingleShot(False)
+            self._scene_poll.setInterval(250)
+            self._scene_poll.start()
+
+    def _clear_scene_callbacks(self) -> None:
+        if not self._scene_callback_ids:
+            return
+        try:
+            from maya.api import OpenMaya as om  # type: ignore
+
+            om.MMessage.removeCallbacks(self._scene_callback_ids)
+        except Exception:
+            pass
+        self._scene_callback_ids = []
+
+    def _guide_undo_redo_changed(self, *_args) -> None:
+        if not self._updating_widgets:
+            QtCore.QTimer.singleShot(0, self._sync_guide_item_presentation)
+            QtCore.QTimer.singleShot(0, self._sync_settings_from_scene)
+
+    def _sync_settings_from_scene(self) -> None:
+        if self.backend.binding is None or self._updating_widgets:
+            return
+        try:
+            settings = self.backend.read_settings()
+            current = ScaleSettings.from_mapping(self._snapshot())
+        except Exception:
+            return
+        if settings == current:
+            return
+        self._load_settings(settings, refresh_scene=False)
+
+    def _sync_guide_item_presentation(self) -> None:
+        if self.backend.binding is None or self._updating_widgets:
+            return
+        try:
+            presentation = self.backend.guide_item_presentation_state()
+        except Exception:
+            return
+        self._updating_widgets = True
+        try:
+            for node, (visible, locked) in presentation.items():
+                item = self._guide_tree_items_by_node.get(node)
+                if item is not None:
+                    self._set_guide_item_presentation(
+                        item,
+                        self._guide_item_kind(item),
+                        visible,
+                        locked,
+                    )
+        finally:
+            self._updating_widgets = False
+    def _scene_event_changed(self, *_args) -> None:
+        self._scene_poll.start()
+
     def _poll_guide_changes(self) -> None:
         if (
             self.backend.binding is None
@@ -2072,25 +2790,29 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             or self._guide_undo_open
         ):
             return
+        self._polling_guide_changes = True
         try:
-            category, presentation_changed = self.backend.poll_guide_state()
-        except Exception:
-            return
-        if category is None and not presentation_changed:
-            return
-        selected = self._current_guide_item_id() or self._scene_selected_guide_item
-        self._refresh_guides(preferred=selected or None)
-        if self._guide_link_undo_sync and presentation_changed:
             try:
-                scene_types = list(self.backend.read_settings().scale_types)
+                category, presentation_changed = self.backend.poll_guide_state()
             except Exception:
-                scene_types = self._scale_types
-            if scene_types != self._scale_types:
-                row = self.scale_type_list.currentRow()
-                self._scale_types = scene_types
-                self._refresh_scale_type_list(select_row=max(0, row))
-        if category is not None and self.auto_preview.isChecked():
-            self._parameter_changed(category)
+                return
+            if category is None and not presentation_changed:
+                return
+            selected = self._current_guide_item_id() or self._scene_selected_guide_item
+            self._refresh_guides(preferred=selected or None)
+            if self._guide_link_undo_sync and presentation_changed:
+                try:
+                    scene_types = list(self.backend.read_settings().scale_types)
+                except Exception:
+                    scene_types = self._scale_types
+                if scene_types != self._scale_types:
+                    row = self.scale_type_list.currentRow()
+                    self._scale_types = scene_types
+                    self._refresh_scale_type_list(select_row=max(0, row))
+            if category is not None and self.auto_preview.isChecked():
+                self._parameter_changed(category)
+        finally:
+            self._polling_guide_changes = False
 
     def _refresh_scale_type_guide_combo(self) -> None:
         current_id = ""
@@ -2130,6 +2852,38 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         finally:
             self.type_guide_combo.blockSignals(False)
 
+    def _filter_guides_for_scale_type(self) -> None:
+        row = self.scale_type_list.currentRow()
+        if not (0 <= row < len(self._scale_types)):
+            return
+        scale_type = self._scale_types[row]
+        if not scale_type.guide_id:
+            self._append("Scale Type has no Guide Link: {}".format(scale_type.name))
+            return
+        self.guide_search.setText(scale_type.name)
+        self.tabs.setCurrentWidget(self.guides_tab)
+
+    def _jump_to_scale_type_link(self) -> None:
+        row = self.scale_type_list.currentRow()
+        if not (0 <= row < len(self._scale_types)):
+            return
+        scale_type = self._scale_types[row]
+        node = self._guide_item_node_for_id(scale_type.guide_id)
+        item = self._guide_tree_items_by_node.get(node)
+        if item is None:
+            self._append("Scale Type link target is missing: {}".format(scale_type.name))
+            return
+        self.guide_search.clear()
+        parent = item.parent()
+        while parent is not None:
+            parent.setExpanded(True)
+            parent = parent.parent()
+        self.guide_tree.clearSelection()
+        self.guide_tree.setCurrentItem(item)
+        item.setSelected(True)
+        self.guide_tree.scrollToItem(item)
+        self.tabs.setCurrentWidget(self.guides_tab)
+
     def _refresh_scale_type_list(self, select_row: int | None = None) -> None:
         current = self.scale_type_list.currentRow()
         row = current if select_row is None else select_row
@@ -2149,23 +2903,28 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         finally:
             self.scale_type_list.blockSignals(False)
         self._scale_type_selection_changed(self.scale_type_list.currentRow())
+        self._refresh_guide_type_links()
 
     @QtCore.Slot(int)
     def _scale_type_selection_changed(self, row: int) -> None:
         if not (0 <= row < len(self._scale_types)):
+            self.filter_type_link_button.setEnabled(False)
+            self.jump_type_link_button.setEnabled(False)
             return
         item = self._scale_types[row]
+        has_link = bool(item.guide_id)
+        self.filter_type_link_button.setEnabled(has_link)
+        self.jump_type_link_button.setEnabled(
+            bool(self._guide_item_node_for_id(item.guide_id))
+        )
         self._updating_widgets = True
         try:
             self.type_name.setText(item.name)
             self.type_enabled.setChecked(item.enabled)
             self.type_size.setValue(item.size_multiplier)
-            self.type_width.setValue(item.width_multiplier)
-            self.type_length.setValue(item.length_multiplier)
             self.type_curvature.setValue(item.curvature_multiplier)
-            self.type_offset.setValue(item.offset)
+            self.type_offset.setValue(item.offset*100.0)
             self.type_random_offset.setValue(item.random_offset)
-            self.type_tip_offset.setValue(item.tip_offset)
             self._refresh_scale_type_guide_combo()
             guide_index = 0
             for index in range(self.type_guide_combo.count()):
@@ -2197,12 +2956,9 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             name=self.type_name.text().strip() or current.name,
             enabled=self.type_enabled.isChecked(),
             size_multiplier=self.type_size.value(),
-            width_multiplier=self.type_width.value(),
-            length_multiplier=self.type_length.value(),
             curvature_multiplier=self.type_curvature.value(),
-            offset=self.type_offset.value(),
+            offset=self.type_offset.value()/100.0,
             random_offset=self.type_random_offset.value(),
-            tip_offset=self.type_tip_offset.value(),
             guide_id=guide_id,
             use_custom_color=self.type_custom_color.isChecked(),
             color_r=self.type_color_r.value(),
@@ -2272,7 +3028,18 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         if self._updating_widgets or not self.auto_preview.isChecked():
             return
         self._inactivity.stop()
-        self.scheduler.begin_interaction()
+        if (
+            self.backend.binding is not None
+            and not self._guide_undo_open
+            and not self._parameter_undo_open
+        ):
+            try:
+                self.backend.begin_undo_chunk("Bifrost Scales Parameter Edit")
+                self._parameter_undo_open = True
+            except Exception:
+                self._parameter_undo_open = False
+        if not self.scheduler.core.status.dragging:
+            self.scheduler.begin_interaction()
 
     @QtCore.Slot()
     def _begin_guide_interaction(self) -> None:
@@ -2286,22 +3053,100 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                 self._guide_undo_open = False
         self._begin_interaction()
 
+    def _open_sculpt_editor(self, per_type=False):
+        from .sculpt_editor import SculptEditor
+        from maya import cmds
+        if self.backend.binding is None:
+            return
+        owner = self.backend.binding.settings_node
+        owner_uuid = cmds.ls(owner, uuid=True)
+        row = self.scale_type_list.currentRow()
+        if per_type and not 0 <= row < len(self._scale_types):
+            return
+        type_id = self._scale_types[row].type_id if per_type else None
+        original = self._scale_types[row].sculpt_surface if per_type else self._sculpt_surface
+        initial = original or (self._sculpt_surface if per_type else {})
+
+        def apply(surface):
+            nonlocal original
+            if self.backend.binding is None or self.backend.binding.settings_node != owner:
+                raise ValueError("編集開始時のSystemを選択してから適用してください。")
+            if cmds.ls(owner, uuid=True) != owner_uuid:
+                raise ValueError("編集先のSystemが削除または再作成されています。")
+            index = next((i for i, item in enumerate(self._scale_types) if item.type_id == type_id), None)
+            if per_type and index is None:
+                raise ValueError("編集先のScale Typeが存在しません。")
+            current = self._scale_types[index].sculpt_surface if per_type else self._sculpt_surface
+            if current != original:
+                raise ValueError("保存先の形状が別の操作で変更されました。編集を開き直してください。")
+            self._finish_interaction()
+            self.backend.begin_undo_chunk("Bifrost Scales Interior Sculpt")
+            try:
+                if per_type:
+                    self._scale_types[index] = replace(self._scale_types[index], sculpt_surface=surface)
+                else:
+                    self._sculpt_surface = surface
+                try:
+                    self.backend.persist_settings(self._snapshot())
+                except Exception:
+                    if per_type:
+                        self._scale_types[index] = replace(self._scale_types[index], sculpt_surface=current)
+                    else:
+                        self._sculpt_surface = current
+                    raise
+                original = surface
+                self._sync_parameter_dependencies()
+                self._parameter_changed(ChangeCategory.SHAPE, settle=True)
+            finally:
+                self.backend.end_undo_chunk()
+
+        previous = getattr(self, "_sculpt_editor", None)
+        if previous is not None:
+            previous.close()
+        dialog = SculptEditor(initial, apply, self, owner_key=owner_uuid[0]+":"+str(type_id))
+        self._sculpt_editor = dialog
+        dialog.destroyed.connect(lambda: setattr(self, "_sculpt_editor", None)
+                                 if getattr(self, "_sculpt_editor", None) is dialog else None)
+        dialog.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+        dialog.show()
+
     def _parameter_changed(self, category: ChangeCategory, settle: bool = False) -> None:
+        if not self._updating_widgets:
+            self._update_preview_limit_warning()
         if self._updating_widgets or not self.auto_preview.isChecked() or self.backend.binding is None:
             return
-        self.scheduler.begin_interaction()
+        self._begin_interaction()
         self.scheduler.queue_change(category, self._snapshot())
         if settle:
-            self.scheduler.end_interaction()
+            self._finish_interaction()
         else:
             self._inactivity.start(self.settled_delay.value())
 
     @QtCore.Slot()
     def _finish_interaction(self) -> None:
-        if not self.auto_preview.isChecked():
-            return
         self._inactivity.stop()
+        if self._parameter_undo_open:
+            try:
+                if self.backend.binding is not None:
+                    self.backend.persist_settings(self._snapshot())
+            except Exception:
+                self._close_parameter_undo()
+                raise
+        if not self.auto_preview.isChecked():
+            self._close_parameter_undo()
+            return
         self.scheduler.end_interaction()
+        status = self.scheduler.core.status
+        if not status.pending and status.inflight_revision is None:
+            self._close_parameter_undo()
+
+    def _close_parameter_undo(self) -> None:
+        if not self._parameter_undo_open:
+            return
+        try:
+            self.backend.end_undo_chunk()
+        finally:
+            self._parameter_undo_open = False
 
     @QtCore.Slot()
     def _finish_guide_interaction(self) -> None:
@@ -2324,6 +3169,70 @@ class BifrostScalesWindow(QtWidgets.QDialog):
                 )
         else:
             self.scheduler.pause()
+            self._close_parameter_undo()
+
+    @QtCore.Slot(bool)
+    def _auto_preview_budget_toggled(self, enabled: bool) -> None:
+        self._pending_interactive_budget = None
+        self._pending_interactive_budget_reason = ""
+        self.interactive_budget.setEnabled(not enabled)
+        self._update_preview_budget_label()
+
+    @QtCore.Slot(int)
+    def _interactive_budget_changed(self, value: int) -> None:
+        if not self.auto_preview_budget.isChecked():
+            self._update_preview_budget_label()
+
+    def _update_preview_budget_label(self) -> None:
+        value = self.interactive_budget.value()
+        if not self.auto_preview_budget.isChecked():
+            self.auto_preview_budget_label.setText("Manual: {}（固定）".format(value))
+        elif self._pending_interactive_budget is not None:
+            self.auto_preview_budget_label.setText(
+                "Auto: {} → 次回 {}（{}）".format(
+                    value,
+                    self._pending_interactive_budget,
+                    self._pending_interactive_budget_reason,
+                )
+            )
+        elif self._pending_interactive_budget_reason:
+            self.auto_preview_budget_label.setText(
+                "Auto: {}（{}）".format(
+                    value,
+                    self._pending_interactive_budget_reason,
+                )
+            )
+        else:
+            self.auto_preview_budget_label.setText(
+                "Auto: {}（次の操作まで固定）".format(value)
+            )
+
+    def _update_auto_preview_budget(self, mode: str, report: Any) -> None:
+        if not self.auto_preview_budget.isChecked():
+            return
+        if mode == "interactive":
+            next_budget = int(report.next_interactive_budget)
+            self._pending_interactive_budget = next_budget
+            if next_budget < report.effective_budget:
+                reason = "直近 {:.1f} ms > 120 ms".format(report.total_ms)
+            elif next_budget > report.effective_budget:
+                reason = "直近 {:.1f} ms < 60 ms".format(report.total_ms)
+            elif report.total_ms > 120.0:
+                reason = "Interactive上限 8 が下限"
+            elif report.total_ms < 60.0:
+                reason = "目標鱗数 {} が上限".format(self.target_count.value())
+            else:
+                reason = "直近 {:.1f} ms は安定範囲".format(report.total_ms)
+            self._pending_interactive_budget_reason = reason
+            self._update_preview_budget_label()
+        elif mode == "settled" and self._pending_interactive_budget is not None:
+            self._updating_widgets = True
+            try:
+                self.interactive_budget.setValue(self._pending_interactive_budget)
+            finally:
+                self._updating_widgets = False
+            self._pending_interactive_budget = None
+            self._update_preview_budget_label()
 
     @QtCore.Slot()
     def _preview_now(self) -> None:
@@ -2339,6 +3248,21 @@ class BifrostScalesWindow(QtWidgets.QDialog):
             self._snapshot(),
             immediate=True,
         )
+
+    @QtCore.Slot()
+    def _create_maya_mesh(self) -> None:
+        status = self.scheduler.core.status
+        if status.pending or status.inflight_revision is not None:
+            QtWidgets.QMessageBox.information(self, "Bifrost Scales", i18n.translate("Wait for the preview to finish before creating a mesh."))
+            return
+        self._close_parameter_undo()
+        try:
+            result = self.backend.create_maya_mesh()
+            self.status_label.setText(i18n.translate("Mesh created") + ": " + result)
+            self._append("Mesh created: " + result)
+        except Exception as exc:
+            self._append("Create mesh failed: " + str(exc))
+            QtWidgets.QMessageBox.warning(self, "Bifrost Scales", str(exc))
 
     @QtCore.Slot()
     def _delete_system(self) -> None:
@@ -2394,6 +3318,9 @@ class BifrostScalesWindow(QtWidgets.QDialog):
 
     @QtCore.Slot(int, str, object)
     def _request_finished(self, revision: int, mode: str, report: Any) -> None:
+        self._update_auto_preview_budget(mode, report)
+        if mode == "settled":
+            self._close_parameter_undo()
         type_summary = ", ".join(
             "{}:{}".format(name, count)
             for name, count in getattr(report, "type_counts", ())
@@ -2593,6 +3520,7 @@ class BifrostScalesWindow(QtWidgets.QDialog):
 
     @QtCore.Slot(int, str)
     def _request_failed(self, revision: int, message: str) -> None:
+        self._close_parameter_undo()
         self.auto_preview.blockSignals(True)
         self.auto_preview.setChecked(False)
         self.auto_preview.blockSignals(False)
@@ -2677,45 +3605,9 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         except Exception as exc:
             self.maintenance_text.setPlainText("Diagnostics failed: {}".format(exc))
 
-    @QtCore.Slot()
-    def _scan_legacy(self) -> None:
-        candidates = scan_legacy_installations(cmds_module=self.backend.scene.cmds)
-        if not candidates:
-            self.maintenance_text.setPlainText("旧ツールのインストールは見つかりませんでした。")
-            return
-        self.maintenance_text.setPlainText(
-            "\n".join(
-                "[{}] {}\n  {}".format(item.kind, item.label, item.path)
-                for item in candidates
-            )
-        )
-
-    @QtCore.Slot()
-    def _remove_legacy(self) -> None:
-        result = QtWidgets.QMessageBox.warning(
-            self,
-            "旧ツールを削除",
-            "旧MayaScales、WoutScales、旧Integrationの既知のインストールを削除します。\n"
-            "シーン内データは削除しません。ロード中DLLは再起動後の削除になる場合があります。",
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel,
-            QtWidgets.QMessageBox.Cancel,
-        )
-        if result != QtWidgets.QMessageBox.Yes:
-            return
-        try:
-            report = remove_legacy_installations(
-                cmds_module=self.backend.scene.cmds,
-                include_external=True,
-            )
-            self.maintenance_text.setPlainText(
-                json.dumps(report.to_mapping(), ensure_ascii=False, indent=2)
-            )
-        except Exception as exc:
-            self.maintenance_text.setPlainText("Cleanup failed: {}".format(exc))
-
-
     def _cancel_preview_queue(self) -> None:
         self._inactivity.stop()
+        self._close_parameter_undo()
         self.scheduler.clear_error()
         if not self.auto_preview.isChecked():
             self.scheduler.pause()
@@ -2724,12 +3616,22 @@ class BifrostScalesWindow(QtWidgets.QDialog):
         self.log.appendPlainText(str(text))
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API
+        self.maintenance_dialog.close()
+        sculpt_editor = getattr(self, "_sculpt_editor", None)
+        if sculpt_editor is not None:
+            sculpt_editor.close()
+        application = QtWidgets.QApplication.instance()
+        if application is not None:
+            application.removeEventFilter(self)
         self._finish_guide_interaction()
         draw_context.stop_draw(cancel=True, reason="UIを閉じたためGuide描画を終了しました")
         self._guide_poll.stop()
+        self._clear_guide_callbacks()
         self._scene_poll.stop()
+        self._clear_scene_callbacks()
         self._inactivity.stop()
         self.scheduler.pause()
+        self._close_parameter_undo()
         super().closeEvent(event)
 
 

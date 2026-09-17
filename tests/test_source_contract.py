@@ -64,7 +64,7 @@ def test_ui_is_native_only_and_new_create_finishes_first_preview():
     assert "def create_system_with_preview" in backend
     assert "self.native.create_graph(binding)" in backend
     assert "report = self.apply" in backend
-    assert "選択メッシュから新規作成（Bifrost Previewまで）" in ui
+    assert 'self.create_system_button = QtWidgets.QPushButton("New System")' in ui
     assert "create_system_with_preview" in ui
     assert "preview_backend_combo" not in ui
     assert "final_and_bake_button" not in ui
@@ -135,7 +135,7 @@ def test_native_operator_and_host_boundary_contracts_remain_immutable():
     )
 
     native_backend = (PACKAGE / "native_backend.py").read_text(encoding="utf-8")
-    assert "bifrost-scales/native-graph/4-dgmesh-1" in native_backend
+    assert 'GRAPH_CONTRACT = "bifrost-scales/native-graph/4-dgmesh-2-uv"' in native_backend
     assert "maya-dg-worldMesh" in native_backend
     assert "def invalidate" in native_backend
 
@@ -251,6 +251,33 @@ def test_guide_authoring_and_internal_cell_identity_foundation_remain_available(
     assert "drawFeedback" in picker
     assert "cell_metadata_for_indices" in backend
     assert "resolve_cell_ids" in native_payload
+
+
+def test_guide_change_watch_ignores_dependency_graph_dirty_noise():
+    ui = (PACKAGE / "ui.py").read_text(encoding="utf-8")
+    assert "addAttributeChangedCallback" in ui
+    assert "addNodeDirtyCallback" not in ui
+
+
+def test_guide_outliner_uses_extended_scene_selection_and_safe_group_shortcut():
+    ui = (PACKAGE / "ui.py").read_text(encoding="utf-8")
+    assert "QAbstractItemView.ExtendedSelection" in ui
+    assert "self.backend.select_guide_items(selected)" in ui
+    assert "application.installEventFilter(self)" in ui
+    assert "application.removeEventFilter(self)" in ui
+    assert "self._group_selected_guides_from_shortcut()" in ui
+    assert "self.backend.guide_grouping_selection()" in ui
+    assert "self.backend.guide_group_layout_state()" in ui
+    assert "self.backend.guide_item_presentation_state()" in ui
+    assert "self.guide_search.textChanged.connect" in ui
+    assert "self.guide_tree.itemChanged.connect" in ui
+    assert "self.backend.set_guide_item_visible" in ui
+    assert "self.backend.set_guide_item_locked" in ui
+    assert "kAttributeLocked" in ui
+    assert "kAttributeUnlocked" in ui
+    assert 'for event in ("Undo", "Redo")' in ui
+    assert "self.guide_tree.itemCollapsed.connect" in ui
+    assert "group_parents" in ui
 
 
 def test_build_info_records_the_native_only_boundary():

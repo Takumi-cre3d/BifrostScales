@@ -11,8 +11,11 @@
     "parent_visibility"
   ],
   "graph_input_contract": "top-level-object-plus-maya-dg-worldMesh",
-  "host_binding_contract": "bifrost-scales/native-graph/4-dgmesh-1",
-  "native_behavior_contract": "bifrost-scales/native-core/0.10.9-settled-proposal-index-1",
+  "host_binding_contract": "bifrost-scales/native-graph/4-dgmesh-2-uv",
+  "mesh_uv_contract": "per-scale-overlapping-0-1-rest-projection",
+  "curve_scale_direction": "opposite-stroke-tangent",
+  "mesh_uv_handedness": "positive-face-area",
+  "native_behavior_contract": "bifrost-scales/native-core/0.10.9-vector-surface-6",
   "random_stream_contract": "cpython-random.Random-int-v2",
   "parity_dump_schema": "bifrost-scales/parity-dump/1",
   "generated_face_winding": "source-surface-normal",

@@ -6,7 +6,6 @@ import platform
 import sys
 from typing import Any
 
-from .legacy_cleanup import scan_legacy_installations
 from .version import VERSION
 
 
@@ -20,7 +19,6 @@ def probe_environment(cmds_module: Any | None = None) -> dict[str, Any]:
         systems = MayaSceneManager(cmds_module).list_systems()
     except Exception:
         pass
-    legacy = scan_legacy_installations(cmds_module=cmds_module)
     return {
         "product": "Bifrost Scales",
         "version": VERSION,
@@ -33,6 +31,4 @@ def probe_environment(cmds_module: Any | None = None) -> dict[str, Any]:
         "maya_version": str(cmds_module.about(version=True)),
         "maya_api": str(cmds_module.about(apiVersion=True)),
         "systems": systems,
-        "legacy_installations": [candidate.__dict__ for candidate in legacy],
-        "legacy_runtime_imports": False,
     }

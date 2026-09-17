@@ -271,6 +271,103 @@ def test_scene_manager_groups_are_non_destructive_and_restore_members_on_delete(
     assert cmds.listRelatives(moved[0], parent=True) == [binding.guide_root]
 
 
+def test_new_guide_group_contains_selected_guides_in_one_undo_step():
+    from bifrost_scales.guides import GuideKind
+
+    cmds = FakeCmds()
+    target_transform, _target_shape = _mesh(cmds, "newGroupTarget")
+    manager = MayaSceneManager(cmds)
+    binding = manager.create_system(target_transform, ScaleSettings())
+    first = manager.create_point_guide(
+        binding.settings_node,
+        GuideKind.DENSITY_POINT,
+    )
+    second = manager.create_point_guide(
+        binding.settings_node,
+        GuideKind.DIRECTION_POINT,
+    )
+    cmds.undo_events.clear()
+
+    group = manager.create_guide_group(
+        binding.settings_node,
+        guide_nodes=[first, second],
+    )
+    group_id = manager.read_guide_group(group).group_id
+
+    assert cmds.listRelatives(first, parent=True) == [group]
+    assert cmds.listRelatives(second, parent=True) == [group]
+    assert manager.read_guide(first).group_id == group_id
+    assert manager.read_guide(second).group_id == group_id
+    assert cmds.selection == [group]
+    assert [
+        event[0] for event in cmds.undo_events if event[0] in {"open", "close"}
+    ] == ["open", "close"]
+
+
+def test_maya_group_selection_is_classified_before_ctrl_g():
+    from bifrost_scales.guides import GuideKind
+
+    cmds = FakeCmds()
+    target_transform, _target_shape = _mesh(cmds, "groupSelectionTarget")
+    manager = MayaSceneManager(cmds)
+    binding = manager.create_system(target_transform, ScaleSettings())
+    first = manager.create_point_guide(
+        binding.settings_node,
+        GuideKind.DENSITY_POINT,
+    )
+    second = manager.create_point_guide(
+        binding.settings_node,
+        GuideKind.DIRECTION_POINT,
+    )
+    ordinary = cmds.createNode("transform", "ordinaryObject")
+
+    cmds.select([first, second], replace=True)
+    assert manager.guide_grouping_selection(binding.settings_node) == (
+        [first, second],
+        True,
+        False,
+    )
+    cmds.select([first, ordinary], replace=True)
+    assert manager.guide_grouping_selection(binding.settings_node) == (
+        [first],
+        True,
+        True,
+    )
+    cmds.select(ordinary, replace=True)
+    assert manager.guide_grouping_selection(binding.settings_node) == (
+        [],
+        False,
+        True,
+    )
+
+
+def test_maya_ctrl_g_style_group_is_adopted_only_for_pure_guides():
+    from bifrost_scales.guides import GuideKind
+
+    cmds = FakeCmds()
+    target_transform, _target_shape = _mesh(cmds, "mayaGroupTarget")
+    manager = MayaSceneManager(cmds)
+    binding = manager.create_system(target_transform, ScaleSettings())
+    first = manager.create_point_guide(
+        binding.settings_node,
+        GuideKind.DENSITY_POINT,
+    )
+    second = manager.create_point_guide(
+        binding.settings_node,
+        GuideKind.DIRECTION_POINT,
+    )
+    group = cmds.createNode("transform", "group1", parent=binding.guide_root)
+    cmds.parent(first, group)
+    cmds.parent(second, group)
+    cmds.select(group, replace=True)
+
+    assert manager.selected_guide_items(binding.settings_node) == [group]
+    assert manager.read_guide_group(group).name == "group1"
+    group_id = manager.read_guide_group(group).group_id
+    assert manager.read_guide(first).group_id == group_id
+    assert manager.read_guide(second).group_id == group_id
+
+
 def test_guide_tree_layout_changes_management_only_and_preserves_evaluation_order():
     from bifrost_scales.guides import GuideKind
 
@@ -340,6 +437,38 @@ def test_selected_guide_item_resolves_curve_shapes_components_and_groups():
     cmds.select(target_transform, replace=True)
     assert manager.selected_guide_item(binding.settings_node) == ""
 
+
+def test_multiple_selected_guide_items_sync_in_scene_selection_order():
+    from bifrost_scales.guides import GuideKind
+
+    cmds = FakeCmds()
+    target_transform, _target_shape = _mesh(cmds, "multiSelectionTarget")
+    manager = MayaSceneManager(cmds)
+    binding = manager.create_system(target_transform, ScaleSettings())
+    first = manager.create_point_guide(
+        binding.settings_node,
+        GuideKind.DENSITY_POINT,
+    )
+    second = manager.create_point_guide(
+        binding.settings_node,
+        GuideKind.DIRECTION_POINT,
+    )
+    second_shape = cmds.listRelatives(second, shapes=True)[0]
+    group = manager.create_guide_group(binding.settings_node, "Primary")
+
+    cmds.select([group, first, second_shape], replace=True)
+    assert manager.selected_guide_items(binding.settings_node) == [
+        group,
+        first,
+        second,
+    ]
+    assert manager.selected_guide_item(binding.settings_node) == group
+    assert manager.selected_guides(binding.settings_node) == [first, second]
+
+    manager.select_guide_items([second, group, second])
+    assert cmds.selection == [second, group]
+    manager.select_guide_items([])
+    assert cmds.selection == []
 
 
 def test_scene_symmetry_resolves_world_and_target_local_planes_without_dag_clones():
@@ -499,3 +628,196 @@ def test_mask_guide_metadata_round_trips_and_colors_shape_magenta():
     manager.update_guide(guide, use_mask=False)
     assert manager.read_guide(guide).affects_mask is False
     assert cmds.getAttr(shapes[0] + ".overrideColorRGB") != (1.0, 0.08, 0.72)
+
+
+def test_guide_styling_skips_equal_viewport_attributes():
+    from bifrost_scales.guides import GuideKind
+
+    cmds = FakeCmds()
+    target_transform, _target_shape = _mesh(cmds, "target")
+    manager = MayaSceneManager(cmds)
+    binding = manager.create_system(target_transform, ScaleSettings())
+    guide = manager.create_point_guide(
+        binding.settings_node,
+        GuideKind.DENSITY_POINT,
+    )
+    writes = []
+    original_set_attr = cmds.setAttr
+
+    def record_set_attr(plug, *values, **kwargs):
+        writes.append(str(plug))
+        return original_set_attr(plug, *values, **kwargs)
+
+    cmds.setAttr = record_set_attr
+    manager._style_guide_node(guide, GuideKind.DENSITY_POINT, False)
+
+    assert writes == []
+
+
+def test_nested_guide_groups_preserve_hierarchy_and_evaluation_order():
+    from bifrost_scales.guides import GuideKind
+
+    cmds = FakeCmds()
+    target_transform, _target_shape = _mesh(cmds, "nestedTarget")
+    manager = MayaSceneManager(cmds)
+    binding = manager.create_system(target_transform, ScaleSettings())
+    first = manager.create_point_guide(binding.settings_node, GuideKind.DENSITY_POINT)
+    second = manager.create_point_guide(
+        binding.settings_node, GuideKind.DIRECTION_POINT
+    )
+    parent = manager.create_guide_group(binding.settings_node, "Parent")
+    child = manager.create_guide_group(binding.settings_node, "Child")
+    evaluation_before = [
+        guide.guide_id for guide in manager.read_guides(binding.settings_node).guides
+    ]
+
+    manager.apply_guide_tree_layout(
+        binding.settings_node,
+        [parent, child],
+        {"": [], parent: [first], child: [second]},
+        {parent: "", child: parent},
+    )
+    cmds.undo_events.clear()
+    manager.set_guide_group_collapsed(parent, True)
+    assert cmds.undo_events == [("state", False), ("state", True)]
+
+    assert manager.list_guide_groups(binding.settings_node) == [parent, child]
+    assert manager.guide_group_layout_state(binding.settings_node) == {
+        parent: ("", True),
+        child: (parent, False),
+    }
+    assert cmds.listRelatives(child, parent=True) == [parent]
+    assert cmds.listRelatives(first, parent=True) == [parent]
+    assert cmds.listRelatives(second, parent=True) == [child]
+    assert [
+        guide.guide_id for guide in manager.read_guides(binding.settings_node).guides
+    ] == evaluation_before
+
+
+def test_guide_item_visibility_and_lock_are_management_only_and_undoable():
+    from bifrost_scales.guides import GuideKind
+
+    cmds = FakeCmds()
+    target_transform, _target_shape = _mesh(cmds, "presentationTarget")
+    manager = MayaSceneManager(cmds)
+    binding = manager.create_system(target_transform, ScaleSettings())
+    guide = manager.create_point_guide(
+        binding.settings_node,
+        GuideKind.DENSITY_POINT,
+    )
+    group = manager.create_guide_group(binding.settings_node, "Presentation")
+    evaluation_before = manager.read_guides(binding.settings_node).fingerprint()
+    management_before = manager.guide_management_fingerprint(binding.settings_node)
+
+    assert manager.guide_item_presentation_state(binding.settings_node) == {
+        guide: (True, False),
+        group: (True, False),
+    }
+
+    cmds.undo_events.clear()
+    manager.set_guide_item_visible(binding.settings_node, guide, False)
+    assert cmds.undo_events == [
+        ("open", "Bifrost Scales Set Guide Visibility"),
+        ("close", ""),
+    ]
+
+    cmds.undo_events.clear()
+    manager.set_guide_item_locked(binding.settings_node, group, True)
+    assert cmds.undo_events == [
+        ("open", "Bifrost Scales Set Guide Lock"),
+        ("close", ""),
+    ]
+
+    assert manager.guide_item_presentation_state(binding.settings_node) == {
+        guide: (False, False),
+        group: (True, True),
+    }
+    assert manager.guide_management_fingerprint(
+        binding.settings_node
+    ) != management_before
+    assert manager.read_guides(binding.settings_node).fingerprint() == evaluation_before
+
+def test_guide_presentation_noop_does_not_open_undo_chunks():
+    import pytest
+    from bifrost_scales.guides import GuideKind
+
+    cmds = FakeCmds()
+    target, _ = _mesh(cmds, "noopTarget")
+    manager = MayaSceneManager(cmds)
+    binding = manager.create_system(target, ScaleSettings())
+    nodes = [manager.create_point_guide(binding.settings_node, GuideKind.DENSITY_POINT),
+             manager.create_guide_group(binding.settings_node, "Noop Group")]
+    before = manager.read_guides(binding.settings_node).fingerprint()
+    for node in nodes:
+        for setter in (manager.set_guide_item_visible, manager.set_guide_item_locked):
+            for value in (False, True):
+                setter(binding.settings_node, node, value)
+                cmds.undo_events.clear()
+                setter(binding.settings_node, node, value)
+                assert not cmds.undo_events, "Unchanged presentation must not add Undo work"
+    assert manager.read_guides(binding.settings_node).fingerprint() == before
+    foreign = cmds.createNode("transform", "notOwned")
+    cmds.undo_events.clear()
+    for setter in (manager.set_guide_item_visible, manager.set_guide_item_locked):
+        for value in (False, True):
+            with pytest.raises(ValueError, match="not owned"):
+                setter(binding.settings_node, foreign, value)
+    assert not cmds.undo_events
+
+
+def test_nested_guide_group_layout_rejects_cycles_before_changing_dag():
+    cmds = FakeCmds()
+    target_transform, _target_shape = _mesh(cmds, "cycleTarget")
+    manager = MayaSceneManager(cmds)
+    binding = manager.create_system(target_transform, ScaleSettings())
+    first = manager.create_guide_group(binding.settings_node, "First")
+    second = manager.create_guide_group(binding.settings_node, "Second")
+
+    try:
+        manager.apply_guide_tree_layout(
+            binding.settings_node,
+            [first, second],
+            {"": [], first: [], second: []},
+            {first: second, second: first},
+        )
+    except ValueError as exc:
+        assert "cycle" in str(exc)
+    else:
+        raise AssertionError("Cyclic Guide Group layout was accepted")
+
+    assert cmds.listRelatives(first, parent=True) == [binding.guide_root]
+    assert cmds.listRelatives(second, parent=True) == [binding.guide_root]
+
+
+def test_deleting_parent_guide_group_preserves_child_group_and_guides():
+    from bifrost_scales.guides import GuideKind
+
+    cmds = FakeCmds()
+    target_transform, _target_shape = _mesh(cmds, "deleteNestedTarget")
+    manager = MayaSceneManager(cmds)
+    binding = manager.create_system(target_transform, ScaleSettings())
+    direct = manager.create_point_guide(binding.settings_node, GuideKind.DENSITY_POINT)
+    nested = manager.create_point_guide(
+        binding.settings_node, GuideKind.DIRECTION_POINT
+    )
+    parent = manager.create_guide_group(binding.settings_node, "Parent")
+    child = manager.create_guide_group(binding.settings_node, "Child")
+    manager.apply_guide_tree_layout(
+        binding.settings_node,
+        [parent, child],
+        {"": [], parent: [direct], child: [nested]},
+        {parent: "", child: parent},
+    )
+
+    moved = manager.delete_guide_group(binding.settings_node, parent)
+
+    assert not cmds.objExists(parent)
+    assert cmds.objExists(child)
+    assert cmds.objExists(direct)
+    assert cmds.objExists(nested)
+    assert moved == [direct]
+    assert cmds.listRelatives(child, parent=True) == [binding.guide_root]
+    assert cmds.listRelatives(direct, parent=True) == [binding.guide_root]
+    assert cmds.listRelatives(nested, parent=True) == [child]
+    assert manager.read_guide(direct).group_id == ""
+    assert manager.read_guide(nested).group_id == manager.read_guide_group(child).group_id
