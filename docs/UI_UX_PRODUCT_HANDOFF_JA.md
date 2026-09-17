@@ -1,5 +1,8 @@
 # MayaScales 製品版UI/UX開発 引き継ぎ
 
+> 2026-09-18: 本書は開発履歴です。現在の採用仕様・再開手順・残課題は
+> [リリース最終調整への引き継ぎ](RELEASE_FINALIZATION_HANDOFF_2026-09-18_JA.md)を優先してください。
+
 ## 目的
 
 0.10.9 Public BetaのNative生成結果、Stable Cell ID、決定性、Maya 2026／Bifrost 2.15契約を維持したまま、アーティストが迷わず軽快に操作できる製品UIへ再設計します。UI/UX開発は新規スレッドで行い、Betaへの変更は重大な不具合修正に限定します。
@@ -691,4 +694,4 @@ v2の外周自由編集は要求の解釈違い。新規パッチを`vector-surf
 
 ## 新規スレッド開始時の指示
 
-`D:\TA-Tools\MayaScales`の`main`からUI/UX専用ブランチを作成し、この文書、`BUILD_INFO.json`、`docs/ROADMAP_JA.md`、`docs/ARCHITECTURE_JA.md`を先に読んでください。最初の実装はSlider操作の評価回数とMain Thread停止時間を測る再現テストから始め、見た目の変更を先行させないでください。`dragon.mb`、`incrementalSave/`、ローカル`BifrostScales.mod`は保護対象です。
+`docs/RELEASE_FINALIZATION_HANDOFF_2026-09-18_JA.md`を最初に読み、採用済みUIを維持してリリース最終調整へ進んでください。`dragon.mb`、`incrementalSave/`、ローカル`BifrostScales.mod`は引き続き保護対象です。

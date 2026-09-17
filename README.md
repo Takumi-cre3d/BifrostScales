@@ -4,6 +4,8 @@ Bifrost Scales is a procedural scale-generation tool for Autodesk Maya 2026 and 
 
 [日本語](README_JA.md)
 
+Development handoff: [Release finalization, 2026-09-18 (Japanese)](docs/RELEASE_FINALIZATION_HANDOFF_2026-09-18_JA.md). The current product UI is accepted; final release validation is still pending.
+
 ## Requirements and status
 
 - Autodesk Maya 2026
